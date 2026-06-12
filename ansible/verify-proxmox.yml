@@ -1,0 +1,30 @@
+---
+# Read-only check that the Proxmox API token minted by the host bootstrap
+# actually authenticates from the control node. Run after site.yml:
+#
+#   ansible-playbook verify-proxmox.yml
+#
+# Green (failed=0, nodes listed) means the whole chain works: pveum mint ->
+# encrypted vault -> /root/.vault_pass -> API auth. This is deliberately
+# separate from the CT-creation play: info calls accept token auth, whereas
+# LXC *creation* has known root@pam-only pre-checks to validate later.
+#
+# Note on collection: if `ansible-doc -l | grep proxmox` shows the modules
+# under community.proxmox instead of community.general, install that
+# collection and change the FQCN below.
+
+- name: Verify Proxmox API access from the control node
+  hosts: control_node
+  gather_facts: false
+  tasks:
+    - name: Query Proxmox nodes via the API token
+      community.general.proxmox_node_info:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+      register: pve_nodes
+
+    - name: Show reachable nodes
+      ansible.builtin.debug:
+        var: pve_nodes.proxmox_nodes

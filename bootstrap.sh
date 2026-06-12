@@ -83,6 +83,49 @@ pct exec "$CTID" -- bash -c "
   [ -d /opt/zai-ops ] || git clone $REPO_URL /opt/zai-ops
 "
 
+# --- Mint the Proxmox API token + Ansible Vault for the control node ---
+# This is host-side because it must be: an API token can only be created with
+# pveum (a host-only binary) or the API, and calling the API would already
+# require credentials. So the first credential is minted here, then handed to
+# CT 100 as part of equipping it — there is still only one host run.
+PROVISIONED=0
+VAULT_PASS=""
+if ! pct exec "$CTID" -- test -f /opt/zai-ops/ansible/group_vars/all/vault.yml; then
+  ROLE=ZaiProvision
+  TOKEN_USER=ansible@pve
+  TOKEN_ID=provision
+  HOST_IP=$(hostname -I | awk '{print $1}')
+
+  # Dedicated role — starting privilege set for LXC lifecycle + storage.
+  # Widen with `pveum role modify` if verify or CT creation hits a 403.
+  pveum role add "$ROLE" --privs \
+    "VM.Allocate,VM.Clone,VM.Config.Disk,VM.Config.CPU,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.PowerMgmt,VM.Audit,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,Sys.Audit,Sys.Modify,SDN.Use,Pool.Allocate" 2>/dev/null || true
+  pveum user add "$TOKEN_USER" 2>/dev/null || true
+  pveum aclmod / --users "$TOKEN_USER" --roles "$ROLE" --propagate 1
+
+  # privsep 0: the token inherits the user's privileges (the role above).
+  TOKEN_OUT=$(pveum user token add "$TOKEN_USER" "$TOKEN_ID" --privsep 0 --output-format json)
+  TOKEN_SECRET=$(printf '%s' "$TOKEN_OUT" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+
+  # Generate the vault password; stored on the CT so Ansible auto-decrypts.
+  VAULT_PASS=$(openssl rand -base64 24)
+
+  pct exec "$CTID" -- bash -c "umask 077; printf '%s\n' '$VAULT_PASS' > /root/.vault_pass"
+  pct exec "$CTID" -- bash -c "
+    set -e
+    cd /opt/zai-ops/ansible
+    mkdir -p group_vars/all
+    cat > group_vars/all/vault.yml <<EOF
+proxmox_api_host: $HOST_IP
+proxmox_api_user: $TOKEN_USER
+proxmox_api_token_id: $TOKEN_ID
+proxmox_api_token_secret: $TOKEN_SECRET
+EOF
+    ansible-vault encrypt group_vars/all/vault.yml --vault-password-file /root/.vault_pass
+  "
+  PROVISIONED=1
+fi
+
 echo
 echo "CT $CTID ($HOSTNAME) ready."
 echo "Next, configure the control node with Ansible:"
@@ -90,3 +133,16 @@ echo
 echo "  pct enter $CTID"
 echo "  cd /opt/zai-ops/ansible"
 echo "  ansible-playbook site.yml"
+
+# --- Vault password — printed LAST so it isn't scrolled away ---
+if [[ "$PROVISIONED" -eq 1 ]]; then
+  echo
+  echo "=================================================================="
+  echo " VAULT PASSWORD — back this up off-box (e.g. a password manager)."
+  echo " Stored on $HOSTNAME at /root/.vault_pass so Ansible auto-decrypts"
+  echo " (recoverable there as root). Needed to view/edit secrets:"
+  echo "   ansible-vault edit group_vars/all/vault.yml"
+  echo
+  echo "     $VAULT_PASS"
+  echo "=================================================================="
+fi

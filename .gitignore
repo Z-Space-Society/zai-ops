@@ -1,0 +1,5 @@
+# Per-host secrets — minted by bootstrap into the control node, never committed.
+# The vault is host-specific (each Proxmox host gets its own token) and lives in
+# the working tree only so Ansible can read it on the control node.
+ansible/group_vars/all/vault.yml
+.vault_pass

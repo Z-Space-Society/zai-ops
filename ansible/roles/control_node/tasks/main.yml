@@ -1,0 +1,12 @@
+---
+# Control-node (CT 100) base configuration.
+#
+# Note: the locale fix (localedef + LANG in /etc/environment) is NOT here. It
+# has to run in the host bootstrap, before Ansible starts — Ansible cannot
+# initialize on a fresh container until en_US.UTF-8 is compiled. See
+# bootstrap/bootstrap.sh. git and the repo checkout are likewise handled there.
+
+- name: Update apt cache and run a full upgrade
+  ansible.builtin.apt:
+    update_cache: true
+    upgrade: full

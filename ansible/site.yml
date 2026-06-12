@@ -1,0 +1,15 @@
+---
+# Top-level playbook. Run from inside CT 100 after the host bootstrap has
+# installed Ansible and cloned this repo to /opt/zai-ops:
+#
+#   cd /opt/zai-ops/ansible && ansible-playbook site.yml
+#
+# The first play configures the control node itself. Plays that create the
+# service containers (101-104) over the Proxmox API are added below as they
+# come online.
+
+- name: Configure the Ansible control node (CT 100)
+  hosts: control_node
+  become: true
+  roles:
+    - control_node

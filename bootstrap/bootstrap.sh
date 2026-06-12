@@ -78,5 +78,10 @@ pct exec "$CTID" -- bash -c "
   [ -d /opt/zai-ops ] || git clone $REPO_URL /opt/zai-ops
 "
 
+echo
 echo "CT $CTID ($HOSTNAME) ready."
-echo "Next: pct enter $CTID, then run the Ansible bootstrap from /opt/zai-ops."
+echo "Next, configure the control node with Ansible:"
+echo
+echo "  pct enter $CTID"
+echo "  cd /opt/zai-ops/ansible"
+echo "  ansible-playbook site.yml"

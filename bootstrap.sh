@@ -103,6 +103,10 @@ if ! pct exec "$CTID" -- test -f /opt/zai-ops/ansible/group_vars/all/vault.yml; 
   pveum user add "$TOKEN_USER" 2>/dev/null || true
   pveum aclmod / --users "$TOKEN_USER" --roles "$ROLE" --propagate 1
 
+  # Re-mint cleanly. The pveum user/token live on the host and survive a
+  # `pct destroy`, so on a rebuild the token already exists; drop it first.
+  pveum user token remove "$TOKEN_USER" "$TOKEN_ID" 2>/dev/null || true
+
   # privsep 0: the token inherits the user's privileges (the role above).
   TOKEN_OUT=$(pveum user token add "$TOKEN_USER" "$TOKEN_ID" --privsep 0 --output-format json)
   TOKEN_SECRET=$(printf '%s' "$TOKEN_OUT" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
@@ -113,15 +117,22 @@ if ! pct exec "$CTID" -- test -f /opt/zai-ops/ansible/group_vars/all/vault.yml; 
   pct exec "$CTID" -- bash -c "umask 077; printf '%s\n' '$VAULT_PASS' > /root/.vault_pass"
   pct exec "$CTID" -- bash -c "
     set -e
+    umask 077
     cd /opt/zai-ops/ansible
     mkdir -p group_vars/all
-    cat > group_vars/all/vault.yml <<EOF
+    # Write plaintext to a temp file and encrypt it INTO the final path with
+    # --output, so vault.yml only exists if encryption succeeded (a half-done
+    # plaintext file would otherwise poison the guard above on re-run).
+    # No --vault-password-file here: ansible.cfg already sets vault_password_file,
+    # and passing it again creates two 'default' vault-ids that ambiguate encrypt.
+    cat > /tmp/zai-vault.yml <<EOF
 proxmox_api_host: $HOST_IP
 proxmox_api_user: $TOKEN_USER
 proxmox_api_token_id: $TOKEN_ID
 proxmox_api_token_secret: $TOKEN_SECRET
 EOF
-    ansible-vault encrypt group_vars/all/vault.yml --vault-password-file /root/.vault_pass
+    ansible-vault encrypt /tmp/zai-vault.yml --output group_vars/all/vault.yml
+    rm -f /tmp/zai-vault.yml
   "
   PROVISIONED=1
 fi

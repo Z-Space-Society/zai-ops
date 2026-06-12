@@ -9,7 +9,6 @@
 #
 # sudo ./bootstrap.sh		#  Will create CT 100
 # sudo ./bootstrap.sh 199	#  Will create CT 199
-
 set -euo pipefail
 
 # --- Must be root (sudo) ---
@@ -17,6 +16,21 @@ if [[ $EUID -ne 0 ]]; then
   echo "This script must run as root. Re-run with: sudo $0 $*" >&2
   exit 1
 fi
+
+# --- Fix Proxmox apt repos (disable enterprise, add no-subscription) ---
+echo 'Enabled: false' | tee -a /etc/apt/sources.list.d/pve-enterprise.sources
+echo 'Enabled: false' | tee -a /etc/apt/sources.list.d/ceph.sources
+if [ ! -f /etc/apt/sources.list.d/proxmox.sources ]; then
+  cat > /etc/apt/sources.list.d/proxmox.sources <<'EOF'
+Types: deb
+URIs: http://download.proxmox.com/debian/pve
+Suites: trixie
+Components: pve-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
+EOF
+fi
+apt-get update
+apt-get -y full-upgrade
 
 # --- Config ---
 CTID="${1:-100}"

@@ -67,12 +67,17 @@ sleep 5
 # --- Provision the control node: locale, Ansible, and the repo ---
 # The locale MUST be fixed here, before Ansible is ever run. On a fresh
 # container Ansible refuses to start ("could not initialize the preferred
-# locale: unsupported locale setting") until en_US.UTF-8 is compiled, so this
-# cannot be deferred to an Ansible play. localedef is the reliable fix
-# (locale-gen / dpkg-reconfigure are not). Set LANG only — no LANGUAGE/LC_ALL.
+# locale: unsupported locale setting") until en_US.UTF-8 exists, so this
+# cannot be deferred to an Ansible play.
+#
+# Register the locale in /etc/locale.gen and generate it from there — NOT a
+# bare localedef. A glibc/locales upgrade (e.g. the full-upgrade in the
+# control_node role) re-runs locale-gen from this file; anything not listed
+# here gets wiped. Set LANG only — no LANGUAGE/LC_ALL.
 pct exec "$CTID" -- bash -c "
   apt-get update
-  localedef -i en_US -f UTF-8 en_US.UTF-8
+  sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+  locale-gen
   grep -q '^LANG=' /etc/environment || echo 'LANG=en_US.UTF-8' >> /etc/environment
   apt-get install -y ansible git
   [ -d /opt/zai-ops ] || git clone $REPO_URL /opt/zai-ops

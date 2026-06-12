@@ -19,8 +19,10 @@ itself from this repo.
    the control node).
 
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/Z-Space-Society/zai-ops/main/bootstrap.sh -o bootstrap.sh
-   bash bootstrap.sh          # creates CT 100; pass a CTID to override
+   bash -c "$(curl -fsSL https://raw.githubusercontent.com/Z-Space-Society/zai-ops/main/bootstrap.sh)"
+
+   # to override the CT ID (default 100), pass it as an argument:
+   # bash -c "$(curl -fsSL https://raw.githubusercontent.com/Z-Space-Society/zai-ops/main/bootstrap.sh)" _ 199
    ```
 
    The script prints a **vault password** on its last line. Back it up

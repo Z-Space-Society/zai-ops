@@ -10,11 +10,29 @@ itself from this repo.
 
 ## How it works
 
-1. Flash Proxmox onto the target host
-2. SSH in and run the host bootstrap script — this creates CT 100, the
-   Ansible control node
-3. From CT 100, Ansible uses the Proxmox API to create and configure all
-   remaining containers and inference nodes
+1. Flash Proxmox onto the target host.
+
+2. SSH in as root and run the host bootstrap script. Base Proxmox has no
+   git, so fetch the single script directly with curl. This creates CT 100,
+   the Ansible control node, fixes its locale, and installs Ansible + this
+   repo into it.
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Z-Space-Society/zai-ops/main/bootstrap/bootstrap.sh -o bootstrap.sh
+   bash bootstrap.sh          # creates CT 100; pass a CTID to override
+   ```
+
+3. Enter the control node and run the first Ansible playbook, which
+   configures CT 100 itself.
+
+   ```bash
+   pct enter 100
+   cd /opt/zai-ops/ansible
+   ansible-playbook site.yml
+   ```
+
+   From here Ansible uses the Proxmox API to create and configure all
+   remaining containers and inference nodes.
 
 ## Principles
 

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
 # bootstrap.sh — Create the ZAI Ansible control node (defaults to CT 100).
-# Run on a freshly-flashed Proxmox host, as root (use sudo).
+# Run on a freshly-flashed Proxmox host as root (the default first-boot login).
 # Pass a container ID to override the default.
 #
 # This is the one host-level script in the repo. Everything after the
 # control node exists is driven by Ansible from inside it.
 #
-# sudo ./bootstrap.sh		#  Will create CT 100
-# sudo ./bootstrap.sh 199	#  Will create CT 199
+# bash bootstrap.sh		#  Will create CT 100
+# bash bootstrap.sh 199	#  Will create CT 199
 set -euo pipefail
 
-# --- Must be root (sudo) ---
+# --- Must be root ---
 if [[ $EUID -ne 0 ]]; then
-  echo "This script must run as root. Re-run with: sudo $0 $*" >&2
+  echo "This script must run as root." >&2
   exit 1
 fi
 

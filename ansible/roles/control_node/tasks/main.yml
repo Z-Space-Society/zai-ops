@@ -16,3 +16,11 @@
   ansible.builtin.apt:
     update_cache: true
     upgrade: full
+
+# The community.proxmox modules talk to the Proxmox API through proxmoxer.
+- name: Install the Proxmox API client library
+  ansible.builtin.apt:
+    name:
+      - python3-proxmoxer
+      - python3-requests
+    state: present

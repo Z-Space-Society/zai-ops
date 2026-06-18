@@ -2,7 +2,7 @@
 # Control-node (CT 100) base configuration.
 #
 # The locale is first fixed in bootstrap (before Ansible can even start; see
-# bootstrap/bootstrap.sh), along with LANG in /etc/environment and the repo
+# bootstrap.sh at the repo root), along with LANG in /etc/environment and the repo
 # checkout. We re-assert the locale here, BEFORE the upgrade, so a
 # glibc/locales upgrade regenerates locale-archive with en_US.UTF-8 present
 # instead of wiping it.

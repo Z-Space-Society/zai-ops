@@ -11,15 +11,40 @@
 # bash bootstrap.sh 199	#  Will create CT 199
 set -euo pipefail
 
+# --- Pretty output ---------------------------------------------------------
+# Phase banners bracket the noisy package/clone output so it's always clear
+# which step is running. Package managers are quieted (see $APT below); the
+# "this can take a few minutes" notes cover the resulting silent stretches.
+# Colors degrade to plain text when stdout isn't a terminal.
+if [ -t 1 ] && command -v tput >/dev/null 2>&1; then
+  BOLD=$(tput bold); CYAN=$(tput setaf 6); GREEN=$(tput setaf 2)
+  YELLOW=$(tput setaf 3); RED=$(tput setaf 1); RESET=$(tput sgr0)
+else
+  BOLD=""; CYAN=""; GREEN=""; YELLOW=""; RED=""; RESET=""
+fi
+STEP=0
+step()    { STEP=$((STEP + 1)); printf '\n%s==> [%d] %s%s\n' "$BOLD$CYAN" "$STEP" "$*" "$RESET"; }
+info()    { printf '    %s\n' "$*"; }
+done_ok() { printf '%s    ✓ %s%s\n' "$GREEN" "$*" "$RESET"; }
+
+# Quiet, non-interactive apt. -qq silences routine chatter but still prints
+# errors, and combined with set -e a real failure still aborts loudly.
+export DEBIAN_FRONTEND=noninteractive
+APT="apt-get -qq -y"
+
 # --- Must be root ---
 if [[ $EUID -ne 0 ]]; then
-  echo "This script must run as root." >&2
+  printf '%sThis script must run as root.%s\n' "$RED" "$RESET" >&2
   exit 1
 fi
 
 # --- Fix Proxmox apt repos (disable enterprise, add no-subscription) ---
-echo 'Enabled: false' | tee -a /etc/apt/sources.list.d/pve-enterprise.sources
-echo 'Enabled: false' | tee -a /etc/apt/sources.list.d/ceph.sources
+step "Configuring Proxmox apt repositories"
+# Append silently (>> rather than `tee -a`, which also echoed to the console).
+# NOTE: this still appends on every run — see security review Issue 1 for the
+# deb822-safe idempotency fix (tracked separately).
+echo 'Enabled: false' >> /etc/apt/sources.list.d/pve-enterprise.sources
+echo 'Enabled: false' >> /etc/apt/sources.list.d/ceph.sources
 if [ ! -f /etc/apt/sources.list.d/proxmox.sources ]; then
   cat > /etc/apt/sources.list.d/proxmox.sources <<'EOF'
 Types: deb
@@ -29,8 +54,13 @@ Components: pve-no-subscription
 Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg
 EOF
 fi
-apt-get update
-apt-get -y full-upgrade
+$APT update
+done_ok "repositories configured"
+
+step "Upgrading host packages"
+info "this can take a minute…"
+$APT full-upgrade
+done_ok "host up to date"
 
 # --- Internal network: vmbr1 (no uplink) + NAT for outbound ---
 # The service containers (102-104) live only on this isolated bridge with no
@@ -38,6 +68,7 @@ apt-get -y full-upgrade
 # their first `apt-get install` would stall with no route to the internet.
 # The masquerade rule rides on the vmbr1 stanza as post-up/post-down so it is
 # both reboot-safe (re-applied on ifup) and rebuild-safe (written here).
+step "Creating internal network (vmbr1 + NAT)"
 INTERNAL_NET=10.1.1.0/24
 if ! grep -q '^iface vmbr1 ' /etc/network/interfaces; then
   cat >> /etc/network/interfaces <<EOF
@@ -52,12 +83,16 @@ iface vmbr1 inet static
 	post-down iptables -t nat -D POSTROUTING -s $INTERNAL_NET -o vmbr0 -j MASQUERADE
 EOF
   ifreload -a
+  done_ok "vmbr1 up (host 10.1.1.1, NAT out via vmbr0)"
+else
+  info "vmbr1 already present; skipping"
 fi
 
 # Enable IPv4 forwarding persistently so the masquerade above actually routes.
 if [ ! -f /etc/sysctl.d/99-zai-forward.conf ]; then
   echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-zai-forward.conf
-  sysctl -p /etc/sysctl.d/99-zai-forward.conf
+  sysctl -q -p /etc/sysctl.d/99-zai-forward.conf
+  done_ok "IPv4 forwarding enabled"
 fi
 
 # --- Config ---
@@ -69,17 +104,21 @@ ROOTFS_STORAGE=local-lvm
 BRIDGE=vmbr0
 REPO_URL=https://github.com/Z-Space-Society/zai-ops.git
 
-echo "Using CT ID: $CTID"
-
 # --- Ensure the template is downloaded ---
+step "Preparing container template"
 if ! pveam list "$TEMPLATE_STORAGE" | grep -q "$TEMPLATE"; then
-  pveam update
+  info "downloading $TEMPLATE …"
+  pveam update >/dev/null
   pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
+else
+  info "template already present"
 fi
+done_ok "template ready"
 
 # --- Create the container (idempotent: skip if it exists) ---
+step "Creating container $CTID ($HOSTNAME)"
 if pct status "$CTID" &>/dev/null; then
-  echo "CT $CTID already exists; skipping create."
+  info "CT $CTID already exists; skipping create"
 else
   pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$TEMPLATE" \
     --hostname "$HOSTNAME" --cores 2 --memory 2048 --swap 512 \
@@ -87,15 +126,19 @@ else
     --net0 name=eth0,bridge="$BRIDGE",ip=dhcp \
     --unprivileged 1 --onboot 1
   pct start "$CTID"
+  done_ok "CT $CTID created and started"
 fi
 
 # --- Attach the control node to the internal network ---
 # CT 100 gets a second NIC on vmbr1 (.100) so it can reach every service CT at
 # its static internal IP (10.1.1.10X) — no DHCP guessing. Idempotent: re-running
 # pct set with the same value is a no-op.
+step "Attaching control node to internal network"
 pct set "$CTID" -net1 name=eth1,bridge=vmbr1,ip=10.1.1.100/24
+done_ok "eth1 = 10.1.1.100 on vmbr1"
 
 # --- Wait for the container network to come up ---
+info "waiting for container network…"
 sleep 5
 
 # --- Provision the control node: locale, Ansible, and the repo ---
@@ -108,20 +151,25 @@ sleep 5
 # bare localedef. A glibc/locales upgrade (e.g. the full-upgrade in the
 # control_node role) re-runs locale-gen from this file; anything not listed
 # here gets wiped. Set LANG only — no LANGUAGE/LC_ALL.
+step "Provisioning control node (locale, Ansible, repo)"
+info "installing Ansible can take a few minutes…"
 pct exec "$CTID" -- bash -c "
-  apt-get update
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get -qq update
   sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
   locale-gen
   grep -q '^LANG=' /etc/environment || echo 'LANG=en_US.UTF-8' >> /etc/environment
-  apt-get install -y ansible git
-  [ -d /opt/zai-ops ] || git clone $REPO_URL /opt/zai-ops
+  apt-get -qq -y install ansible git
+  [ -d /opt/zai-ops ] || git clone --quiet $REPO_URL /opt/zai-ops
 "
+done_ok "control node provisioned"
 
 # --- Mint the Proxmox API token + Ansible Vault for the control node ---
 # This is host-side because it must be: an API token can only be created with
 # pveum (a host-only binary) or the API, and calling the API would already
 # require credentials. So the first credential is minted here, then handed to
 # CT 100 as part of equipping it — there is still only one host run.
+step "Minting Proxmox API token + vault"
 PROVISIONED=0
 VAULT_PASS=""
 if ! pct exec "$CTID" -- test -f /opt/zai-ops/ansible/group_vars/all/vault.yml; then
@@ -169,25 +217,31 @@ EOF
     rm -f /tmp/zai-vault.yml
   "
   PROVISIONED=1
+  done_ok "token minted and vault encrypted"
+else
+  info "vault already present; skipping token mint"
 fi
 
-echo
-echo "CT $CTID ($HOSTNAME) ready."
-echo "Next, configure the control node with Ansible:"
+# --- Done ---
+printf '\n%s==================================================================%s\n' "$GREEN$BOLD" "$RESET"
+printf '%s CT %s (%s) ready.%s\n' "$GREEN$BOLD" "$CTID" "$HOSTNAME" "$RESET"
+printf '%s==================================================================%s\n' "$GREEN$BOLD" "$RESET"
+echo "Next, configure the control node and build the service containers:"
 echo
 echo "  pct enter $CTID"
 echo "  cd /opt/zai-ops/ansible"
-echo "  ansible-playbook site.yml"
+echo "  ansible-playbook site.yml                           # configure CT 100"
+echo "  ansible-playbook verify-proxmox.yml                 # confirm API token"
+echo "  ansible-playbook provision.yml --limit ct101-nginx  # create + configure CT 101"
 
 # --- Vault password — printed LAST so it isn't scrolled away ---
 if [[ "$PROVISIONED" -eq 1 ]]; then
-  echo
-  echo "=================================================================="
-  echo " VAULT PASSWORD — back this up off-box (e.g. a password manager)."
+  printf '\n%s==================================================================%s\n' "$YELLOW$BOLD" "$RESET"
+  printf '%s VAULT PASSWORD — back this up off-box (e.g. a password manager).%s\n' "$YELLOW$BOLD" "$RESET"
   echo " Stored on $HOSTNAME at /root/.vault_pass so Ansible auto-decrypts"
   echo " (recoverable there as root). Needed to view/edit secrets:"
   echo "   ansible-vault edit group_vars/all/vault.yml"
   echo
-  echo "     $VAULT_PASS"
-  echo "=================================================================="
+  printf '%s     %s%s\n' "$BOLD" "$VAULT_PASS" "$RESET"
+  printf '%s==================================================================%s\n' "$YELLOW$BOLD" "$RESET"
 fi

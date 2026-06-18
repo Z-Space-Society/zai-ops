@@ -38,8 +38,28 @@ itself from this repo.
    ansible-playbook verify-proxmox.yml  # confirm the API token authenticates
    ```
 
+4. Build the service containers. `provision.yml` creates each CT over the
+   Proxmox API and then configures it over SSH. Drive one at a time with
+   `--limit` while the stack comes online:
+
+   ```bash
+   ansible-playbook provision.yml --limit ct101-nginx   # create + configure CT 101
+   ```
+
    From here Ansible uses the Proxmox API to create and configure all
    remaining containers and inference nodes.
+
+## Networking
+
+The bootstrap creates an isolated internal bridge `vmbr1` (`10.1.1.0/24`, no
+uplink) and makes the host its NAT gateway (`10.1.1.1`), so service containers
+can reach the internet for package installs without being exposed on the LAN.
+
+- The control node (CT 100) sits at `10.1.1.100` and reaches every service at
+  its static internal IP — no DHCP guessing.
+- nginx (CT 101) is the only LAN-facing container: dual-homed on `vmbr0` (DHCP)
+  for inbound traffic and `vmbr1` (`10.1.1.101`) to reach upstreams.
+- The remaining services live on `vmbr1` only and route out through the host.
 
 ## Secrets
 
@@ -62,7 +82,13 @@ ansible-vault edit group_vars/all/vault.yml
 ## Structure
 
 - `bootstrap.sh` — Host-level script to create CT 100 (the one host entry point)
-- `ansible/` — Roles and playbooks for all containers and inference nodes
+- `ansible/`
+  - `site.yml` — configures the control node (CT 100)
+  - `verify-proxmox.yml` — checks the API token authenticates
+  - `provision.yml` — creates the service containers over the API, then configures them
+  - `inventory/` — hosts and per-CT specs
+  - `group_vars/all/` — shared vars (`main.yml`) and the encrypted `vault.yml`
+  - `roles/` — `control_node`, `nginx`, and service roles as they come online
 
 ## Contributing
 

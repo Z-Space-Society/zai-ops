@@ -1,0 +1,18 @@
+---
+# Create a human admin account from someone's GitHub public keys — same username
+# on the control node and every inference node — and grant it sudo. Run from
+# inside CT 100:
+#
+#   ansible-playbook add-github-user.yml                  # adds jsayles
+#   ansible-playbook add-github-user.yml -e github_user=alice
+#
+# A random 16-char temp password is generated and PRINTED at the end; the account
+# is forced to change it on first login, after which that password unlocks sudo.
+# One play over both groups so the temp password is generated once and shared.
+
+- name: Add a GitHub-keyed admin user
+  hosts: control_node:inference_nodes
+  remote_user: ansible      # ignored on CT 100 (local connection); used on nodes
+  become: true
+  roles:
+    - github_user

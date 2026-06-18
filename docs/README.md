@@ -184,6 +184,7 @@ later; the repo bakes in neither.
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
 | `inference.yml`       | CT 100 → SSH   | Configure inference nodes (`nvidia_cuda` + `llama_server`) |
+| `add-github-user.yml` | CT 100 (local) + SSH | Create a human admin account from GitHub keys, with sudo, on CT 100 + inference nodes |
 
 `provision.yml` has two plays: a **create** play (`connection: local`, talks to
 the Proxmox API) and a **configure** play (SSH into the new CT, applies its
@@ -200,6 +201,7 @@ specs aren't filled in yet, so a no-`--limit` run is safe.
 | [`nginx`](roles/nginx.md)                  | CT 101     | Install + configure nginx as the cluster reverse proxy  |
 | [`nvidia_cuda`](roles/nvidia_cuda.md)      | inference nodes | NVIDIA driver + CUDA toolkit (bare-metal Debian 13) |
 | [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
+| [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
 
 (More roles — postgres, litellm, open-webui — will be added here as they come
 online.)
@@ -255,6 +257,17 @@ Hard-won lessons on the bare-metal **inference nodes** (Debian 13 + NVIDIA):
   node never comes up on the network.
 - **CUDA arch is auto-detected** from `nvidia-smi` (`compute_cap`) — no per-host
   build flag to maintain.
+
+Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
+
+- **Forced first-login password change needs a real temp password.** Over SSH
+  *key* auth, PAM (`UsePAM yes`, Debian default) asks for the *current* password
+  to authorize the new one — a locked/empty account can't complete the change. So
+  the account is seeded with a printed temp password rather than locked.
+- **Set passwords with `chpasswd`, not `password_hash`.** Debian 13's Python 3.13
+  removed the stdlib `crypt` module Ansible's `password_hash` filter used;
+  `chpasswd` on the target uses libc crypt instead, so no `python3-passlib` on
+  the control node.
 
 ---
 

@@ -18,6 +18,13 @@
   ansible.builtin.apt:
     update_cache: true
 
+# Trixie's minimal install ships without curl; install it as a base utility for
+# ad-hoc fetches on the node (e.g. pulling GitHub keys when adding a user by hand).
+- name: Install base utilities (curl)
+  ansible.builtin.apt:
+    name: curl
+    state: present
+
 # mokutil reports the Secure Boot state; it's in main, so install before the check.
 - name: Install mokutil (to read the Secure Boot state)
   ansible.builtin.apt:

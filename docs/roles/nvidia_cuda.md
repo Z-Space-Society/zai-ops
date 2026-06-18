@@ -20,6 +20,7 @@ verifies `nvidia-smi`. It runs first in `inference.yml`.
 | ---- | ------ | --- |
 | Enable `contrib` + `non-free` APT components | `ansible.builtin.replace` | Trixie's minimal install only enables `main non-free-firmware`; the NVIDIA packages live in contrib/non-free. Idempotent. |
 | Update the APT cache | `ansible.builtin.apt` | Pick up the newly-enabled components. |
+| Install base utilities (`curl`) | `ansible.builtin.apt` | Trixie's minimal install ships no curl; handy for ad-hoc fetches on the node (e.g. pulling GitHub keys when adding a user by hand). |
 | Install `mokutil` | `ansible.builtin.apt` | Needed to read the Secure Boot state in the next task. |
 | Read the Secure Boot state | `ansible.builtin.command: mokutil --sb-state` (`changed_when/failed_when: false`) | Capture the state without failing the run yet. |
 | Fail if Secure Boot is enabled | `ansible.builtin.assert` | Unsigned NVIDIA modules won't load under Secure Boot — fail fast with a fix message instead of rebooting into a driver that never loads. |

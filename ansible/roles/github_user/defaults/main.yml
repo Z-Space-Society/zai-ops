@@ -1,0 +1,5 @@
+---
+# GitHub username to provision. Doubles as the local account name; the public
+# keys are pulled from https://github.com/<github_user>.keys. Override per run:
+#   ansible-playbook add-github-user.yml -e github_user=alice
+github_user: jsayles

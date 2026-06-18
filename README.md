@@ -61,6 +61,16 @@ itself from this repo.
    ansible-playbook inference.yml --limit salmon
    ```
 
+6. (Optional) Give a person a login. Pulls their public keys from
+   `https://github.com/<user>.keys` and creates a same-named sudo account on the
+   control node and every inference node. A temp password is printed; the user
+   changes it on first login.
+
+   ```bash
+   ansible-playbook add-github-user.yml                  # adds jsayles
+   ansible-playbook add-github-user.yml -e github_user=alice
+   ```
+
 ## Networking
 
 The bootstrap creates an isolated internal bridge `vmbr1` (`10.1.1.0/24`, no
@@ -105,6 +115,7 @@ architecture, networking, and a note for every role.
   - `provision.yml` — creates the service containers over the API, then configures them
   - `enroll-inference-node.yml` — records a bare-metal inference node in the runtime inventory
   - `inference.yml` — configures inference nodes (NVIDIA/CUDA + llama-server)
+  - `add-github-user.yml` — creates a human admin account from GitHub keys (CT 100 + inference nodes)
   - `inventory/` — committed blueprint (`hosts.yml`) + git-ignored runtime roster (`local.yml`)
   - `group_vars/all/` — shared vars (`main.yml`) and the encrypted `vault.yml`
   - `roles/` — `control_node`, `nginx`, `nvidia_cuda`, `llama_server`, and more as they come online

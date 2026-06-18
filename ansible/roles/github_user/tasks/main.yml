@@ -1,0 +1,55 @@
+---
+# Provision a human admin account from someone's GitHub public keys, with sudo.
+# Applied to the control node and every inference node by add-github-user.yml.
+
+- name: Generate a one-time temporary password
+  # run_once so the same temp password lands on every host in the play and is
+  # printed once at the end — the operator hands it off out-of-band.
+  ansible.builtin.set_fact:
+    github_user_temp_password: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+  run_once: true
+
+- name: Create the admin account
+  # No password here — chpasswd sets it below. groups=sudo grants sudo (Debian's
+  # sudo group), append keeps any existing membership.
+  ansible.builtin.user:
+    name: "{{ github_user }}"
+    shell: /bin/bash
+    create_home: true
+    groups: sudo
+    append: true
+    state: present
+  register: github_user_account
+
+- name: Set the temporary password
+  # chpasswd uses libc crypt (SHA-512 per /etc/login.defs) — no passlib needed,
+  # which Debian 13's Python 3.13 would otherwise require (it dropped stdlib
+  # crypt that Ansible's password_hash relied on). Only on creation, so re-runs
+  # never reset a password the user has since changed.
+  ansible.builtin.shell: "echo '{{ github_user }}:{{ github_user_temp_password }}' | chpasswd"
+  when: github_user_account is changed
+  no_log: true
+
+- name: Force a password change on first login
+  # The account is created with an expired password so the user must set their
+  # own on first login; afterwards that password unlocks sudo. Creation-only for
+  # idempotency.
+  ansible.builtin.command: "chage -d 0 {{ github_user }}"
+  when: github_user_account is changed
+
+- name: Install the GitHub public keys
+  # The url lookup runs on the control node (internet via the host NAT); the
+  # .keys body may hold several keys and authorized_key adds each.
+  ansible.posix.authorized_key:
+    user: "{{ github_user }}"
+    key: "{{ lookup('url', 'https://github.com/' + github_user + '.keys') }}"
+    state: present
+
+- name: Report the temporary password
+  ansible.builtin.debug:
+    msg: >-
+      Created '{{ github_user }}' with sudo. Temporary password:
+      {{ github_user_temp_password }} — share it out-of-band; the user must
+      change it on first login.
+  run_once: true
+  when: github_user_account is changed

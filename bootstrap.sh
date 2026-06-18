@@ -32,6 +32,34 @@ fi
 apt-get update
 apt-get -y full-upgrade
 
+# --- Internal network: vmbr1 (no uplink) + NAT for outbound ---
+# The service containers (102-104) live only on this isolated bridge with no
+# LAN NIC, so the host masquerades their traffic out via vmbr0 — otherwise
+# their first `apt-get install` would stall with no route to the internet.
+# The masquerade rule rides on the vmbr1 stanza as post-up/post-down so it is
+# both reboot-safe (re-applied on ifup) and rebuild-safe (written here).
+INTERNAL_NET=10.1.1.0/24
+if ! grep -q '^iface vmbr1 ' /etc/network/interfaces; then
+  cat >> /etc/network/interfaces <<EOF
+
+auto vmbr1
+iface vmbr1 inet static
+	address 10.1.1.1/24
+	bridge-ports none
+	bridge-stp off
+	bridge-fd 0
+	post-up   iptables -t nat -A POSTROUTING -s $INTERNAL_NET -o vmbr0 -j MASQUERADE
+	post-down iptables -t nat -D POSTROUTING -s $INTERNAL_NET -o vmbr0 -j MASQUERADE
+EOF
+  ifreload -a
+fi
+
+# Enable IPv4 forwarding persistently so the masquerade above actually routes.
+if [ ! -f /etc/sysctl.d/99-zai-forward.conf ]; then
+  echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/99-zai-forward.conf
+  sysctl -p /etc/sysctl.d/99-zai-forward.conf
+fi
+
 # --- Config ---
 CTID="${1:-100}"
 HOSTNAME=ansible-control
@@ -60,6 +88,12 @@ else
     --unprivileged 1 --onboot 1
   pct start "$CTID"
 fi
+
+# --- Attach the control node to the internal network ---
+# CT 100 gets a second NIC on vmbr1 (.100) so it can reach every service CT at
+# its static internal IP (10.1.1.10X) — no DHCP guessing. Idempotent: re-running
+# pct set with the same value is a no-op.
+pct set "$CTID" -net1 name=eth1,bridge=vmbr1,ip=10.1.1.100/24
 
 # --- Wait for the container network to come up ---
 sleep 5

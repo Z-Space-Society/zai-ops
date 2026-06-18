@@ -24,3 +24,23 @@
       - python3-proxmoxer
       - python3-requests
     state: present
+
+# Service CTs are created with this public key injected into their root
+# authorized_keys (the proxmox module's `pubkey`), so Ansible can SSH in over
+# the internal network afterward. Idempotent: only generates if absent.
+- name: Ensure root has an ed25519 SSH keypair to inject into service CTs
+  ansible.builtin.user:
+    name: root
+    generate_ssh_key: true
+    ssh_key_type: ed25519
+    ssh_key_file: .ssh/id_ed25519
+
+# The vault password sits beside the vault on CT 100 by design (host root is the
+# trust boundary). Defense-in-depth: assert it stays root-only so permission
+# drift gets caught. The bootstrap writes it with umask 077 already.
+- name: Assert the vault password file is root-only
+  ansible.builtin.file:
+    path: /root/.vault_pass
+    mode: "0600"
+    owner: root
+    group: root

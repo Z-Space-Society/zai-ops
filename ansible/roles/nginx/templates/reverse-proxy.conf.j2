@@ -1,0 +1,38 @@
+# {{ ansible_managed }}
+# Reverse proxy for the ZAI service stack. Rendered from the nginx role.
+
+# Default server: catches unmatched requests and serves a health check, so the
+# proxy is verifiable even before any upstreams (litellm/open-webui) exist.
+server {
+    listen {{ nginx_health_port }} default_server;
+    server_name _;
+
+    location /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 'ok';
+    }
+
+    location / {
+        return 404;
+    }
+}
+{% for vhost in nginx_vhosts %}
+
+upstream {{ vhost.server_name | replace('.', '_') }}_backend {
+    server {{ vhost.upstream_host }}:{{ vhost.upstream_port }};
+}
+
+server {
+    listen 80;
+    server_name {{ vhost.server_name }};
+
+    location / {
+        proxy_pass http://{{ vhost.server_name | replace('.', '_') }}_backend;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+{% endfor %}

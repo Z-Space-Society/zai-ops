@@ -1,0 +1,12 @@
+---
+# Reverse-proxy vhosts. Each entry renders an upstream + a server block:
+#   - server_name: chat.example.com
+#     upstream_host: 10.1.1.104
+#     upstream_port: 8080
+# Empty by default — the upstreams (litellm 103, open-webui 104) don't exist
+# yet. With no vhosts the role still produces a working nginx serving the
+# health endpoint below, so the install is verifiable on its own.
+nginx_vhosts: []
+
+# Port the default health server listens on (returns 200 "ok" at /healthz).
+nginx_health_port: 80

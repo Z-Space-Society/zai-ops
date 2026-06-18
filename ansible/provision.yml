@@ -1,0 +1,65 @@
+---
+# Create the service containers over the Proxmox API, then configure them.
+# Run from inside CT 100 after site.yml (which generates the SSH key injected
+# below). Until 102-104 are specced, drive a single CT explicitly:
+#
+#   ansible-playbook provision.yml --limit ct101-nginx
+#
+# The create play runs ON the control node (connection: local) and talks to the
+# Proxmox API with the same vault token verify-proxmox.yml uses — token auth is
+# sufficient for a plain managed-storage LXC create (no bind mounts). The
+# `when: ct_netif is defined` guard skips any service host that hasn't had its
+# create specs filled in yet, so a no-limit run is safe.
+
+- name: Create service containers via the Proxmox API
+  hosts: services
+  connection: local
+  gather_facts: false
+  module_defaults:
+    community.proxmox.proxmox:
+      api_host: "{{ proxmox_api_host }}"
+      api_user: "{{ proxmox_api_user }}"
+      api_token_id: "{{ proxmox_api_token_id }}"
+      api_token_secret: "{{ proxmox_api_token_secret }}"
+      node: "{{ proxmox_node_name }}"
+  tasks:
+    - name: Create the LXC container
+      # storage and ostemplate are set EXPLICITLY: a wrong value here surfaces as
+      # a misleading bare 'errors' from proxmoxer, not an auth failure.
+      community.proxmox.proxmox:
+        vmid: "{{ ctid }}"
+        hostname: "{{ ct_hostname }}"
+        ostemplate: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst"
+        storage: local-lvm
+        disk: "{{ ct_disk }}"
+        cores: "{{ ct_cores }}"
+        memory: "{{ ct_memory }}"
+        swap: "{{ ct_swap }}"
+        unprivileged: true
+        onboot: true
+        features:
+          - nesting=1
+        pubkey: "{{ lookup('file', '/root/.ssh/id_ed25519.pub') }}"
+        netif: "{{ ct_netif }}"
+        state: present
+        timeout: 120
+      when: ct_netif is defined
+
+    - name: Start the container
+      community.proxmox.proxmox:
+        vmid: "{{ ctid }}"
+        state: started
+      when: ct_netif is defined
+
+    - name: Wait for SSH on the internal IP
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 22
+        timeout: 120
+      when: ct_netif is defined
+
+- name: Configure the nginx reverse proxy
+  hosts: ct101-nginx
+  gather_facts: true
+  roles:
+    - nginx

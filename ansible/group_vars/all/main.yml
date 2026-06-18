@@ -1,0 +1,6 @@
+---
+# Non-secret cluster-wide vars (the encrypted secrets live in vault.yml beside
+# this file). Kept out of the vault on purpose: the Proxmox node name isn't a
+# secret, and hardcoding it into playbooks breaks the "rebuilds on any host"
+# principle. Override per deployment.
+proxmox_node_name: alhambra

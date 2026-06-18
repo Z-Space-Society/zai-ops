@@ -71,6 +71,11 @@ Ansible decrypts it automatically via `/root/.vault_pass`. To view or edit:
 ansible-vault edit group_vars/all/vault.yml
 ```
 
+## Documentation
+
+Full reference docs live in [`docs/`](docs/README.md) — the bootstrap process,
+architecture, networking, and a note for every role.
+
 ## Principles
 
 - No Docker on LXC service containers — all services run natively under

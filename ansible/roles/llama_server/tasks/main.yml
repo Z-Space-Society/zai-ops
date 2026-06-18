@@ -1,0 +1,82 @@
+---
+# Build llama.cpp with CUDA and install the llama-server systemd unit. Runs after
+# the nvidia_cuda role, so nvidia-smi and nvcc are available.
+#
+# The GPU architecture is auto-detected from nvidia-smi — no per-host config. The
+# service is left ENABLED BUT NOT STARTED: the GGUF named by llama_model_file is
+# staged by hand (models are large), and the unit fails fast without it.
+
+- name: Install build toolchain (CMake, git, compiler)
+  ansible.builtin.apt:
+    name: "{{ llama_build_packages }}"
+    state: present
+
+- name: Detect GPU compute capabilities
+  ansible.builtin.command: nvidia-smi --query-gpu=compute_cap --format=csv,noheader
+  register: compute_cap
+  changed_when: false
+
+# "8.6\n8.6" → "86" — strip dots, dedupe (mixed-arch nodes keep both, joined ';').
+- name: Derive the CUDA architecture string
+  ansible.builtin.set_fact:
+    cuda_arch: "{{ compute_cap.stdout_lines | map('replace', '.', '') | unique | join(';') }}"
+
+- name: Show the detected CUDA architecture
+  ansible.builtin.debug:
+    msg: "Building for CUDA architecture(s): {{ cuda_arch }}"
+
+- name: Create the llama service user
+  ansible.builtin.user:
+    name: "{{ llama_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ llama_build_dir }}"
+
+- name: Create the model directory
+  ansible.builtin.file:
+    path: "{{ llama_model_dir }}"
+    state: directory
+    owner: "{{ llama_user }}"
+    mode: "0755"
+
+- name: Clone llama.cpp
+  ansible.builtin.git:
+    repo: https://github.com/ggml-org/llama.cpp
+    dest: "{{ llama_build_dir }}"
+    depth: 1
+    update: true
+  register: llama_src
+
+# Reconfigure/rebuild only when the checkout changed — full rebuilds are slow.
+- name: Configure the CUDA build
+  ansible.builtin.command:
+    cmd: "cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES={{ cuda_arch }}"
+    chdir: "{{ llama_build_dir }}"
+    creates: "{{ llama_build_dir }}/build/CMakeCache.txt"
+
+- name: Build llama.cpp (takes a few minutes)
+  ansible.builtin.command:
+    cmd: cmake --build build --config Release -j
+    chdir: "{{ llama_build_dir }}"
+    creates: "{{ llama_build_dir }}/build/bin/llama-server"
+
+# Force a rebuild when the source advanced even though the binary already exists.
+- name: Rebuild llama.cpp after a source update
+  ansible.builtin.command:
+    cmd: cmake --build build --config Release -j
+    chdir: "{{ llama_build_dir }}"
+  when: llama_src is changed
+  changed_when: true
+
+- name: Install the llama-server systemd unit
+  ansible.builtin.template:
+    src: llama-server.service.j2
+    dest: /etc/systemd/system/llama-server.service
+    mode: "0644"
+  notify: reload systemd
+
+- name: Enable llama-server (not started — stage the GGUF first)
+  ansible.builtin.systemd:
+    name: llama-server
+    enabled: true
+    daemon_reload: true

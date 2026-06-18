@@ -1,0 +1,26 @@
+---
+# Where llama.cpp is cloned and built, and where GGUF models are staged.
+llama_build_dir: /opt/llama.cpp
+llama_model_dir: /opt/models
+
+# System user the service runs as (no login shell).
+llama_user: llama
+
+# Build-time packages. nvcc comes from nvidia-cuda-toolkit (the nvidia_cuda
+# role); these are the host toolchain + CMake/git to fetch and compile.
+llama_build_packages:
+  - build-essential
+  - cmake
+  - git
+
+# --- Per-node serving config (override in the runtime inventory host entry) ---
+# These are deliberately generic defaults. Real model/flags are this-cluster
+# data, so the enroll step or inventory/local.yml sets them per node:
+#   salmon — one model split across both 1080 Ti via llama_extra_args:
+#            ["--tensor-split", "1,1"]; Apertus also wants "--jinja".
+#   orca   — single 3090, defaults are usually fine.
+llama_model_file: model.gguf      # filename under llama_model_dir
+llama_port: 8080
+llama_host: "0.0.0.0"
+llama_ngl: 999                    # offload all layers to GPU (sentinel "max")
+llama_extra_args: []             # e.g. ["--jinja", "--tensor-split", "1,1"]

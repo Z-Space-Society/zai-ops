@@ -12,10 +12,13 @@ one script, and the stack rebuilds itself from this repo.
 - [Bootstrap process](#bootstrap-process)
 - [Architecture](#architecture)
 - [Networking](#networking)
+- [Generic repo vs runtime data](#generic-repo-vs-runtime-data)
+- [Inference nodes](#inference-nodes)
 - [Playbooks](#playbooks)
 - [Roles](#roles)
 - [Secrets & trust model](#secrets--trust-model)
 - [Known gotchas](#known-gotchas)
+- [TODO](#todo)
 
 ---
 
@@ -88,6 +91,9 @@ ansible-playbook provision.yml --limit ct101-nginx  # create + configure CT 101
   internal services.
 - **CT 102-104** (postgres, litellm, open-webui) live only on the internal
   network and are reached through nginx.
+- **Inference nodes** (salmon, orca, …) are **bare-metal**, *outside* the Proxmox
+  host — they run `llama-server` only, behind the gateway, and are configured by
+  CT 100 over SSH. See [Inference nodes](#inference-nodes).
 
 ---
 
@@ -111,6 +117,64 @@ LAN.
 
 ---
 
+## Generic repo vs runtime data
+
+This repo is meant to rebuild *any* cluster, not just this one (it's the pilot
+for COAI). So **this-cluster facts stay out of the committed tree** and live only
+as **runtime data on the control node**, git-ignored — the same pattern the vault
+already uses for the API token.
+
+- The repo holds **generic** automation (roles, playbooks) and **blueprint
+  constants** every cluster reuses — the `10.1.1.0/24` net, the CT-ID layout.
+- This-cluster specifics — *which inference nodes exist, their IPs, their models*
+  — live in `ansible/inventory/local.yml`, written by
+  [`enroll-inference-node.yml`](#playbooks) and never committed.
+- The inventory is loaded as a **directory** (`inventory/`), so the committed
+  blueprint (`hosts.yml`, with an empty `inference_nodes` group) and the runtime
+  `local.yml` merge automatically.
+
+Because the roster isn't in the repo, a control-node rebuild is **repo +
+restored runtime data** — back up `local.yml` alongside the vault. The decision
+is pinned in [ADR-0001](decisions/0001-repo-stays-generic.md). The existing
+service-CT IPs and `proxmox_node_name` still live in the committed inventory and
+are slated for the same treatment — see [TODO](#todo).
+
+---
+
+## Inference nodes
+
+The inference nodes (salmon, orca, …) are **bare-metal Debian 13 machines** with
+NVIDIA GPUs, sitting on the LAN/tailnet *outside* the Proxmox host. They run
+`llama-server` only — no double duty — and are reached for inference by the
+LiteLLM gateway (addressing per the vault's ADR-002).
+
+CT 100 configures them over SSH as a dedicated **`ansible` user** (NOPASSWD
+sudo), using its root ed25519 key. Two roles apply: [`nvidia_cuda`](roles/nvidia_cuda.md)
+(driver + CUDA) then [`llama_server`](roles/llama_server.md) (build llama.cpp,
+install the unit, enabled-not-started until a GGUF is staged).
+
+Operator flow, from inside CT 100:
+
+```bash
+ansible-playbook enroll-inference-node.yml -e "name=salmon ansible_host=192.168.6.63"
+ansible-playbook inference.yml --limit salmon
+```
+
+`ansible_host` is whatever reaches the node — a LAN IP today, a Tailscale 100.x
+later; the repo bakes in neither.
+
+**Node prep (manual, per node), before the first run:**
+
+- **Secure Boot disabled** in BIOS (unsigned NVIDIA modules won't load otherwise;
+  the role asserts it).
+- An **`ansible` user with NOPASSWD sudo**, with **CT 100's root public key** in
+  its `authorized_keys`.
+- On Trixie, `systemd-networkd` needs a `.network` file to DHCP (e.g.
+  `/etc/systemd/network/20-wired.network` with `DHCP=yes`) so the node is
+  reachable at its enrolled address.
+
+---
+
 ## Playbooks
 
 | Playbook              | Runs on        | Purpose                                              |
@@ -118,6 +182,8 @@ LAN.
 | `site.yml`            | CT 100 (local) | Configure the control node (applies `control_node`) |
 | `verify-proxmox.yml`  | CT 100 (local) | Read-only check that the API token authenticates    |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
+| `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
+| `inference.yml`       | CT 100 → SSH   | Configure inference nodes (`nvidia_cuda` + `llama_server`) |
 
 `provision.yml` has two plays: a **create** play (`connection: local`, talks to
 the Proxmox API) and a **configure** play (SSH into the new CT, applies its
@@ -132,6 +198,8 @@ specs aren't filled in yet, so a no-`--limit` run is safe.
 | ------------------------------------------ | ---------- | ------------------------------------------------------- |
 | [`control_node`](roles/control_node.md)    | CT 100     | Base config for the Ansible control node                |
 | [`nginx`](roles/nginx.md)                  | CT 101     | Install + configure nginx as the cluster reverse proxy  |
+| [`nvidia_cuda`](roles/nvidia_cuda.md)      | inference nodes | NVIDIA driver + CUDA toolkit (bare-metal Debian 13) |
+| [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
 
 (More roles — postgres, litellm, open-webui — will be added here as they come
 online.)
@@ -149,7 +217,11 @@ online.)
 - For stricter deployments, drop `vault_password_file` from `ansible.cfg` and
   run with `--ask-vault-pass` (the password is printed at bootstrap for backup).
 - Service CTs are reached via a root **ed25519 key** generated on CT 100 and
-  injected at create time (key-only login).
+  injected at create time (key-only login). Inference nodes are reached with the
+  same key as a dedicated `ansible` user (see [Inference nodes](#inference-nodes)).
+- The inference-node roster (`ansible/inventory/local.yml`) is git-ignored
+  runtime state, like the vault — back it up with the control node. See
+  [Generic repo vs runtime data](#generic-repo-vs-runtime-data).
 
 ---
 
@@ -169,3 +241,31 @@ Debian 13's `ansible` 12). These will recur on CT 102-104:
   nesting"; service CTs are created with `features: [nesting=1]`.
 
 [community.proxmox #98]: https://github.com/ansible-collections/community.proxmox/issues/98
+
+Hard-won lessons on the bare-metal **inference nodes** (Debian 13 + NVIDIA):
+
+- **Secure Boot must be disabled** in BIOS — unsigned NVIDIA kernel modules
+  won't load otherwise. Manual BIOS step; `nvidia_cuda` asserts it and fails fast.
+- **Trixie needs `contrib non-free`.** The minimal install only enables
+  `main non-free-firmware`; the NVIDIA packages aren't visible until you add them.
+- **`nvidia-cuda-toolkit-gcc` bridges the GCC 14 / nvcc 12.4 mismatch.** Without
+  it the CUDA build fails on a compiler-version check.
+- **`systemd-networkd` won't DHCP without a `.network` file.** Create
+  `/etc/systemd/network/20-wired.network` with `DHCP=yes` during node prep, or the
+  node never comes up on the network.
+- **CUDA arch is auto-detected** from `nvidia-smi` (`compute_cap`) — no per-host
+  build flag to maintain.
+
+---
+
+## TODO
+
+- **Retrofit the committed inventory into the generic/runtime split.** Move the
+  service-CT internal IPs and `proxmox_node_name: alhambra` out of the committed
+  tree into runtime data, the way the inference nodes already work
+  ([ADR-0001](decisions/0001-repo-stays-generic.md)). Touches `bootstrap.sh`,
+  `provision.yml`, and `inventory/hosts.yml`.
+- **Control-node backup mechanism.** Full recovery now depends on the control
+  node's git-ignored runtime state — the vault, `/root/.vault_pass`, and
+  `inventory/local.yml`. Build a documented way to back these up (and restore)
+  so a reflash is genuinely *repo + restored state*.

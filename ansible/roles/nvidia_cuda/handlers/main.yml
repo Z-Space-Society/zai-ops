@@ -1,0 +1,7 @@
+---
+# Reboot after the driver is installed so the kernel module loads cleanly. The
+# tasks flush this immediately (it can't wait until end-of-play) and then
+# wait_for_connection for the host to return.
+- name: reboot
+  ansible.builtin.reboot:
+    reboot_timeout: "{{ nvidia_reboot_timeout }}"

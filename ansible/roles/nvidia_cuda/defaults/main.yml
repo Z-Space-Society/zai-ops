@@ -1,0 +1,12 @@
+---
+# NVIDIA driver + CUDA toolkit packages (Debian Trixie repos). Pinned as a list
+# so a node with different needs can override without touching the tasks.
+# nvidia-cuda-toolkit-gcc is load-bearing: it bridges the Trixie GCC 14 / nvcc
+# 12.4 version mismatch that otherwise breaks the CUDA build.
+nvidia_packages:
+  - nvidia-driver
+  - nvidia-cuda-toolkit
+  - nvidia-cuda-toolkit-gcc
+
+# Seconds to wait for the host to come back after the post-install reboot.
+nvidia_reboot_timeout: 300

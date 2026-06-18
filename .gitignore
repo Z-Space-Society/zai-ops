@@ -3,3 +3,8 @@
 # the working tree only so Ansible can read it on the control node.
 ansible/group_vars/all/vault.yml
 .vault_pass
+
+# Runtime inventory — the actual inference-node roster (names/IPs/models) for
+# THIS cluster, written by enroll-inference-node.yml. The repo stays generic;
+# these specifics are control-node state, backed up like the vault, never committed.
+ansible/inventory/local.yml

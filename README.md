@@ -47,7 +47,19 @@ itself from this repo.
    ```
 
    From here Ansible uses the Proxmox API to create and configure all
-   remaining containers and inference nodes.
+   remaining containers.
+
+5. Bring the bare-metal inference nodes (salmon, orca, …) into the cluster.
+   Enrolling records the node in a git-ignored runtime inventory on the control
+   node (names/IPs stay out of the repo); a second playbook configures it
+   (NVIDIA driver + CUDA, then builds llama.cpp). Each node needs one-time prep
+   first — Secure Boot off, an `ansible` user with sudo and CT 100's key. See
+   [docs](docs/README.md#inference-nodes).
+
+   ```bash
+   ansible-playbook enroll-inference-node.yml -e "name=salmon ansible_host=192.168.6.63"
+   ansible-playbook inference.yml --limit salmon
+   ```
 
 ## Networking
 
@@ -91,9 +103,11 @@ architecture, networking, and a note for every role.
   - `site.yml` — configures the control node (CT 100)
   - `verify-proxmox.yml` — checks the API token authenticates
   - `provision.yml` — creates the service containers over the API, then configures them
-  - `inventory/` — hosts and per-CT specs
+  - `enroll-inference-node.yml` — records a bare-metal inference node in the runtime inventory
+  - `inference.yml` — configures inference nodes (NVIDIA/CUDA + llama-server)
+  - `inventory/` — committed blueprint (`hosts.yml`) + git-ignored runtime roster (`local.yml`)
   - `group_vars/all/` — shared vars (`main.yml`) and the encrypted `vault.yml`
-  - `roles/` — `control_node`, `nginx`, and service roles as they come online
+  - `roles/` — `control_node`, `nginx`, `nvidia_cuda`, `llama_server`, and more as they come online
 
 ## Contributing
 

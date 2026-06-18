@@ -1,0 +1,74 @@
+---
+# Record a bare-metal inference node into the runtime inventory. RECORDS ONLY —
+# it does not configure anything; run inference.yml afterwards to apply the roles.
+#
+#   ansible-playbook enroll-inference-node.yml -e "name=salmon ansible_host=192.168.6.63"
+#   ansible-playbook inference.yml --limit salmon
+#
+# Why a separate playbook instead of editing inventory by hand: node names and
+# IPs are THIS-cluster specifics, not generic repo data. They go in the
+# git-ignored runtime inventory (inventory/local.yml) on the control node, which
+# is backed up like the vault — never committed. The repo stays generic.
+#
+# Model vars are optional; omit them to take the llama_server role defaults, or
+# pass them here (JSON form is easiest for lists), e.g.:
+#   -e '{"name":"salmon","ansible_host":"192.168.6.63",
+#        "llama_model_file":"Apertus-8B-Instruct-2509-Q5_K_M.gguf",
+#        "llama_extra_args":["--jinja","--tensor-split","1,1"]}'
+# Re-enrolling a node updates its entry in place (idempotent merge-and-rewrite).
+
+- name: Enroll an inference node into the runtime inventory
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    runtime_inventory: "{{ playbook_dir }}/inventory/local.yml"
+    node_user: "{{ ansible_user | default('ansible') }}"
+  tasks:
+    - name: Require name and ansible_host
+      ansible.builtin.assert:
+        that:
+          - name is defined and (name | string | length) > 0
+          - ansible_host is defined and (ansible_host | string | length) > 0
+        fail_msg: >-
+          Pass at least name and ansible_host, e.g.
+          -e "name=salmon ansible_host=192.168.6.63"
+
+    # errors='ignore' → empty string when the file doesn't exist yet; 'or {}'
+    # turns that (and an empty/whitespace file) into an empty mapping to merge into.
+    - name: Load the existing runtime inventory (empty if absent)
+      ansible.builtin.set_fact:
+        runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
+
+    # Only the keys the operator actually supplied are stored, so unset model
+    # vars fall through to the llama_server role defaults rather than being pinned.
+    - name: Assemble this node's inventory entry
+      ansible.builtin.set_fact:
+        node_entry: >-
+          {{
+            {'ansible_host': ansible_host, 'ansible_user': node_user}
+            | combine({'llama_model_file': llama_model_file} if llama_model_file is defined else {})
+            | combine({'llama_port': llama_port | int} if llama_port is defined else {})
+            | combine({'llama_extra_args': llama_extra_args} if llama_extra_args is defined else {})
+          }}
+
+    - name: Merge this node into the inference_nodes group
+      ansible.builtin.set_fact:
+        merged_inventory: >-
+          {{
+            runtime_data
+            | combine({'all': {'children': {'inference_nodes': {'hosts': {name: node_entry}}}}},
+                      recursive=True)
+          }}
+
+    - name: Write the runtime inventory
+      ansible.builtin.copy:
+        dest: "{{ runtime_inventory }}"
+        content: "{{ merged_inventory | to_nice_yaml(indent=2) }}"
+        mode: "0644"
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          - "Recorded '{{ name }}' ({{ ansible_host }}) in {{ runtime_inventory }}."
+          - "Next: ansible-playbook inference.yml --limit {{ name }}"

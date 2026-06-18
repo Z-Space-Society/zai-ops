@@ -1,0 +1,20 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=llama-server inference node
+After=network.target
+
+[Service]
+Type=simple
+User={{ llama_user }}
+ExecStart={{ llama_build_dir }}/build/bin/llama-server \
+  --model {{ llama_model_dir }}/{{ llama_model_file }} \
+  --host {{ llama_host }} \
+  --port {{ llama_port }} \
+  -ngl {{ llama_ngl }}{% for arg in llama_extra_args %} \
+  {{ arg }}{% endfor %}
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

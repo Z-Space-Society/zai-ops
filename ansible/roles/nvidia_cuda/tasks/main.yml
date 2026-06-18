@@ -1,0 +1,71 @@
+---
+# NVIDIA driver + CUDA toolkit for a bare-metal inference node (Debian 13/Trixie).
+#
+# PRE-REQUISITE (manual, cannot be automated): Secure Boot must be disabled in
+# BIOS first — unsigned NVIDIA kernel modules won't load otherwise. The first
+# task asserts this so a misconfigured node fails fast with a clear message
+# instead of rebooting into a driver that silently never loads.
+
+# Trixie's minimal install enables only `main non-free-firmware`; the NVIDIA
+# packages live in contrib/non-free. replace is idempotent — re-runs are no-ops.
+- name: Enable contrib and non-free APT components
+  ansible.builtin.replace:
+    path: /etc/apt/sources.list
+    regexp: ' main non-free-firmware'
+    replace: ' main contrib non-free non-free-firmware'
+
+- name: Update the APT cache
+  ansible.builtin.apt:
+    update_cache: true
+
+# mokutil reports the Secure Boot state; it's in main, so install before the check.
+- name: Install mokutil (to read the Secure Boot state)
+  ansible.builtin.apt:
+    name: mokutil
+    state: present
+
+- name: Read the Secure Boot state
+  ansible.builtin.command: mokutil --sb-state
+  register: secure_boot
+  changed_when: false
+  failed_when: false
+
+- name: Fail if Secure Boot is enabled
+  ansible.builtin.assert:
+    that:
+      - "'enabled' not in (secure_boot.stdout | default('') | lower)"
+    fail_msg: >-
+      Secure Boot appears to be ENABLED on this node ({{ secure_boot.stdout | default('') | trim }}).
+      Disable it in BIOS (e.g. MSI: Settings → Security → Secure Boot → Disabled,
+      Standard mode) before installing the NVIDIA driver, then re-run.
+    success_msg: "Secure Boot is off — safe to build the NVIDIA module."
+
+- name: Install kernel headers (DKMS needs these to build the NVIDIA module)
+  ansible.builtin.apt:
+    name: "linux-headers-{{ ansible_kernel }}"
+    state: present
+
+- name: Install the NVIDIA driver and CUDA toolkit
+  ansible.builtin.apt:
+    name: "{{ nvidia_packages }}"
+    state: present
+  notify: reboot
+
+# The reboot can't wait until end-of-play: later tasks (and the llama_server
+# role) need the freshly-built module loaded. Flush now, then wait for the host.
+- name: Reboot now if the driver was just installed
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the host to come back after reboot
+  ansible.builtin.wait_for_connection:
+    delay: 30
+    timeout: "{{ nvidia_reboot_timeout }}"
+
+- name: Verify the NVIDIA driver loaded
+  ansible.builtin.command: nvidia-smi
+  register: nvidia_smi
+  changed_when: false
+
+- name: Show nvidia-smi output
+  ansible.builtin.debug:
+    var: nvidia_smi.stdout_lines

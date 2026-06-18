@@ -48,9 +48,18 @@
       when: ct_netif is defined
 
     - name: Start the container
+      # hostname is the load-bearing fix: without it the module's power-state
+      # path evaluates `hostname or lxc["name"]` and KeyErrors ('name') on a
+      # freshly created CT whose cluster record hasn't populated 'name' yet
+      # (community.proxmox issue #98). retries cover the same post-create race.
       community.proxmox.proxmox:
         vmid: "{{ ctid }}"
+        hostname: "{{ ct_hostname }}"
         state: started
+      register: ct_start
+      until: ct_start is succeeded
+      retries: 5
+      delay: 3
       when: ct_netif is defined
 
     - name: Wait for SSH on the internal IP

@@ -24,14 +24,16 @@
       node: "{{ proxmox_node_name }}"
   tasks:
     - name: Create the LXC container
-      # storage and ostemplate are set EXPLICITLY: a wrong value here surfaces as
-      # a misleading bare 'errors' from proxmoxer, not an auth failure.
+      # disk MUST be the `<storage>:<size>` string form (e.g. local-lvm:8), NOT a
+      # bare size with a separate `storage:` — the latter renders a pathless
+      # rootfs that PVE rejects under token auth ("Only root can pass arbitrary
+      # filesystem paths"). ostemplate is set explicitly; a wrong value there
+      # surfaces as a misleading bare 'errors', not an auth failure.
       community.proxmox.proxmox:
         vmid: "{{ ctid }}"
         hostname: "{{ ct_hostname }}"
         ostemplate: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst"
-        storage: local-lvm
-        disk: "{{ ct_disk }}"
+        disk: "{{ ct_rootfs_storage }}:{{ ct_disk }}"
         cores: "{{ ct_cores }}"
         memory: "{{ ct_memory }}"
         swap: "{{ ct_swap }}"

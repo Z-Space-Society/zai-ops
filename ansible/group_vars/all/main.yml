@@ -4,3 +4,9 @@
 # secret, and hardcoding it into playbooks breaks the "rebuilds on any host"
 # principle. Override per deployment.
 proxmox_node_name: alhambra
+
+# Storage for service-CT root filesystems. Combined with each CT's ct_disk size
+# into the `disk: <storage>:<size>` form the proxmox module needs — a bare size
+# with a separate `storage:` renders a pathless rootfs that PVE rejects under
+# token auth ("Only root can pass arbitrary filesystem paths").
+ct_rootfs_storage: local-lvm

@@ -1,13 +1,11 @@
 ---
-# Read-only check that the Proxmox API token minted by the host bootstrap
-# actually authenticates from the control node. Run after site.yml:
+# Read-only smoke test: confirms the Proxmox API token authenticates from the
+# control node before running the heavier create plays. Run after site.yml:
 #
 #   ansible-playbook verify-proxmox.yml
 #
 # Green (failed=0, nodes listed) means the whole chain works: pveum mint ->
-# encrypted vault -> /root/.vault_pass -> API auth. This is deliberately
-# separate from the CT-creation play: info calls accept token auth, whereas
-# LXC *creation* has known root@pam-only pre-checks to validate later.
+# encrypted vault -> /root/.vault_pass -> API auth.
 #
 # Uses community.proxmox (the proxmox modules moved here from community.general,
 # which deprecated its copies). Requires the python3-proxmoxer library on the

@@ -125,6 +125,12 @@ def callback(request):
         request, user, backend="django.contrib.auth.backends.ModelBackend"
     )
     user.touch_last_seen()
+
+    # Resume an in-progress OIDC authorize (Open WebUI) if one bounced us here.
+    # Only honour a safe same-site path (single leading slash, no scheme/host).
+    next_url = request.session.pop("post_login_redirect", None)
+    if next_url and next_url.startswith("/") and not next_url.startswith("//"):
+        return redirect(next_url)
     return redirect("atproto_oauth:landing")
 
 

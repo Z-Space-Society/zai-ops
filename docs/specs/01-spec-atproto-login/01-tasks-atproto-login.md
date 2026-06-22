@@ -170,7 +170,7 @@ demoable units and must be built in order (1 → 2 → 3 → 4).
 - [x] 3.8 Tests: callback success path (mocked PDS, redacted tokens) and
       `state`-mismatch rejection; create-vs-update user logic.
 
-### [ ] 4.0 OIDC provider endpoint (id_token for Open WebUI)
+### [x] 4.0 OIDC provider endpoint (id_token for Open WebUI)
 
 #### 4.0 Proof Artifact(s)
 
@@ -184,18 +184,18 @@ demoable units and must be built in order (1 → 2 → 3 → 4).
 
 #### 4.0 Tasks
 
-- [ ] 4.1 Implement `id_token` minting in `oidc/provider.py` (RS256, signed via
+- [x] 4.1 Implement `id_token` minting in `oidc/provider.py` (RS256, signed via
       `signing.py` with the published `kid`): `sub`=DID, `handle`, plus
       `iss`/`aud`/`exp`.
-- [ ] 4.2 Implement the OIDC discovery endpoint
+- [x] 4.2 Implement the OIDC discovery endpoint
       (`/.well-known/openid-configuration`) advertising issuer, `jwks_uri`,
       authorize/token endpoints, and supported claims/scopes.
-- [ ] 4.3 Implement the OIDC authorize endpoint reusing the member's Django
+- [x] 4.3 Implement the OIDC authorize endpoint reusing the member's Django
       session (redirect to login if unauthenticated).
-- [ ] 4.4 Implement the OIDC token endpoint issuing the `id_token` to the OIDC
+- [x] 4.4 Implement the OIDC token endpoint issuing the `id_token` to the OIDC
       client (Open WebUI).
-- [ ] 4.5 Document the exact Open WebUI OIDC client config in `README.md` (issuer
+- [x] 4.5 Document the exact Open WebUI OIDC client config in `README.md` (issuer
       URL, client id/secret, scopes, claim mapping); note the no-`email`
       open-question/risk.
-- [ ] 4.6 Tests: mint an `id_token` and verify its signature + claims against
+- [x] 4.6 Tests: mint an `id_token` and verify its signature + claims against
       JWKS; assert the discovery document is correct.

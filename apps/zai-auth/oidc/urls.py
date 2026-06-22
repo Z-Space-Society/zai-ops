@@ -1,7 +1,4 @@
-"""OIDC provider + JWKS routes.
-
-JWKS lands in Task 2; discovery/authorize/token in Task 4.
-"""
+"""OIDC provider + JWKS routes."""
 
 from django.urls import path
 
@@ -11,4 +8,11 @@ app_name = "oidc"
 
 urlpatterns = [
     path(".well-known/jwks.json", views.jwks, name="jwks"),
+    path(
+        ".well-known/openid-configuration",
+        views.openid_configuration,
+        name="openid_configuration",
+    ),
+    path("oidc/authorize", views.authorize, name="authorize"),
+    path("oidc/token", views.token, name="token"),
 ]

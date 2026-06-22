@@ -60,4 +60,36 @@ list. `.env` is git-ignored — **never commit secrets or private keys**.
   Verify Open WebUI can provision an account without `email`; if not, a
   synthesized claim will be added.
 
-<!-- Open WebUI OIDC configuration is documented in Task 4. -->
+## Open WebUI OIDC configuration
+
+ZAI Auth is a standard OIDC provider. Point Open WebUI at it with these
+environment variables (substitute `PUBLIC_BASE_URL` for the real public origin):
+
+```bash
+ENABLE_OAUTH_SIGNUP=true
+OAUTH_CLIENT_ID=open-webui                       # must equal OIDC_CLIENT_ID here
+OAUTH_CLIENT_SECRET=<shared secret>              # must equal OIDC_CLIENT_SECRET here
+OPENID_PROVIDER_URL=https://PUBLIC_BASE_URL/.well-known/openid-configuration
+OAUTH_PROVIDER_NAME=ZAI
+OAUTH_SCOPES=openid profile
+OAUTH_USERNAME_CLAIM=handle                      # we emit `handle` (= the atproto handle)
+```
+
+Register Open WebUI's redirect URI in this app's `OIDC_REDIRECT_URIS`
+(e.g. `https://chat.example.com/oauth/oidc/callback`).
+
+| Provider endpoint | Path |
+| ----------------- | ---- |
+| Discovery | `/.well-known/openid-configuration` |
+| JWKS | `/.well-known/jwks.json` |
+| Authorize | `/oidc/authorize` |
+| Token | `/oidc/token` |
+
+**id_token claims:** `sub` = DID, `handle` = atproto handle (also as
+`preferred_username`), plus `iss`/`aud`/`exp`/`iat`/`nonce`. RS256, verifiable via
+JWKS.
+
+> **Open Question (spec #2):** the `id_token` carries **no `email`**. Some Open
+> WebUI versions require an email to provision an account (`OAUTH_EMAIL_CLAIM`).
+> Verify against the target Open WebUI version; if it can't sign up without one, a
+> synthesized email claim will be added here.

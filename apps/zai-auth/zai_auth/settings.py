@@ -30,6 +30,12 @@ SECRET_KEY = env("SECRET_KEY", default="dev-insecure-key-do-not-use-in-prod")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
+# Origins Django trusts for unsafe (POST) requests' CSRF Origin check. Needed
+# when served behind an HTTPS proxy/tunnel (e.g. cloudflared in dev): the browser
+# sends an `https://` Origin while the app sees the forwarded request as `http`,
+# so the tunnel host must be declared trusted explicitly.
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
+
 # The public HTTPS origin this app is served from. It anchors the OAuth
 # `client_id`, the OIDC issuer, and the redirect/JWKS URLs. In local dev it can
 # be a tunnel or the localhost development convention (see README).

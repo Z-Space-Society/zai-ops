@@ -1,0 +1,103 @@
+---
+# Install and configure Garage as the cluster's S3-compatible object store.
+# Reached only over the internal network (vmbr1); the backup job on the control
+# node writes its restic repo here.
+
+- name: Create the garage system group
+  ansible.builtin.group:
+    name: garage
+    system: true
+
+- name: Create the garage system user
+  ansible.builtin.user:
+    name: garage
+    group: garage
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/garage
+    create_home: false
+
+- name: Create the metadata and data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: garage
+    group: garage
+    mode: "0700"
+  loop:
+    - /var/lib/garage
+    - "{{ garage_metadata_dir }}"
+    - "{{ garage_data_dir }}"
+
+# Static single binary — no apt package on Debian. get_url is idempotent on the
+# dest; the optional checksum makes a tampered/partial download fail the run.
+- name: Install the garage binary
+  ansible.builtin.get_url:
+    url: "{{ garage_binary_url }}"
+    dest: /usr/local/bin/garage
+    mode: "0755"
+    owner: root
+    group: root
+    checksum: "{{ ('sha256:' + garage_binary_sha256) if garage_binary_sha256 else omit }}"
+  notify: restart garage
+
+# Config carries the rpc_secret + admin_token. Garage 2.x refuses to start if the
+# file is readable by group or others, so it's 0600 owned by the garage user
+# (the daemon reads it as itself; root/Ansible still manage it freely).
+- name: Deploy the garage configuration
+  ansible.builtin.template:
+    src: garage.toml.j2
+    dest: /etc/garage.toml
+    owner: garage
+    group: garage
+    mode: "0600"
+  notify: restart garage
+
+- name: Install the garage systemd unit
+  ansible.builtin.template:
+    src: garage.service.j2
+    dest: /etc/systemd/system/garage.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart garage
+
+- name: Ensure garage is started and enabled
+  ansible.builtin.systemd:
+    name: garage
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# Flush now so the daemon is actually up (with the latest config) before we run
+# the one-time cluster init below, rather than at the end of the play.
+- name: Apply pending garage restarts before cluster init
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the S3 API to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 3900
+    timeout: 60
+
+# One-time cluster bring-up: assign the storage layout, import the vault-pinned
+# access key, create the bucket, and grant the key. Idempotent via the sentinel
+# the script touches on success (`creates:`), so re-runs are no-ops and the
+# credentials stay stable across rebuilds (restic repo survives).
+- name: Install the cluster-init script
+  ansible.builtin.template:
+    src: garage-init.sh.j2
+    dest: /usr/local/bin/garage-init.sh
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Initialise the garage cluster (layout, key, bucket)
+  ansible.builtin.command:
+    cmd: /usr/local/bin/garage-init.sh
+    creates: /var/lib/garage/.zai-initialized
+  environment:
+    ZAI_OS_ACCESS_KEY: "{{ object_store_access_key }}"
+    ZAI_OS_SECRET_KEY: "{{ object_store_secret_key }}"

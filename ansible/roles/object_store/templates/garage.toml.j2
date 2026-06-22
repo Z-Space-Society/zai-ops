@@ -1,0 +1,27 @@
+# {{ ansible_managed }}
+# Garage object-store config. Single-node deployment: one replica, one zone.
+
+metadata_dir = "{{ garage_metadata_dir }}"
+data_dir = "{{ garage_data_dir }}"
+db_engine = "lmdb"
+
+# Single node => a single copy. (Multi-node HA would raise this and add peers.)
+replication_factor = 1
+
+# RPC is the inter-node + CLI control channel. Bound to localhost only: this is
+# a one-node cluster and nothing off-box should speak RPC.
+rpc_bind_addr = "127.0.0.1:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "{{ garage_rpc_secret }}"
+
+[s3_api]
+# The S3 endpoint restic talks to. Bound on all interfaces so the control node
+# reaches it over vmbr1; the CT is internal-only, so "all interfaces" is still
+# just the internal network.
+s3_region = "{{ garage_region }}"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage"
+
+[admin]
+api_bind_addr = "127.0.0.1:3903"
+admin_token = "{{ garage_admin_token }}"

@@ -1,0 +1,68 @@
+---
+# Install restic on the control node and schedule a recurring backup of the
+# runtime state to the cluster object store.
+
+- name: Install restic
+  ansible.builtin.apt:
+    name: restic
+    state: present
+    update_cache: true
+
+- name: Create the backup config directory
+  ansible.builtin.file:
+    path: /etc/zai-backup
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# Holds the repo password + S3 credentials; root-only. The wrapper sources it.
+- name: Deploy the restic environment file
+  ansible.builtin.template:
+    src: restic.env.j2
+    dest: /etc/zai-backup/restic.env
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Install the backup wrapper script
+  ansible.builtin.template:
+    src: zai-backup.sh.j2
+    dest: /usr/local/bin/zai-backup.sh
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the backup systemd service
+  ansible.builtin.template:
+    src: zai-backup.service.j2
+    dest: /etc/systemd/system/zai-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload systemd
+
+- name: Install the backup systemd timer
+  ansible.builtin.template:
+    src: zai-backup.timer.j2
+    dest: /etc/systemd/system/zai-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload systemd
+
+- name: Enable the backup timer
+  ansible.builtin.systemd:
+    name: zai-backup.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# Run once now so a misconfiguration (unreachable object store, bad creds,
+# uninitialised repo) fails the play instead of silently waiting for 03:00.
+- name: Run an initial backup
+  ansible.builtin.command:
+    cmd: /usr/local/bin/zai-backup.sh
+  register: backup_initial
+  changed_when: true
+  when: backup_run_now | bool

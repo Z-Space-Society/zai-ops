@@ -1,0 +1,16 @@
+---
+# Configure the control node's backup job. Run from inside CT 100 after the
+# object store (CT 105) exists, so its first backup has somewhere to write:
+#
+#   ansible-playbook provision.yml --limit object-store   # stand up the store
+#   ansible-playbook backup.yml                           # restic + daily timer
+#
+# Installs restic, points it at the Garage bucket, and schedules a daily backup
+# of the control node's runtime state (the vault, /root/.vault_pass, the SSH
+# key, and the inference roster). See docs/roles/backup.md.
+
+- name: Configure control-node backups
+  hosts: control_node
+  become: true
+  roles:
+    - backup

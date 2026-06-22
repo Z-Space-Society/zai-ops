@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# Back up the control node's runtime state to the cluster object store with
+# restic. Idempotent and safe to run by hand: `zai-backup.sh`.
+set -euo pipefail
+
+source /etc/zai-backup/restic.env
+
+# First run: create the repo. `restic cat config` is the cheap "is this repo
+# initialised?" probe — non-zero on a fresh bucket.
+if ! restic cat config >/dev/null 2>&1; then
+  echo "zai-backup: initialising restic repository"
+  restic init
+fi
+
+# Always-present paths, plus any optional path that actually exists (the
+# inference roster may not yet).
+paths=(
+{% for p in backup_paths %}
+  "{{ p }}"
+{% endfor %}
+)
+{% for p in backup_optional_paths %}
+[ -e "{{ p }}" ] && paths+=( "{{ p }}" )
+{% endfor %}
+
+echo "zai-backup: backing up control-node state"
+restic backup --tag zai-control-node "${paths[@]}"
+
+{% if backup_postgres_enabled %}
+# --- Tier 2: service databases (enabled) ----------------------------------
+# pg_dump each database over SSH and stream it straight into restic.
+# (Wired when Postgres / CT 102 is online.)
+{% endif %}
+
+echo "zai-backup: pruning old snapshots"
+restic forget --tag zai-control-node \
+  --keep-daily {{ backup_keep_daily }} \
+  --keep-weekly {{ backup_keep_weekly }} \
+  --keep-monthly {{ backup_keep_monthly }} \
+  --prune
+
+echo "zai-backup: done"

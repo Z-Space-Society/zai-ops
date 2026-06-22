@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Daily ZAI control-node backup
+
+[Timer]
+OnCalendar={{ backup_oncalendar }}
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

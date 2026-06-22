@@ -44,3 +44,16 @@
     mode: "0600"
     owner: root
     group: root
+
+# Home for auto-generated runtime secrets (object-store key, restic repo
+# password, …). The `password` lookup writes them here on first use; creating it
+# 0700 up front guarantees they land root-only. Same posture as /root/.vault_pass
+# — plaintext on CT 100, with host root as the trust boundary. Part of the
+# control node's restored state: see docs/roles/backup.md.
+- name: Ensure the generated-secrets directory exists (root-only)
+  ansible.builtin.file:
+    path: /root/.zai-secrets
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"

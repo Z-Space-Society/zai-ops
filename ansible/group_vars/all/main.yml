@@ -10,3 +10,25 @@ proxmox_node_name: alhambra
 # with a separate `storage:` renders a pathless rootfs that PVE rejects under
 # token auth ("Only root can pass arbitrary filesystem paths").
 ct_rootfs_storage: local-lvm
+
+# --- Auto-generated runtime secrets (no manual step) -----------------------
+# Generated on the control node the first time they're used and persisted under
+# /root/.zai-secrets (root-only); re-runs reuse the same values, so the
+# object-store key and restic repo stay stable. The expressions below are
+# *recipes*, not secrets — the material lives only on CT 100 — so they belong
+# here, not in the vault. Same posture as /root/.vault_pass: host root is the
+# trust boundary.
+#
+# The `password` lookup runs on the control node regardless of a play's target,
+# so the object_store play (CT 105) and the backup play (CT 100) both resolve to
+# the *same* values. `chars=digits,abcdef` gives lowercase hex.
+#
+# These are part of the control node's restored state: a fresh CT 100 would
+# generate *new* values, so restore /root/.zai-secrets (it's in the backup)
+# before re-running Ansible. See docs/roles/backup.md.
+_zai_secrets_dir: /root/.zai-secrets
+garage_rpc_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/garage_rpc_secret chars=digits,abcdef length=64') }}"
+garage_admin_token: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/garage_admin_token chars=digits,abcdef length=64') }}"
+object_store_access_key: "GK{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/object_store_access_key chars=digits,abcdef length=24') }}"
+object_store_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/object_store_secret_key chars=digits,abcdef length=64') }}"
+restic_repo_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/restic_repo_password chars=digits,abcdef length=64') }}"

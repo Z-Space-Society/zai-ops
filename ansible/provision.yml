@@ -74,3 +74,9 @@
   gather_facts: true
   roles:
     - nginx
+
+- name: Configure the object store
+  hosts: object-store
+  gather_facts: true
+  roles:
+    - object_store

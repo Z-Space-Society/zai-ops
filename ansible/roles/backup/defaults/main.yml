@@ -1,0 +1,54 @@
+---
+# Control-node backup, via restic, to the cluster object store.
+#
+# What this protects: the git-ignored runtime state that turns a reflash from
+# "lost cluster" into "repo + restored state". Everything here is small but
+# unreproducible — losing it means re-minting the Proxmox token and re-enrolling
+# nodes by hand.
+
+# Always backed up (these exist after site.yml has configured the control node).
+backup_paths:
+  - /opt/zai-ops/ansible/group_vars/all/vault.yml   # Proxmox API token (encrypted)
+  - /root/.vault_pass                               # vault password (host root = trust boundary)
+  - /root/.ssh/id_ed25519                           # key injected into every service CT
+  - /root/.ssh/id_ed25519.pub
+  - /root/.zai-secrets                              # auto-generated secrets (object-store key, restic pw)
+
+# Backed up only if present — the inference-node roster doesn't exist until the
+# first node is enrolled.
+backup_optional_paths:
+  - /opt/zai-ops/ansible/inventory/local.yml
+
+# restic repository = the Garage S3 endpoint on the object-store CT. The IP is
+# read from inventory (not duplicated here) so it tracks a hosts.yml change.
+backup_s3_endpoint: "http://{{ hostvars['object-store'].ansible_host }}:3900"
+backup_s3_bucket: "zai-backups"
+backup_s3_region: "garage"
+backup_repository: "s3:{{ backup_s3_endpoint }}/{{ backup_s3_bucket }}"
+
+# Snapshot retention applied after each run (restic forget --prune).
+backup_keep_daily: 7
+backup_keep_weekly: 4
+backup_keep_monthly: 6
+
+# When the timer fires (systemd OnCalendar). A randomized delay avoids a thundering
+# herd if more timed jobs are added later.
+backup_oncalendar: "*-*-* 03:00:00"
+
+# Run a backup immediately at the end of the play (validates the whole path
+# end-to-end). Turn off for a config-only apply.
+backup_run_now: true
+
+# --- Tier 2 (service data) — inert until Postgres is online ----------------
+# Flip on once CT 102 exists; the wrapper will pg_dump over SSH into the same
+# restic repo. Left here as the documented seam, not yet wired.
+backup_postgres_enabled: false
+
+# restic_repo_password + object_store_access_key/secret_key are auto-generated in
+# group_vars/all/main.yml (same values Garage imported) — no manual step.
+#
+# NOTE for disaster recovery: the restic repo is encrypted with
+# restic_repo_password, which lives in /root/.zai-secrets *and* inside the repo
+# itself. To restore after losing CT 100 you need that password out-of-band —
+# escrow /root/.zai-secrets off-box, the same way the vault password is backed up
+# at bootstrap. (On-box CT-level restore just needs the dir put back first.)

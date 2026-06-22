@@ -17,6 +17,7 @@ one script, and the stack rebuilds itself from this repo.
 - [Playbooks](#playbooks)
 - [Roles](#roles)
 - [Secrets & trust model](#secrets--trust-model)
+- [Backups](#backups)
 - [Known gotchas](#known-gotchas)
 - [TODO](#todo)
 
@@ -91,6 +92,8 @@ ansible-playbook provision.yml --limit ct101-nginx  # create + configure CT 101
   internal services.
 - **CT 102-104** (postgres, litellm, open-webui) live only on the internal
   network and are reached through nginx.
+- **CT 105** (object-store, Garage) is internal-only too — it's the restic
+  backend the [`backup`](#backups) job writes to, not a user-facing service.
 - **Inference nodes** (salmon, orca, …) are **bare-metal**, *outside* the Proxmox
   host — they run `llama-server` only, behind the gateway, and are configured by
   CT 100 over SSH. See [Inference nodes](#inference-nodes).
@@ -108,6 +111,7 @@ LAN.
 | CT 100 control node  | DHCP          | `10.1.1.100`                      |
 | CT 101 nginx         | DHCP          | `10.1.1.101`                      |
 | CT 102+ services     | —             | `10.1.1.10X` (gw `10.1.1.1`)      |
+| CT 105 object-store  | —             | `10.1.1.105` (gw `10.1.1.1`)      |
 
 - `vmbr1` has **no uplink** — it's a pure virtual switch. The host masquerades
   internal traffic out via `vmbr0`, so internal-only CTs can still `apt`/`pip`.
@@ -185,6 +189,7 @@ later; the repo bakes in neither.
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
 | `inference.yml`       | CT 100 → SSH   | Configure inference nodes (`nvidia_cuda` + `llama_server`) |
 | `add-github-user.yml` | CT 100 (local) + SSH | Create a human admin account from GitHub keys, with sudo, on CT 100 + inference nodes |
+| `backup.yml`          | CT 100 (local) | Install restic + a daily timer backing up control-node runtime state to the object store |
 
 `provision.yml` has two plays: a **create** play (`connection: local`, talks to
 the Proxmox API) and a **configure** play (SSH into the new CT, applies its
@@ -202,6 +207,8 @@ specs aren't filled in yet, so a no-`--limit` run is safe.
 | [`nvidia_cuda`](roles/nvidia_cuda.md)      | inference nodes | NVIDIA driver + CUDA toolkit (bare-metal Debian 13) |
 | [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
+| [`object_store`](roles/object_store.md)    | CT 105     | Single-node Garage (S3-compatible) — the on-box backup target |
+| [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
 
 (More roles — postgres, litellm, open-webui — will be added here as they come
 online.)
@@ -222,8 +229,45 @@ online.)
   injected at create time (key-only login). Inference nodes are reached with the
   same key as a dedicated `ansible` user (see [Inference nodes](#inference-nodes)).
 - The inference-node roster (`ansible/inventory/local.yml`) is git-ignored
-  runtime state, like the vault — back it up with the control node. See
-  [Generic repo vs runtime data](#generic-repo-vs-runtime-data).
+  runtime state, like the vault — backed up with the control node by the
+  [`backup`](#backups) job. See [Generic repo vs runtime data](#generic-repo-vs-runtime-data).
+- The object-store key and restic repo password are **auto-generated** on first
+  run by `password` lookups (see `group_vars/all/main.yml`) and persisted under
+  `/root/.zai-secrets` on CT 100 — same plaintext-on-the-box posture as
+  `/root/.vault_pass`, no manual entry. They're part of restored state: a fresh
+  CT 100 regenerates different values, so restore `/root/.zai-secrets` before
+  re-running Ansible.
+
+---
+
+## Backups
+
+Recovery is meant to be **repo + restored state**: reflash, run `bootstrap.sh`,
+restore the runtime state, re-run Ansible. The [`backup`](roles/backup.md) role
+makes the "restore" half real — it backs up the unreproducible bits (the vault,
+`/root/.vault_pass`, the root SSH key, and `inventory/local.yml`) with
+[restic](https://restic.net/) on a **daily systemd timer**.
+
+The restic repository is the cluster **object store**: a single-node
+[Garage](roles/object_store.md) (S3-compatible) on CT 105, internal-only on
+`vmbr1`. restic encrypts and deduplicates, so the vault password and SSH key are
+safe at rest in the bucket.
+
+```bash
+# Object store is the restic backend, so it comes up first:
+ansible-playbook provision.yml --limit object-store
+ansible-playbook backup.yml
+```
+
+**Tiers.** Tier 1 (control-node state) is live today. Tier 2 (service databases —
+`pg_dump` over SSH into the same repo) is a documented seam in
+[`backup`](roles/backup.md), inert until Postgres/CT 102 exists.
+
+> **Scope caveat — this is not yet disaster recovery.** The object store sits on
+> the *same physical disk* as everything else, so today's backup guards
+> **CT-level** loss (restore a clobbered service container) but **not whole-host**
+> loss (dead disk, stolen box, fire). Closing that gap is a second, **off-site**
+> restic target — a one-line backend addition, tracked in [TODO](#todo).
 
 ---
 
@@ -278,7 +322,8 @@ Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
   tree into runtime data, the way the inference nodes already work
   ([ADR-0001](decisions/0001-repo-stays-generic.md)). Touches `bootstrap.sh`,
   `provision.yml`, and `inventory/hosts.yml`.
-- **Control-node backup mechanism.** Full recovery now depends on the control
-  node's git-ignored runtime state — the vault, `/root/.vault_pass`, and
-  `inventory/local.yml`. Build a documented way to back these up (and restore)
-  so a reflash is genuinely *repo + restored state*.
+- **Off-site backup target.** The [`backup`](#backups) job ships runtime state to
+  the on-box object store (CT 105), which guards CT-level loss but not whole-host
+  loss. Add a second restic target off the box (SFTP/B2/S3) so a dead host or
+  lost site is recoverable — restic's backend is swappable, so this is a second
+  repo in the same wrapper, not a rewrite.

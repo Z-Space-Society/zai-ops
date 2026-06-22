@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# One-time Garage cluster bring-up. Run once (the Ansible task guards it with a
+# `creates:` sentinel), but written defensively so a manual re-run is harmless.
+# Credentials arrive via the environment (set by the task) so they are NOT
+# baked into this on-disk script.
+set -euo pipefail
+
+ACCESS_KEY="${ZAI_OS_ACCESS_KEY:?ZAI_OS_ACCESS_KEY not set}"
+SECRET_KEY="${ZAI_OS_SECRET_KEY:?ZAI_OS_SECRET_KEY not set}"
+
+# --- Storage layout -------------------------------------------------------
+# A fresh node starts with an empty layout (version 0). Assign this node a zone
+# and capacity, then apply as version 1. Skip if a layout is already applied.
+# Node ID is the 64-hex ed25519 public key (Garage may print it as id@addr).
+NODE_ID="$(garage node id 2>/dev/null | grep -oE '[0-9a-f]{64}' | head -1)"
+if [ -z "${NODE_ID}" ]; then
+  echo "garage-init: could not determine node id" >&2
+  exit 1
+fi
+if ! garage layout show | grep -q "{{ garage_zone }}"; then
+  garage layout assign -z "{{ garage_zone }}" -c "{{ garage_capacity }}" "${NODE_ID}"
+  garage layout apply --version 1
+fi
+
+# --- Access key -----------------------------------------------------------
+# Import the vault-pinned credentials (rather than letting Garage generate
+# random ones) so the same key survives a rebuild and restic keeps its repo.
+if ! garage key list | grep -q "{{ object_store_key_name }}"; then
+  garage key import --yes -n "{{ object_store_key_name }}" "${ACCESS_KEY}" "${SECRET_KEY}"
+fi
+
+# --- Bucket + grant -------------------------------------------------------
+if ! garage bucket list | grep -q "{{ object_store_bucket }}"; then
+  garage bucket create "{{ object_store_bucket }}"
+fi
+garage bucket allow --read --write "{{ object_store_bucket }}" --key "{{ object_store_key_name }}"
+
+touch /var/lib/garage/.zai-initialized
+echo "garage: cluster initialised (bucket={{ object_store_bucket }}, key={{ object_store_key_name }})"

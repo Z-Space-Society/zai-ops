@@ -1,0 +1,38 @@
+---
+# Object store (Garage) — service-agnostic role name on purpose: the CT is "the
+# object store", and the implementing daemon could change without renaming the
+# role or the container. Today it runs Garage (Deuxfleurs), a single-binary,
+# S3-compatible store that fits the native-systemd-on-LXC model.
+
+# Pinned release. Garage ships a static musl binary; bump the version and the
+# checksum together. Releases: https://garagehq.deuxfleurs.fr/download/
+# (Garage doesn't publish a sidecar .sha256, so the value below is computed from
+# the pinned binary — recompute with `shasum -a 256 garage` after a bump.)
+garage_version: "v2.3.0"
+garage_arch: "x86_64-unknown-linux-musl"
+garage_binary_url: "https://garagehq.deuxfleurs.fr/_releases/{{ garage_version }}/{{ garage_arch }}/garage"
+# SHA-256 of the binary above. Empty = skip verification (NOT recommended for a
+# box that holds backups). get_url fails the run on a mismatch.
+garage_binary_sha256: "f98d317942bb341151a2775162016bb50cf86b865d0108de03eb5db16e2120cd"
+
+# On-disk layout. Both live under /var/lib/garage so a single StateDirectory in
+# the unit owns them; data_dir is where the restic repo's objects actually land.
+garage_metadata_dir: "/var/lib/garage/meta"
+garage_data_dir: "/var/lib/garage/data"
+
+# Single-node cluster. Capacity advertised to Garage's layout — keep it under
+# the CT's rootfs (ct_disk: 32 GB) with headroom for metadata + the OS. Garage's
+# layout-assign suffixes are decimal (B/KB/MB/GB/TB), so "20GB", not "20G".
+garage_capacity: "20GB"
+garage_zone: "dc1"
+
+# S3 region restic will be told to use. Garage doesn't care about the value, but
+# it must match on both sides, so it's pinned here and consumed by the backup role.
+garage_region: "garage"
+
+# Bucket + access-key name the backup job uses. The key's *credentials* come
+# from the auto-generated secrets in group_vars/all/main.yml (garage_rpc_secret,
+# garage_admin_token, object_store_access_key, object_store_secret_key) — no
+# manual step, and stable across rebuilds so the restic repo survives.
+object_store_bucket: "zai-backups"
+object_store_key_name: "zai-backup"

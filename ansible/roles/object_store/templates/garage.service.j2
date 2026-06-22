@@ -1,0 +1,22 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Garage S3-compatible object store
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=garage
+Group=garage
+ExecStart=/usr/local/bin/garage server
+Restart=on-failure
+RestartSec=5
+
+# Hardening: Garage only needs to write its own state dirs.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ garage_metadata_dir }} {{ garage_data_dir }}
+
+[Install]
+WantedBy=multi-user.target

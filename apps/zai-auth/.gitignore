@@ -1,0 +1,14 @@
+# Local environment — never commit real secrets/config.
+.env
+
+# Private signing keys (PEM). Generated out-of-band; public halves go in JWKS.
+*.pem
+keys/
+
+# Python / Django runtime artifacts.
+.venv/
+__pycache__/
+*.py[cod]
+db.sqlite3
+*.log
+staticfiles/

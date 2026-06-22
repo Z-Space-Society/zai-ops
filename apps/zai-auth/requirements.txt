@@ -1,0 +1,16 @@
+# ZAI Auth — pinned dependencies.
+#
+# Kept deliberately small. The ATProto OAuth flow (DID resolution, PDS discovery,
+# PAR, DPoP, PKCE, private_key_jwt) is implemented directly on top of `requests`
+# + `PyJWT` rather than a turnkey OAuth library: atproto's DID/PDS specifics and
+# its mandated ES256 keys make a transparent, unit-testable implementation easier
+# to reason about than wrapping a generic client. (Spec Open Question #1 —
+# `requests_oauth2client` was the leading candidate; this is the call made at
+# implementation time, documented here so it can be revisited.)
+
+Django>=5.2,<5.3            # LTS; supports Python 3.10–3.13
+psycopg[binary]>=3.2,<4     # Postgres driver (psycopg 3)
+django-environ>=0.11,<0.13  # 12-factor env-driven settings
+PyJWT>=2.9,<3               # JWT sign/verify for DPoP, client assertion, id_token
+cryptography>=43            # EC (P-256) + RSA key handling, backs PyJWT
+requests>=2.32              # HTTP to the PDS / DID resolution

@@ -1,11 +1,14 @@
 """OIDC provider + JWKS routes.
 
-Populated in Task 2 (JWKS) and Task 4 (discovery, authorize, token). Empty for
-now so the project boots with the app installed.
+JWKS lands in Task 2; discovery/authorize/token in Task 4.
 """
 
 from django.urls import path
 
+from . import views
+
 app_name = "oidc"
 
-urlpatterns: list[path] = []
+urlpatterns = [
+    path(".well-known/jwks.json", views.jwks, name="jwks"),
+]

@@ -102,7 +102,7 @@ demoable units and must be built in order (1 → 2 → 3 → 4).
       DID, DID-uniqueness constraint, handle stored in `username`.
 - [x] 1.8 Start `apps/zai-auth/README.md` (run-locally + env-var section).
 
-### [ ] 2.0 Signing key + published client metadata & JWKS
+### [x] 2.0 Signing key + published client metadata & JWKS
 
 #### 2.0 Proof Artifact(s)
 
@@ -117,20 +117,22 @@ demoable units and must be built in order (1 → 2 → 3 → 4).
 
 #### 2.0 Tasks
 
-- [ ] 2.1 Implement `zai_auth/signing.py` to load the RSA private key from the
+- [x] 2.1 Implement `zai_auth/signing.py` to load the private key(s) from the
       configured path/env, failing closed with a clear error if missing.
-- [ ] 2.2 Derive the public JWK (with a stable `kid`) from the private key for
+      *(Two keys: ES256 EC for atproto, RS256 RSA for OIDC — documented deviation
+      from the spec's single-keypair line.)*
+- [x] 2.2 Derive the public JWK (with a stable `kid`) from the private key for
       publication and for `id_token`/client-assertion signing.
-- [ ] 2.3 Implement the JWKS endpoint (in `oidc/views.py`) returning only public
+- [x] 2.3 Implement the JWKS endpoint (in `oidc/views.py`) returning only public
       key(s); wire its URL.
-- [ ] 2.4 Implement the `client-metadata.json` view at the `client_id` URL per the
+- [x] 2.4 Implement the `client-metadata.json` view at the `client_id` URL per the
       ATProto client-metadata schema (`client_id`, `jwks_uri`, `redirect_uris`,
       `scope`, `token_endpoint_auth_method=private_key_jwt`,
       `dpop_bound_access_tokens=true`, …), driven by the configured hostname.
-- [ ] 2.5 Add a dev key-generation helper/management command and document it
+- [x] 2.5 Add a dev key-generation helper/management command and document it
       (key generated out-of-band, never committed); add the key path to
       `.env.example` and `.gitignore`.
-- [ ] 2.6 Tests: JWKS exposes no private fields and matches the configured key;
+- [x] 2.6 Tests: JWKS exposes no private fields and matches the configured key;
       `client-metadata.json` is schema-valid; missing-key startup fails clearly.
 
 ### [ ] 3.0 ATProto OAuth login flow (handle → authenticated session)

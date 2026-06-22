@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signed in — ZAI</title>
+</head>
+<body>
+  <main>
+    <h1>You're signed in</h1>
+    <p>Welcome, <strong>{{ user.username }}</strong>.</p>
+    <dl>
+      <dt>DID</dt><dd><code>{{ user.did }}</code></dd>
+      <dt>PDS</dt><dd><code>{{ user.pds_url }}</code></dd>
+      <dt>Last seen</dt><dd>{{ user.last_seen }}</dd>
+    </dl>
+  </main>
+</body>
+</html>

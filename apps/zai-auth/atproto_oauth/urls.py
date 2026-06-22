@@ -1,8 +1,4 @@
-"""ATProto OAuth client routes.
-
-client-metadata.json lands in Task 2; login + callback in Task 3 (the `callback`
-route is declared now so `config.redirect_uri()` can `reverse()` it).
-"""
+"""ATProto OAuth client routes."""
 
 from django.urls import path
 
@@ -12,5 +8,7 @@ app_name = "atproto_oauth"
 
 urlpatterns = [
     path("client-metadata.json", views.client_metadata, name="client_metadata"),
-    path("oauth/callback", views.client_metadata, name="callback"),  # replaced in Task 3
+    path("login", views.login, name="login"),
+    path("oauth/callback", views.callback, name="callback"),
+    path("", views.landing, name="landing"),
 ]

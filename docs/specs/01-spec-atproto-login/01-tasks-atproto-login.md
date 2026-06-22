@@ -135,7 +135,7 @@ demoable units and must be built in order (1 → 2 → 3 → 4).
 - [x] 2.6 Tests: JWKS exposes no private fields and matches the configured key;
       `client-metadata.json` is schema-valid; missing-key startup fails clearly.
 
-### [ ] 3.0 ATProto OAuth login flow (handle → authenticated session)
+### [x] 3.0 ATProto OAuth login flow (handle → authenticated session)
 
 #### 3.0 Proof Artifact(s)
 
@@ -151,23 +151,23 @@ demoable units and must be built in order (1 → 2 → 3 → 4).
 
 #### 3.0 Tasks
 
-- [ ] 3.1 Implement handle → DID resolution and DID-document fetch in
+- [x] 3.1 Implement handle → DID resolution and DID-document fetch in
       `atproto/client.py`; extract the PDS endpoint.
-- [ ] 3.2 Implement PDS authorization-server discovery
+- [x] 3.2 Implement PDS authorization-server discovery
       (`/.well-known/oauth-authorization-server`).
-- [ ] 3.3 Implement DPoP proof generation (per-request JWT signed with the app
+- [x] 3.3 Implement DPoP proof generation (per-request JWT signed with the app
       key, including server-nonce handling).
-- [ ] 3.4 Implement the PAR request with PKCE (`code_challenge`) + `state`, and
+- [x] 3.4 Implement the PAR request with PKCE (`code_challenge`) + `state`, and
       build the authorize redirect URL.
-- [ ] 3.5 Implement the login view (handle form) and the callback view: validate
+- [x] 3.5 Implement the login view (handle form) and the callback view: validate
       `state`, then do the DPoP-bound token exchange with the `private_key_jwt`
       client assertion.
-- [ ] 3.6 On callback success, create-or-update the `User` (key on DID; refresh
+- [x] 3.6 On callback success, create-or-update the `User` (key on DID; refresh
       `username`/`pds_url`/`last_seen`), establish the Django session, and store
       the refresh token + DPoP key material **server-side**.
-- [ ] 3.7 Add the login template + authenticated landing page and handle error
+- [x] 3.7 Add the login template + authenticated landing page and handle error
       states (unresolvable handle, denied authorization).
-- [ ] 3.8 Tests: callback success path (mocked PDS, redacted tokens) and
+- [x] 3.8 Tests: callback success path (mocked PDS, redacted tokens) and
       `state`-mismatch rejection; create-vs-update user logic.
 
 ### [ ] 4.0 OIDC provider endpoint (id_token for Open WebUI)

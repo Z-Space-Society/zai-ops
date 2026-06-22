@@ -94,6 +94,16 @@ Ansible decrypts it automatically via `/root/.vault_pass`. To view or edit:
 ansible-vault edit group_vars/all/vault.yml
 ```
 
+The zai-auth signing keys (EC P-256/ES256 for ATProto, RSA/RS256 for the OIDC
+id_token) live in a git-ignored `keys/` as PKCS#8 PEM at mode `0600`, and are
+never committed — only the public halves are exposed, served at
+`/.well-known/jwks.json`. In production they're provisioned out-of-band; for
+local development the `generate_keys` management command mints a fresh pair:
+
+```bash
+python manage.py generate_keys   # writes EC + RSA keys to keys/, mode 0600
+```
+
 ## Documentation
 
 Full reference docs live in [`docs/`](docs/README.md) — the bootstrap process,

@@ -5,16 +5,15 @@ login, persist it server-side (the tokens are bound to it), and use it to sign a
 fresh DPoP proof for every request to the PDS / authorization server.
 """
 
-import base64
 import hashlib
-import json
 import time
 import uuid
 
 import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from jwt.algorithms import ECAlgorithm
+
+from zai_auth import signing
 
 
 def generate_key() -> ec.EllipticCurvePrivateKey:
@@ -32,16 +31,6 @@ def key_to_pem(key: ec.EllipticCurvePrivateKey) -> str:
 
 def key_from_pem(pem: str) -> ec.EllipticCurvePrivateKey:
     return serialization.load_pem_private_key(pem.encode(), password=None)
-
-
-def _public_jwk(key: ec.EllipticCurvePrivateKey) -> dict:
-    full = json.loads(ECAlgorithm.to_jwk(key.public_key()))
-    # The DPoP header carries only the public EC members.
-    return {"kty": "EC", "crv": full["crv"], "x": full["x"], "y": full["y"]}
-
-
-def _b64url(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
 def make_proof(
@@ -66,10 +55,12 @@ def make_proof(
     if nonce:
         payload["nonce"] = nonce
     if access_token:
-        payload["ath"] = _b64url(hashlib.sha256(access_token.encode()).digest())
+        payload["ath"] = signing.b64url(
+            hashlib.sha256(access_token.encode()).digest()
+        )
     return jwt.encode(
         payload,
         key,
         algorithm="ES256",
-        headers={"typ": "dpop+jwt", "jwk": _public_jwk(key)},
+        headers={"typ": "dpop+jwt", "jwk": signing.ec_public_jwk(key.public_key())},
     )

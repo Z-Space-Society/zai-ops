@@ -6,14 +6,12 @@ tested with mocked HTTP. The DPoP dance (a 401 with `use_dpop_nonce` + a
 `DPoP-Nonce` header, retried once) is handled in `_post_with_dpop`.
 """
 
-import base64
 import hashlib
 import secrets
 import time
 import uuid
 
 import requests
-from cryptography.hazmat.primitives.asymmetric import ec
 
 from . import config, dpop
 from zai_auth import signing
@@ -79,7 +77,10 @@ def pds_endpoint_from_doc(doc: dict) -> str:
             svc.get("id") in ("#atproto_pds", f"{doc.get('id', '')}#atproto_pds")
             or svc.get("type") == "AtprotoPersonalDataServer"
         ):
-            return svc["serviceEndpoint"].rstrip("/")
+            endpoint = svc.get("serviceEndpoint")
+            if not endpoint:
+                raise OAuthError("PDS service entry has no serviceEndpoint")
+            return endpoint.rstrip("/")
     raise OAuthError("no atproto PDS endpoint in DID document")
 
 
@@ -117,8 +118,7 @@ def discover_auth_server(pds_url: str) -> dict:
 def pkce_pair() -> tuple[str, str]:
     """Return (code_verifier, code_challenge) for the S256 method."""
     verifier = secrets.token_urlsafe(64)
-    digest = hashlib.sha256(verifier.encode()).digest()
-    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    challenge = signing.b64url(hashlib.sha256(verifier.encode()).digest())
     return verifier, challenge
 
 
@@ -182,7 +182,11 @@ def pushed_authorization_request(
     )
     if not resp.ok:
         raise OAuthError(f"PAR failed ({resp.status_code}): {resp.text[:200]}")
-    return resp.json()["request_uri"], nonce
+    try:
+        request_uri = resp.json()["request_uri"]
+    except (ValueError, KeyError) as exc:
+        raise OAuthError("PAR response missing request_uri") from exc
+    return request_uri, nonce
 
 
 def authorization_url(meta, request_uri: str) -> str:

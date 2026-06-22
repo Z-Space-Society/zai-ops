@@ -55,7 +55,7 @@ class CallbackViewTests(TestCase):
         )
         _seed_pending(self.client, "state1")
         resp = self.client.get(
-            reverse("atproto_oauth:callback"), {"state": "state1", "code": "code"}
+            reverse("atproto_oauth:callback"), {"state": "state1", "code": "code", "iss": "https://auth.example"}
         )
         self.assertRedirects(
             resp, reverse("atproto_oauth:landing"), fetch_redirect_response=False
@@ -80,12 +80,33 @@ class CallbackViewTests(TestCase):
         )
         _seed_pending(self.client, "state2", handle="new.handle")
         self.client.get(
-            reverse("atproto_oauth:callback"), {"state": "state2", "code": "code"}
+            reverse("atproto_oauth:callback"), {"state": "state2", "code": "code", "iss": "https://auth.example"}
         )
         user = User.objects.get(did=DID)
         self.assertEqual(user.username, "new.handle")  # refreshed
         self.assertIsNotNone(user.last_seen)
         self.assertEqual(User.objects.filter(did=DID).count(), 1)  # no duplicate
+
+    def test_issuer_mismatch_is_rejected(self):
+        _seed_pending(self.client, "state_iss")
+        resp = self.client.get(
+            reverse("atproto_oauth:callback"),
+            {"state": "state_iss", "code": "code", "iss": "https://evil.example"},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(User.objects.filter(did=DID).exists())
+
+    @patch("atproto_oauth.views.client.exchange_code")
+    def test_missing_sub_is_rejected(self, mock_exchange):
+        # Token response without `sub` must not fall back to the resolved DID.
+        mock_exchange.return_value = ({"access_token": "AT"}, "n2")
+        _seed_pending(self.client, "state_nosub")
+        resp = self.client.get(
+            reverse("atproto_oauth:callback"),
+            {"state": "state_nosub", "code": "code", "iss": "https://auth.example"},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(User.objects.filter(did=DID).exists())
 
     @patch("atproto_oauth.views.client.exchange_code")
     def test_did_mismatch_is_rejected(self, mock_exchange):
@@ -95,7 +116,7 @@ class CallbackViewTests(TestCase):
         )
         _seed_pending(self.client, "state3", did=DID)
         resp = self.client.get(
-            reverse("atproto_oauth:callback"), {"state": "state3", "code": "code"}
+            reverse("atproto_oauth:callback"), {"state": "state3", "code": "code", "iss": "https://auth.example"}
         )
         self.assertEqual(resp.status_code, 400)
         self.assertFalse(User.objects.filter(did=DID).exists())

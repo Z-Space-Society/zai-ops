@@ -91,6 +91,12 @@ def callback(request):
             {"error": f"Authorization denied: {request.GET.get('error')}"},
         )
 
+    # RFC 9207 mix-up defense: the authorization response must carry the exact
+    # issuer we started the flow with, else a code could be redeemed against a
+    # different authorization server.
+    if request.GET.get("iss") != pending["issuer"]:
+        return HttpResponseBadRequest("Issuer mismatch in authorization response.")
+
     code = request.GET.get("code")
     if not code:
         return HttpResponseBadRequest("Missing authorization code.")
@@ -111,9 +117,10 @@ def callback(request):
     except client.OAuthError as exc:
         return render(request, "atproto_oauth/login.html", {"error": str(exc)})
 
-    # The token's `sub` is the authenticated DID; it must match who we resolved.
-    did = token.get("sub") or pending["did"]
-    if pending["did"] and did != pending["did"]:
+    # The token's `sub` is the PDS-authenticated DID — authoritative and
+    # required. Never fall back to the unverified pre-resolved DID.
+    did = token.get("sub")
+    if not did or did != pending["did"]:
         return HttpResponseBadRequest("DID mismatch in token response.")
 
     user = _upsert_member(

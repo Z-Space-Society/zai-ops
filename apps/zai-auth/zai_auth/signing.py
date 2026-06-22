@@ -28,6 +28,17 @@ from django.core.exceptions import ImproperlyConfigured
 from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 
 
+def b64url(raw: bytes) -> str:
+    """URL-safe base64 without padding (the JOSE encoding)."""
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def ec_public_jwk(public_key) -> dict:
+    """Minimal public EC JWK (`kty`/`crv`/`x`/`y`) — shared by JWKS + DPoP."""
+    full = json.loads(ECAlgorithm.to_jwk(public_key))
+    return {"kty": "EC", "crv": full["crv"], "x": full["x"], "y": full["y"]}
+
+
 @lru_cache(maxsize=8)
 def _load_private_key(path: str, setting_name: str):
     """Load a PEM private key from `path`, failing closed if absent.
@@ -69,8 +80,7 @@ def _jwk_thumbprint(jwk: dict) -> str:
     else:  # pragma: no cover - we only mint EC/RSA
         raise ValueError(f"unsupported kty: {jwk['kty']}")
     canonical = json.dumps(members, separators=(",", ":"), sort_keys=True)
-    digest = hashlib.sha256(canonical.encode()).digest()
-    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return b64url(hashlib.sha256(canonical.encode()).digest())
 
 
 def _public_jwk(private_key, alg: str) -> dict:

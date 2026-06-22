@@ -9,11 +9,11 @@
 """
 
 import base64
+import hmac
 from urllib.parse import urlencode
 
 from django.http import JsonResponse
 from django.shortcuts import redirect
-from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
@@ -98,7 +98,10 @@ def token(request):
     from django.conf import settings
 
     cid, secret = _client_credentials(request)
-    if cid != settings.OIDC_CLIENT_ID or secret != settings.OIDC_CLIENT_SECRET:
+    # Constant-time comparison so the token endpoint doesn't leak the secret.
+    cid_ok = hmac.compare_digest(cid or "", settings.OIDC_CLIENT_ID)
+    secret_ok = hmac.compare_digest(secret or "", settings.OIDC_CLIENT_SECRET)
+    if not (cid_ok and secret_ok):
         return _error("invalid_client", "client authentication failed", status=401)
 
     if request.POST.get("grant_type") != "authorization_code":
@@ -117,9 +120,13 @@ def token(request):
     if code.client_id != cid or code.redirect_uri != redirect_uri:
         return _error("invalid_grant", "code/client/redirect mismatch")
 
-    # Single-use: burn the code before issuing the token.
-    code.used = True
-    code.save(update_fields=["used"])
+    # Single-use, race-safe: only the request that flips used False→True wins,
+    # so concurrent redemptions of the same code can't both mint a token.
+    claimed = OidcAuthCode.objects.filter(code=code_value, used=False).update(
+        used=True
+    )
+    if not claimed:
+        return _error("invalid_grant", "code already used")
 
     id_token = provider.mint_id_token(
         code.user, client_id=cid, nonce=code.nonce

@@ -1,8 +1,9 @@
 # zai-ops
 
-Infrastructure-as-code for the Z-Space AI Cluster (ZAI) — a local-first
-shared AI infrastructure deployment at Z-Space, a coworking space in
-Vancouver, BC.
+The control node for the Z-Space AI Cluster (ZAI) — both the
+infrastructure-as-code that builds a cluster and the control app that operates
+it. A local-first shared AI infrastructure deployment at Z-Space, a coworking
+space in Vancouver, BC.
 
 The goal of this repo is full reproducibility: flash Proxmox onto any
 compatible host, run the bootstrap script, and the full stack rebuilds
@@ -104,11 +105,13 @@ architecture, networking, and a note for every role.
   systemd
 - Inference nodes run llama-server only, nothing else
 - The LiteLLM gateway owns all routing and policy
-- This repo is the single source of truth for all infrastructure
+- This repo is the control node: the single source of truth for the cluster's
+  infrastructure and its operating control app
 
 ## Structure
 
 - `bootstrap.sh` — Host-level script to create CT 100 (the one host entry point)
+- `apps/zai-auth/` — Django control app; ATProto-handle login (OIDC for Open WebUI) today, dashboard + Proxmox/Ansible control to come
 - `ansible/`
   - `site.yml` — configures the control node (CT 100)
   - `verify-proxmox.yml` — checks the API token authenticates

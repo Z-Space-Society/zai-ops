@@ -111,6 +111,11 @@ curl -H 'Host: chat.example.com' http://10.1.1.<ctid>/
   with `Sub-process /usr/bin/sqv returned an error code`. `gpgv` still verifies the
   signature against the pinned key but accepts SHA1 self-sigs — authenticity is kept,
   not disabled. This is independent of the bookworm suite pin (same key either way).
+  **`gpgv` is installed first, as its own task,** because Debian 13 ships none by
+  default (sqv replaced it); without that, the override breaks *every* repo —
+  including the Debian repos needed to install gpgv (`Cannot find gpgv`). The
+  install runs before the override and before the OpenResty repo, so it bootstraps
+  under sqv against Debian's own (modern-key) repos. Task order is load-bearing.
 - NPM without Docker is **unsupported upstream**; `npm-build.sh` follows the
   community dockerless assembly. Treat a `npm_version` bump as a change to test on
   a real CT, not a no-op.

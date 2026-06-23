@@ -353,7 +353,10 @@ Lessons on third-party apt repos under **Debian 13** (any CT):
   returned an error code … not signed`, even though the signature is valid. Fix:
   drop an apt.conf so apt uses the classic `gpgv` verifier
   (`APT::Key::gpgvcommand "gpgv";`) — it checks the same signature but accepts
-  SHA1 self-sigs, so authenticity is kept rather than disabled. See the
+  SHA1 self-sigs, so authenticity is kept rather than disabled. **Install `gpgv`
+  first** (Debian 13 ships none — sqv replaced it), in its own task before the
+  override and before the third-party repo, or the override breaks every repo
+  including the ones needed to install gpgv (`Cannot find gpgv`). See the
   [nginx-proxy-manager](roles/nginx-proxy-manager.md) role.
 
 Hard-won lessons on the bare-metal **inference nodes** (Debian 13 + NVIDIA):

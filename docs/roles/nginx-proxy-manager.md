@@ -90,10 +90,12 @@ curl -H 'Host: chat.example.com' http://10.1.1.<ctid>/
 
 ## Notes
 
-- **OpenResty apt repo is per Debian codename.** `bookworm` is known-good; a newer
-  codename (e.g. `trixie`) installs only if OpenResty has published for it. If the
-  `apt install openresty` step fails, that's the cause — pin the CT template to a
-  published codename or build OpenResty from source.
+- **OpenResty apt suite is pinned to `bookworm`** (`npm_openresty_suite`).
+  OpenResty has no Debian 13/trixie repo yet ([openresty#1054](https://github.com/openresty/openresty/issues/1054)),
+  so the live codename can't be used. bookworm installs fine on trixie because
+  OpenResty bundles its own PCRE/OpenSSL (`openresty-pcre`/`openresty-openssl3`)
+  and doesn't pull the EOL `libpcre3` that trixie removed. Bump the var to `trixie`
+  once upstream publishes it.
 - NPM without Docker is **unsupported upstream**; `npm-build.sh` follows the
   community dockerless assembly. Treat a `npm_version` bump as a change to test on
   a real CT, not a no-op.

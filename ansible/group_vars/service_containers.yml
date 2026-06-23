@@ -1,0 +1,17 @@
+---
+# Group vars for every service container. These DERIVE per-host facts from the
+# one piece of runtime data the assign action records — `ctid` — so the committed
+# blueprint (inventory/hosts.yml) stays number-free and nothing can drift.
+#
+# `ctid` is supplied per host by the git-ignored inventory/local.yml, written by
+# `zai-assign <service> <ctid>` (ansible/assign.yml). A service with no assignment
+# has no ctid, so these templates stay unresolved until one exists — provision.yml
+# asserts ctid is present before it tries to create the CT.
+
+# Internal IP, by construction: CTID 104 ⇒ 10.1.1.104 everywhere. The control node
+# is deliberately exempt from this (see inventory/hosts.yml) — it is pinned to
+# 10.1.1.100 by bootstrap.sh regardless of its CTID.
+ansible_host: "10.1.1.{{ ctid }}"
+
+# The container's OS hostname is just its logical name — no number baked in.
+ct_hostname: "{{ inventory_hostname }}"

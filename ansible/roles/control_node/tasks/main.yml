@@ -45,6 +45,17 @@
     owner: root
     group: root
 
+# The CTID allocator's CLI. Sugar over `ansible-playbook assign.yml` so the
+# operator runs `zai-assign nginx 104` instead of the full invocation; the repo
+# checkout lives at /opt/zai-ops, which the script hardcodes.
+- name: Install the zai-assign CLI
+  ansible.builtin.copy:
+    src: zai-assign
+    dest: /usr/local/bin/zai-assign
+    owner: root
+    group: root
+    mode: "0755"
+
 # Home for auto-generated runtime secrets (object-store key, restic repo
 # password, …). The `password` lookup writes them here on first use; creating it
 # 0700 up front guarantees they land root-only. Same posture as /root/.vault_pass

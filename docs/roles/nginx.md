@@ -1,14 +1,14 @@
 # Role: `nginx`
 
-Installs and configures nginx as the ZAI cluster's reverse proxy (CT 101).
+Installs and configures nginx as the ZAI cluster's reverse proxy.
 
 - **Source:** [`ansible/roles/nginx/`](../../ansible/roles/nginx/)
-- **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure play, `hosts: ct101-nginx`)
-- **Target:** CT 101, over SSH
+- **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure play, `hosts: nginx`)
+- **Target:** the `nginx` service CT (whatever CTID it was assigned), over SSH
 
 ## Purpose
 
-CT 101 is the only LAN-facing container. This role installs nginx and renders a
+nginx is the only LAN-facing container. This role installs nginx and renders a
 reverse-proxy config that fronts the internal services (litellm, open-webui).
 Because those upstreams don't exist yet, the role ships a working default that
 serves a health endpoint, so the install is verifiable on its own.
@@ -74,5 +74,5 @@ ssh root@10.1.1.101 'curl -s localhost/healthz'   # → ok
   by extending `nginx_vhosts`, not by hand-editing on the box.
 - `nginx -t` runs as an explicit task (not just in the handler) so config errors
   surface during the play.
-- For how CT 101 is created and reached, see the
+- For how the nginx CT is assigned a CTID, created, and reached, see the
   [main docs](../README.md#networking) and [`provision.yml`](../../ansible/provision.yml).

@@ -109,7 +109,7 @@ restic restore latest --target /tmp/restore
 ## Notes
 
 - Secrets live only in `restic.env` (`0600`) and the vault — never in the repo.
-- **Tier 2 (service data)** — once Postgres/CT 102 is online, set
+- **Tier 2 (service data)** — once the Postgres CT is online, set
   `backup_postgres_enabled: true` and wire the `pg_dump`-over-SSH block in
   `zai-backup.sh.j2`; it streams into the *same* restic repo.
 - For the trust model behind backing up the vault password, see the

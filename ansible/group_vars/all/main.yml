@@ -5,6 +5,15 @@
 # principle. Override per deployment.
 proxmox_node_name: alhambra
 
+# CTIDs the assign action (ansible/assign.yml) refuses to hand out — the safety
+# rail against stomping live or externally-managed containers. Default is just
+# the control node's pinned target (100). On a BROWNFIELD host, widen this to
+# every live CTID before assigning anything, e.g. on yvette:
+#   reserved_ctids: [100, 101, 102, 103, 104, 199]
+# (100 = eventual control-node target, 101-104 = live services, 199 = the current
+# control node). With these set, no assign or provision run can target them.
+reserved_ctids: [100]
+
 # Storage for service-CT root filesystems. Combined with each CT's ct_disk size
 # into the `disk: <storage>:<size>` form the proxmox module needs — a bare size
 # with a separate `storage:` renders a pathless rootfs that PVE rejects under

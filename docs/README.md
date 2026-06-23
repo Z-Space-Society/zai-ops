@@ -13,6 +13,7 @@ one script, and the stack rebuilds itself from this repo.
 - [Architecture](#architecture)
 - [Networking](#networking)
 - [Generic repo vs runtime data](#generic-repo-vs-runtime-data)
+- [Service CTID assignment](#service-ctid-assignment)
 - [Inference nodes](#inference-nodes)
 - [Playbooks](#playbooks)
 - [Roles](#roles)
@@ -62,9 +63,10 @@ After it finishes, continue inside the control node:
 ```bash
 pct enter 100
 cd /opt/zai-ops/ansible
-ansible-playbook site.yml                           # configure CT 100
-ansible-playbook verify-proxmox.yml                 # confirm the API token
-ansible-playbook provision.yml --limit ct101-nginx  # create + configure CT 101
+ansible-playbook site.yml                       # configure the control node
+ansible-playbook verify-proxmox.yml             # confirm the API token
+zai-assign nginx 101                            # assign nginx its CTID (10.1.1.101)
+ansible-playbook provision.yml --limit nginx    # create + configure nginx
 ```
 
 ---
@@ -118,6 +120,10 @@ LAN.
 - Service CTs get **static** internal IPs, so CT 100 always knows where to SSH
   (no DHCP guessing).
 - nginx is **dual-homed** (LAN + internal); the rest are internal-only.
+- The specific numbers above (101–105) are this cluster's **assigned** layout, not
+  committed identity — each is bound with `zai-assign` and could differ on another
+  host. What's fixed is the `10.1.1.{ctid}` convention. See
+  [Service CTID assignment](#service-ctid-assignment).
 
 ---
 
@@ -128,20 +134,64 @@ for COAI). So **this-cluster facts stay out of the committed tree** and live onl
 as **runtime data on the control node**, git-ignored — the same pattern the vault
 already uses for the API token.
 
-- The repo holds **generic** automation (roles, playbooks) and **blueprint
-  constants** every cluster reuses — the `10.1.1.0/24` net, the CT-ID layout.
-- This-cluster specifics — *which inference nodes exist, their IPs, their models*
-  — live in `ansible/inventory/local.yml`, written by
-  [`enroll-inference-node.yml`](#playbooks) and never committed.
+- The repo holds **generic** automation (roles, playbooks) and the **blueprint
+  constants** every cluster reuses — the `10.1.1.0/24` net and the
+  `10.1.1.{ctid}` addressing *convention* (but not the specific numbers).
+- This-cluster specifics — *which inference nodes exist, and which CTID each
+  service got* — live in `ansible/inventory/local.yml`, written by
+  [`enroll-inference-node.yml`](#playbooks) (inference roster) and
+  [`assign.yml`](#service-ctid-assignment) (`zai-assign`, service CTIDs), and
+  never committed. The committed `hosts.yml` carries **no container numbers** at
+  all — services are keyed by logical name (`nginx`, `litellm`, …) and their IP
+  is *derived* from the assigned CTID, so there's no second field to drift.
 - The inventory is loaded as a **directory** (`inventory/`), so the committed
-  blueprint (`hosts.yml`, with an empty `inference_nodes` group) and the runtime
-  `local.yml` merge automatically.
+  blueprint (`hosts.yml`, with an empty `inference_nodes` group and number-free
+  service blueprint) and the runtime `local.yml` merge automatically.
 
-Because the roster isn't in the repo, a control-node rebuild is **repo +
-restored runtime data** — back up `local.yml` alongside the vault. The decision
-is pinned in [ADR-0001](decisions/0001-repo-stays-generic.md). The existing
-service-CT IPs and `proxmox_node_name` still live in the committed inventory and
-are slated for the same treatment — see [TODO](#todo).
+Because neither the roster nor the CTID assignments live in the repo, a
+control-node rebuild is **repo + restored runtime data** — back up `local.yml`
+alongside the vault. The decision is pinned in
+[ADR-0001](decisions/0001-repo-stays-generic.md). Only `proxmox_node_name` still
+lives in the committed inventory and is slated for the same treatment — see
+[TODO](#todo).
+
+---
+
+## Service CTID assignment
+
+The committed blueprint names services generically (`nginx`, `litellm`, …) and
+carries **no container numbers**. The operator binds a service to a container ID
+once, with the `zai-assign` CLI on the control node:
+
+```bash
+zai-assign nginx 104                  # nginx is now CT 104 at 10.1.1.104, cluster-wide
+zai-assign nginx 105 -e reassign=true # move it (reassign guards against accidental clobber)
+```
+
+`zai-assign` is thin sugar over [`assign.yml`](#playbooks); the playbook is the
+engine. It validates (CTID in range 100–999, not in
+[`reserved_ctids`](#service-ctid-assignment), not already held by another service,
+the service exists in the blueprint, and not already assigned unless
+`reassign=true`), then **read-modify-writes** the whole `inventory/local.yml`
+structure so every other assignment — and the inference-node roster that shares
+the file — survives. Assigning a service the CTID it already has is an idempotent
+no-op.
+
+From then on the merged inventory resolves the service to `ctid` and a derived
+`ansible_host` of `10.1.1.{ctid}` for every playbook; `provision.yml --limit
+<service>` creates exactly that CT and **fails fast** if the service was never
+assigned.
+
+**`reserved_ctids`** (in [`group_vars/all/main.yml`](../ansible/group_vars/all/main.yml))
+is the safety rail: a per-cluster list the allocator refuses to assign over.
+Default is `[100]` (the control node). On a **brownfield** host, widen it to every
+live CTID *before* assigning anything, so no run can stomp a container the cluster
+didn't create.
+
+> **Control-node exception.** The `10.1.1.{ctid}` convention is for **service
+> containers only**. The control node's internal IP is pinned to `10.1.1.100` by
+> `bootstrap.sh` regardless of its CTID (which may be 199 on a brownfield box), so
+> it carries no `ctid` in the inventory and is never assigned.
 
 ---
 
@@ -185,6 +235,7 @@ later; the repo bakes in neither.
 | --------------------- | -------------- | --------------------------------------------------- |
 | `site.yml`            | CT 100 (local) | Configure the control node (applies `control_node`) |
 | `verify-proxmox.yml`  | CT 100 (local) | Read-only check that the API token authenticates    |
+| `assign.yml`          | CT 100 (local) | Bind a service to a CTID in runtime inventory (the `zai-assign` engine) |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
 | `inference.yml`       | CT 100 → SSH   | Configure inference nodes (`nvidia_cuda` + `llama_server`) |
@@ -203,11 +254,11 @@ specs aren't filled in yet, so a no-`--limit` run is safe.
 | Role                                       | Applied to | What it does                                            |
 | ------------------------------------------ | ---------- | ------------------------------------------------------- |
 | [`control_node`](roles/control_node.md)    | CT 100     | Base config for the Ansible control node                |
-| [`nginx`](roles/nginx.md)                  | CT 101     | Install + configure nginx as the cluster reverse proxy  |
+| [`nginx`](roles/nginx.md)                  | `nginx`    | Install + configure nginx as the cluster reverse proxy  |
 | [`nvidia_cuda`](roles/nvidia_cuda.md)      | inference nodes | NVIDIA driver + CUDA toolkit (bare-metal Debian 13) |
 | [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
-| [`object_store`](roles/object_store.md)    | CT 105     | Single-node Garage (S3-compatible) — the on-box backup target |
+| [`object_store`](roles/object_store.md)    | `object-store` | Single-node Garage (S3-compatible) — the on-box backup target |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
 
 (More roles — postgres, litellm, open-webui — will be added here as they come
@@ -249,19 +300,20 @@ makes the "restore" half real — it backs up the unreproducible bits (the vault
 [restic](https://restic.net/) on a **daily systemd timer**.
 
 The restic repository is the cluster **object store**: a single-node
-[Garage](roles/object_store.md) (S3-compatible) on CT 105, internal-only on
-`vmbr1`. restic encrypts and deduplicates, so the vault password and SSH key are
-safe at rest in the bucket.
+[Garage](roles/object_store.md) (S3-compatible) in the `object-store` CT,
+internal-only on `vmbr1`. restic encrypts and deduplicates, so the vault password
+and SSH key are safe at rest in the bucket.
 
 ```bash
-# Object store is the restic backend, so it comes up first:
+# Object store is the restic backend, so it's assigned and comes up first:
+zai-assign object-store 105
 ansible-playbook provision.yml --limit object-store
 ansible-playbook backup.yml
 ```
 
 **Tiers.** Tier 1 (control-node state) is live today. Tier 2 (service databases —
 `pg_dump` over SSH into the same repo) is a documented seam in
-[`backup`](roles/backup.md), inert until Postgres/CT 102 exists.
+[`backup`](roles/backup.md), inert until the Postgres CT exists.
 
 > **Scope caveat — this is not yet disaster recovery.** The object store sits on
 > the *same physical disk* as everything else, so today's backup guards
@@ -274,7 +326,7 @@ ansible-playbook backup.yml
 ## Known gotchas
 
 Hard-won lessons with `community.proxmox.proxmox` (the version bundled with
-Debian 13's `ansible` 12). These will recur on CT 102-104:
+Debian 13's `ansible` 12). These will recur on the remaining service CTs:
 
 - **Disk must use the `storage:size` form.** Use `disk: "local-lvm:8"`, *not*
   `disk: 8` with a separate `storage:` — the latter renders a pathless rootfs
@@ -317,11 +369,12 @@ Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
 
 ## TODO
 
-- **Retrofit the committed inventory into the generic/runtime split.** Move the
-  service-CT internal IPs and `proxmox_node_name: alhambra` out of the committed
-  tree into runtime data, the way the inference nodes already work
-  ([ADR-0001](decisions/0001-repo-stays-generic.md)). Touches `bootstrap.sh`,
-  `provision.yml`, and `inventory/hosts.yml`.
+- **Move `proxmox_node_name` into runtime data.** The service-CT numbers and IPs
+  are now runtime ([Service CTID assignment](#service-ctid-assignment)), so the
+  committed tree is number-free — but `proxmox_node_name: alhambra` still pins one
+  this-cluster fact in `group_vars/all/main.yml`. Finish the
+  [ADR-0001](decisions/0001-repo-stays-generic.md) split by sourcing it from
+  runtime data the way the CTID assignments now work.
 - **Off-site backup target.** The [`backup`](#backups) job ships runtime state to
   the on-box object store (CT 105), which guards CT-level loss but not whole-host
   loss. Add a second restic target off the box (SFTP/B2/S3) so a dead host or

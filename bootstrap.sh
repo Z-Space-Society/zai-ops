@@ -230,9 +230,10 @@ echo "Next, configure the control node and build the service containers:"
 echo
 echo "  pct enter $CTID"
 echo "  cd /opt/zai-ops/ansible"
-echo "  ansible-playbook site.yml                           # configure CT 100"
+echo "  ansible-playbook site.yml                           # configure the control node"
 echo "  ansible-playbook verify-proxmox.yml                 # confirm API token"
-echo "  ansible-playbook provision.yml --limit ct101-nginx  # create + configure CT 101"
+echo "  zai-assign nginx 101                                # assign nginx its CTID"
+echo "  ansible-playbook provision.yml --limit nginx        # create + configure nginx"
 
 # --- Vault password — printed LAST so it isn't scrolled away ---
 if [[ "$PROVISIONED" -eq 1 ]]; then

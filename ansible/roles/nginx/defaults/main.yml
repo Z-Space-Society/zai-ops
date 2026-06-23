@@ -1,10 +1,11 @@
 ---
 # Reverse-proxy vhosts. Each entry renders an upstream + a server block:
 #   - server_name: chat.example.com
-#     upstream_host: 10.1.1.104
+#     upstream_host: "{{ hostvars['open-webui'].ansible_host }}"
 #     upstream_port: 8080
-# Empty by default — the upstreams (litellm 103, open-webui 104) don't exist
-# yet. With no vhosts the role still produces a working nginx serving the
+# Reference upstreams by their derived ansible_host (10.1.1.<assigned-ctid>), not
+# a pinned number. Empty by default — the upstreams (litellm, open-webui) don't
+# exist yet. With no vhosts the role still produces a working nginx serving the
 # health endpoint below, so the install is verifiable on its own.
 nginx_vhosts: []
 

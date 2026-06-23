@@ -39,12 +39,16 @@ itself from this repo.
    ansible-playbook verify-proxmox.yml  # confirm the API token authenticates
    ```
 
-4. Build the service containers. `provision.yml` creates each CT over the
-   Proxmox API and then configures it over SSH. Drive one at a time with
+4. Build the service containers. First **assign** each service a container ID
+   (`zai-assign <service> <ctid>`); the number is recorded in git-ignored runtime
+   state, so the committed blueprint stays number-free and the same repo can stand
+   up a cluster on whatever CTIDs are free. Then `provision.yml` creates the CT
+   over the Proxmox API and configures it over SSH. Drive one at a time with
    `--limit` while the stack comes online:
 
    ```bash
-   ansible-playbook provision.yml --limit ct101-nginx   # create + configure CT 101
+   zai-assign nginx 101                          # nginx → CTID 101 (10.1.1.101)
+   ansible-playbook provision.yml --limit nginx  # create + configure it
    ```
 
    From here Ansible uses the Proxmox API to create and configure all

@@ -1,18 +1,22 @@
 ---
 # Create the service containers over the Proxmox API, then configure them.
-# Run from inside CT 100 after site.yml (which generates the SSH key injected
-# below). Until 102-104 are specced, drive a single CT explicitly:
+# Run from inside the control node after site.yml (which generates the SSH key
+# injected below). A service must be assigned a CTID first; then drive it by its
+# logical name:
 #
-#   ansible-playbook provision.yml --limit ct101-nginx
+#   zai-assign nginx 101                 # record nginx → CTID 101 (10.1.1.101)
+#   ansible-playbook provision.yml --limit nginx
 #
-# The create play runs ON the control node (connection: local) and talks to the
-# Proxmox API with the same vault token verify-proxmox.yml uses — token auth is
-# sufficient for a plain managed-storage LXC create (no bind mounts). The
-# `when: ct_netif is defined` guard skips any service host that hasn't had its
-# create specs filled in yet, so a no-limit run is safe.
+# The CTID comes from the runtime assignment (inventory/local.yml); this play
+# parses no number out of a host name. The create play runs ON the control node
+# (connection: local) and talks to the Proxmox API with the same vault token
+# verify-proxmox.yml uses — token auth is sufficient for a plain managed-storage
+# LXC create (no bind mounts). The `when: ct_netif is defined` guard skips any
+# service host that hasn't had its create specs filled in yet, so a no-limit run
+# is safe.
 
 - name: Create service containers via the Proxmox API
-  hosts: services
+  hosts: service_containers
   connection: local
   gather_facts: false
   module_defaults:
@@ -23,6 +27,18 @@
       api_token_secret: "{{ proxmox_api_token_secret }}"
       node: "{{ proxmox_node_name }}"
   tasks:
+    - name: Fail fast if the service has no CTID assignment
+      # ctid is supplied only by the runtime assignment (inventory/local.yml).
+      # Without it ansible_host and the netif IP can't resolve, so refuse early
+      # with an actionable message instead of inventing a number. Gated on
+      # ct_netif so unspecced placeholder services (no create specs) stay skipped.
+      ansible.builtin.assert:
+        that: ctid is defined
+        fail_msg: >-
+          {{ inventory_hostname }} has no CTID — run:
+          zai-assign {{ inventory_hostname }} <ctid>
+      when: ct_netif is defined
+
     - name: Create the LXC container
       # disk MUST be the `<storage>:<size>` string form (e.g. local-lvm:8), NOT a
       # bare size with a separate `storage:` — the latter renders a pathless
@@ -70,7 +86,7 @@
       when: ct_netif is defined
 
 - name: Configure the nginx reverse proxy
-  hosts: ct101-nginx
+  hosts: nginx
   gather_facts: true
   roles:
     - nginx

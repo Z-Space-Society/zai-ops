@@ -17,13 +17,30 @@
     state: directory
     mode: "0755"
 
-# Install gpgv FIRST, before the OpenResty repo or the gpgv override below exist.
-# Debian 13 verifies apt signatures with Sequoia (sqv) and ships NO gpgv by
-# default, so the override we add next ("use gpgv") would otherwise break every
-# repo — including the Debian repos needed to install gpgv ("Cannot find gpgv").
-# This task runs with the default sqv verifier against Debian's own repos (modern
-# keys sqv accepts), so it bootstraps cleanly. Order is load-bearing.
-- name: Ensure gpgv is installed (needed as the apt verifier for OpenResty's key)
+# Install gpgv FIRST, before the OpenResty repo or the gpgv override below take
+# effect. Debian 13 verifies apt signatures with Sequoia (sqv) and ships NO gpgv
+# by default, so the override we add later ("use gpgv") would break every repo —
+# including the Debian repos needed to install gpgv ("Cannot find gpgv") — and the
+# SHA1-signed OpenResty repo can't be verified by sqv at all. Neither may be active
+# during the bootstrap apt update. A prior *failed* run can leave both on disk, so
+# clear them when gpgv is missing (guarded so a converged CT shows no churn), then
+# bootstrap gpgv under the default sqv verifier against Debian's own (modern-key)
+# repos. They're re-added in the right order below. Task order is load-bearing.
+- name: Check whether gpgv is already installed
+  ansible.builtin.stat:
+    path: /usr/bin/gpgv
+  register: gpgv_bin
+
+- name: Clear partial repo config left by a failed run so gpgv can bootstrap
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/apt.conf.d/99-zai-gpgv
+    - /etc/apt/sources.list.d/openresty.sources
+  when: not gpgv_bin.stat.exists
+
+- name: Ensure gpgv is installed (the apt verifier for OpenResty's key)
   ansible.builtin.apt:
     name: gpgv
     state: present

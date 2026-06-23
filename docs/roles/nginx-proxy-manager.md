@@ -33,6 +33,7 @@ cluster, so `certbot` is intentionally omitted — NPM serves plain HTTP on `:80
 | ---- | ------ | --- |
 | Install base deps | `apt` | curl, git, build-essential, python3, sqlite3, rsync, etc. |
 | Add NodeSource + OpenResty keys/repos | `get_url` + `apt_repository` | No apt package for Node 18 / OpenResty in Debian; signed-by `.asc` keyrings. |
+| Pin `nodejs` to NodeSource | `copy` (preferences.d, priority 1001) | Debian 13's nodejs is newer (20.x) so apt would prefer it, breaking the Node-18 pin and leaving no `npm`. See Notes. |
 | Force apt to verify with `gpgv` | `copy` (apt.conf.d drop-in) | Debian 13's Sequoia `sqv` rejects OpenResty's SHA1-bound key; gpgv still verifies it. See Notes. |
 | Install Node.js + OpenResty | `apt` | The runtime (Node) and NPM's nginx (OpenResty). |
 | Install pnpm | `command` (`creates:`) | NPM's package manager, version-pinned. |
@@ -97,6 +98,13 @@ curl -H 'Host: chat.example.com' http://10.1.1.<ctid>/
   OpenResty bundles its own PCRE/OpenSSL (`openresty-pcre`/`openresty-openssl3`)
   and doesn't pull the EOL `libpcre3` that trixie removed. Bump the var to `trixie`
   once upstream publishes it.
+- **`nodejs` is pinned to NodeSource** (`/etc/apt/preferences.d/nodesource.pref`,
+  priority 1001). Debian 13 ships nodejs 20.x — *newer* than our pinned NodeSource
+  18.x — so by default apt prefers Debian's, which both breaks the Node-18 pin and
+  leaves no `npm` (Debian splits `npm` into a separate package; NodeSource's nodejs
+  bundles it). Priority > 1000 makes apt install NodeSource's nodejs even though
+  it's a version downgrade. Symptom without the pin: the pnpm task fails with
+  `No such file or directory: b'npm'`.
 - **apt is pinned to the `gpgv` verifier on this CT** (`/etc/apt/apt.conf.d/99-zai-gpgv`).
   Debian 13's apt verifies signatures with Sequoia (`sqv`), whose policy rejects
   SHA1 key self-signatures from **2026-02-01**. OpenResty's signing key is SHA1-bound,

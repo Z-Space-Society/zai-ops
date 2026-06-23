@@ -39,6 +39,21 @@
     components: main
     signed_by: /etc/apt/keyrings/nodesource.asc
 
+# Pin nodejs to NodeSource. Debian 13 ships a *newer* nodejs (20.x) than our
+# pinned NodeSource 18.x, so without this apt prefers Debian's by version and
+# (a) silently breaks the Node-18 pin and (b) leaves no `npm` — Debian splits npm
+# into its own package, while NodeSource's nodejs bundles it. Priority > 1000 so
+# apt installs NodeSource's nodejs even though it's a downgrade from Debian's.
+- name: Pin nodejs to the NodeSource repository
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/nodesource.pref
+    mode: "0644"
+    content: |
+      # Managed by Ansible (nginx-proxy-manager role). See tasks/main.yml.
+      Package: nodejs
+      Pin: origin deb.nodesource.com
+      Pin-Priority: 1001
+
 # OpenResty publishes per Debian codename but has no trixie repo yet, so pin
 # npm_openresty_suite (bookworm). It installs cleanly on trixie because OpenResty
 # bundles its own PCRE/OpenSSL — see the var comment in defaults/main.yml.

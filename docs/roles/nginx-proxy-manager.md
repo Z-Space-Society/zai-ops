@@ -35,7 +35,8 @@ cluster, so `certbot` is intentionally omitted — NPM serves plain HTTP on `:80
 | Add NodeSource + OpenResty keys/repos | `get_url` + `apt_repository` | No apt package for Node 18 / OpenResty in Debian; signed-by `.asc` keyrings. |
 | Pin `nodejs` to NodeSource | `copy` (preferences.d, priority 1001) | Debian 13's nodejs is newer (20.x) so apt would prefer it, breaking the Node-18 pin and leaving no `npm`. See Notes. |
 | Force apt to verify with `gpgv` | `copy` (apt.conf.d drop-in) | Debian 13's Sequoia `sqv` rejects OpenResty's SHA1-bound key; gpgv still verifies it. See Notes. |
-| Install Node.js + OpenResty | `apt` | The runtime (Node) and NPM's nginx (OpenResty). |
+| Install base deps + OpenResty | `apt` (`state: present`) | Build/runtime deps and NPM's nginx (OpenResty). |
+| Install Node.js | `apt` (`state: latest`, `allow_downgrade`) | NodeSource's nodejs; latest+downgrade so a CT with Debian's nodejs reconciles to the pinned major. See Notes. |
 | Install pnpm | `command` (`creates:`) | NPM's package manager, version-pinned. |
 | Create the `/data` tree + scratch dirs | `file` | Runtime state + nginx/cache scratch NPM expects at start. |
 | Render `production.json` | `template` | Points the backend at SQLite (`/data/database.sqlite`). |
@@ -104,7 +105,10 @@ curl -H 'Host: chat.example.com' http://10.1.1.<ctid>/
   leaves no `npm` (Debian splits `npm` into a separate package; NodeSource's nodejs
   bundles it). Priority > 1000 makes apt install NodeSource's nodejs even though
   it's a version downgrade. Symptom without the pin: the pnpm task fails with
-  `No such file or directory: b'npm'`.
+  `No such file or directory: b'npm'`. The pin only *selects* the candidate,
+  though — it can't downgrade a nodejs that's already installed, so the install
+  task uses `state: latest` + `allow_downgrade` to reconcile a CT that picked up
+  Debian's nodejs on an earlier run.
 - **apt is pinned to the `gpgv` verifier on this CT** (`/etc/apt/apt.conf.d/99-zai-gpgv`).
   Debian 13's apt verifies signatures with Sequoia (`sqv`), whose policy rejects
   SHA1 key self-signatures from **2026-02-01**. OpenResty's signing key is SHA1-bound,

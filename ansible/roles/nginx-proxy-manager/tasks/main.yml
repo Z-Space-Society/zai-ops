@@ -82,8 +82,8 @@
       APT::Key::gpgvcommand "gpgv";
 
 # Single apt update, now that both repos are correct. Base build/runtime deps
-# plus the toolchain land together.
-- name: Install base deps, Node.js and OpenResty
+# plus OpenResty land together. nodejs is handled separately just below.
+- name: Install base deps and OpenResty
   ansible.builtin.apt:
     name:
       - curl
@@ -95,10 +95,21 @@
       - sqlite3
       - logrotate
       - rsync
-      - nodejs
       - openresty
     state: present
     update_cache: true
+
+# nodejs gets its own task because the NodeSource pin can only *choose* the
+# candidate — it can't downgrade an already-installed package. A CT left with
+# Debian's nodejs (20.x, no bundled npm) from an earlier run would never switch
+# under `state: present` (a no-op for installed packages). `state: latest`
+# reconciles to the pinned candidate (NodeSource 18.x, which carries npm) and
+# `allow_downgrade` permits the version drop. Idempotent once on 18.x.
+- name: Install Node.js from NodeSource (reconcile to the pinned major)
+  ansible.builtin.apt:
+    name: nodejs
+    state: latest
+    allow_downgrade: true
 
 - name: Install pnpm (NPM's package manager) at the pinned version
   ansible.builtin.command: "npm install -g pnpm@{{ npm_pnpm_version }}"

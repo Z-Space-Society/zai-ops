@@ -100,21 +100,22 @@
     update_cache: true
 
 # nodejs gets its own task because the NodeSource pin can only *choose* the
-# candidate — it can't downgrade an already-installed package. A CT left with
-# Debian's nodejs (20.x, no bundled npm) from an earlier run would never switch
-# under `state: present` (a no-op for installed packages). `state: latest`
-# reconciles to the pinned candidate (NodeSource 18.x, which carries npm) and
-# `allow_downgrade` permits the version drop. Idempotent once on 18.x.
+# candidate — it can't replace an already-installed package whose version differs.
+# A CT left with Debian's nodejs (no bundled npm) from an earlier run, or with a
+# previous NodeSource major, would never switch under `state: present` (a no-op
+# for installed packages). `state: latest` reconciles to the pinned candidate
+# (NodeSource's npm_node_major, which carries npm) and `allow_downgrade` permits
+# the change in either direction. Idempotent once on the pinned major.
 - name: Install Node.js from NodeSource (reconcile to the pinned major)
   ansible.builtin.apt:
     name: nodejs
     state: latest
     allow_downgrade: true
 
-- name: Install pnpm (NPM's package manager) at the pinned version
-  ansible.builtin.command: "npm install -g pnpm@{{ npm_pnpm_version }}"
+- name: Install yarn (NPM's package manager) at the pinned version
+  ansible.builtin.command: "npm install -g yarn@{{ npm_yarn_version }}"
   args:
-    creates: "/usr/lib/node_modules/pnpm/package.json"
+    creates: "/usr/lib/node_modules/yarn/package.json"
 
 - name: Create the source/scratch directory
   ansible.builtin.file:

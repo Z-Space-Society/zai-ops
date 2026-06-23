@@ -47,25 +47,32 @@ cp -rT "$work/docker/rootfs/etc/nginx" /usr/local/openresty/nginx
 conf=/usr/local/openresty/nginx/nginx.conf
 sed -i 's/^daemon/#daemon/g; s/^user npm/user root/g; s/^pid/#pid/g; s#include conf.d#include /etc/nginx/conf.d#g' "$conf"
 
-# Frontend: install, compile locales, build. The compiled per-language bundles
-# (src/locale/lang/*.json) are NOT committed — they're generated from the message
-# sources in src/locale/src/ by formatjs. Upstream runs locale-compile as its own
-# CI step before the build; `pnpm run build` (tsc && vite build) does not, so tsc
-# fails with "Cannot find module './lang/en.json'" unless we compile them first.
+# Frontend: install, compile locales, build. Both NPM workspaces lock with
+# yarn.lock (classic), so install with --frozen-lockfile to reproduce the exact
+# tested dependency tree — never pnpm/npm, which ignore yarn.lock and float every
+# caret range to latest (untested versions that break the build).
+#
+# The compiled per-language bundles (src/locale/lang/*.json) are NOT committed —
+# they're generated from the message sources in src/locale/src/ by formatjs.
+# Upstream runs locale-compile as its own CI step before the build; `yarn build`
+# (tsc && vite build) does not, so tsc fails with "Cannot find module
+# './lang/en.json'" unless we compile them first.
 cd "$work/frontend"
-pnpm install
+yarn install --frozen-lockfile
 mkdir -p src/locale/lang
-pnpm run locale-compile
-pnpm run build
+yarn run locale-compile
+yarn run build
 rm -rf "$APP/frontend"
 mkdir -p "$APP"
 cp -r dist "$APP/frontend"
 
-# Backend: stage into $APP and install production deps in place.
+# Backend: stage into $APP and install production deps in place. No build step —
+# it runs directly under node (ESM). --production drops devDeps to keep the rootfs
+# within 8 GB.
 cd "$work/backend"
 cp -r . "$APP/"
 cd "$APP"
-pnpm install
+yarn install --frozen-lockfile --production
 ln -sf "$APP/migrations" /migrations
 
 # Hand the data tree to the service user (the unit runs as root, but keep perms sane).

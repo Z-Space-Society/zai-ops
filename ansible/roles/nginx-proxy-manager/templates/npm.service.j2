@@ -7,6 +7,9 @@ Wants=openresty.service
 [Service]
 Type=simple
 Environment=NODE_ENV=production
+# NPM's backend needs legacy OpenSSL algorithms (upstream sets this in its runtime
+# image). Node 20 still supports the flag; Node 22 removed it (see the node pin).
+Environment=NODE_OPTIONS=--openssl-legacy-provider
 # NPM expects these scratch/ACME dirs to exist at start; create them defensively.
 ExecStartPre=/bin/mkdir -p /tmp/nginx/body {{ npm_data_dir }}/letsencrypt-acme-challenge
 ExecStart=/usr/bin/node {{ npm_app_dir }}/index.js

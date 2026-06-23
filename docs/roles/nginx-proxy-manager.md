@@ -37,7 +37,7 @@ cluster, so `certbot` is intentionally omitted — NPM serves plain HTTP on `:80
 | Force apt to verify with `gpgv` | `copy` (apt.conf.d drop-in) | Debian 13's Sequoia `sqv` rejects OpenResty's SHA1-bound key; gpgv still verifies it. See Notes. |
 | Install base deps + OpenResty | `apt` (`state: present`) | Build/runtime deps and NPM's nginx (OpenResty). |
 | Install Node.js | `apt` (`state: latest`, `allow_downgrade`) | NodeSource's nodejs; latest+downgrade so a CT with Debian's nodejs reconciles to the pinned major. See Notes. |
-| Install pnpm | `command` (`creates:`) | NPM's package manager, version-pinned. |
+| Install yarn | `command` (`creates:`) | NPM's package manager (classic yarn), version-pinned. Both workspaces lock with `yarn.lock`. |
 | Create the `/data` tree + scratch dirs | `file` | Runtime state + nginx/cache scratch NPM expects at start. |
 | Render `production.json` | `template` | Points the backend at SQLite (`/data/database.sqlite`). |
 | Build + stage NPM | `template` + `command` | `npm-build.sh` fetches the pinned release, builds the frontend, stages the backend into `/app`, wires the paths NPM hardcodes. Version-aware → idempotent. |
@@ -61,8 +61,8 @@ Defined in [`defaults/main.yml`](../../ansible/roles/nginx-proxy-manager/default
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `npm_version` | `2.15.1` | Pinned NPM release tag (no leading `v`). Never `latest` — the build is reproducible only against a fixed tree. Bump deliberately. |
-| `npm_node_major` | `18` | Node major from NodeSource. |
-| `npm_pnpm_version` | `8.15` | pnpm version. |
+| `npm_node_major` | `20` | Node major from NodeSource. Frontend build needs ≥ 20.19 (vite 8); backend runs on it too. |
+| `npm_yarn_version` | `1.22.22` | Classic yarn — both workspaces lock with `yarn.lock`. |
 | `npm_app_dir` | `/app` | Backend install dir (NPM hardcodes this). |
 | `npm_data_dir` | `/data` | Runtime state (SQLite DB, per-host nginx config, certs) — the backup target. |
 | `npm_src_dir` | `/opt/nginx-proxy-manager` | Build scratch + the `.installed_version` marker. |
@@ -100,15 +100,15 @@ curl -H 'Host: chat.example.com' http://10.1.1.<ctid>/
   and doesn't pull the EOL `libpcre3` that trixie removed. Bump the var to `trixie`
   once upstream publishes it.
 - **`nodejs` is pinned to NodeSource** (`/etc/apt/preferences.d/nodesource.pref`,
-  priority 1001). Debian 13 ships nodejs 20.x — *newer* than our pinned NodeSource
-  18.x — so by default apt prefers Debian's, which both breaks the Node-18 pin and
-  leaves no `npm` (Debian splits `npm` into a separate package; NodeSource's nodejs
-  bundles it). Priority > 1000 makes apt install NodeSource's nodejs even though
-  it's a version downgrade. Symptom without the pin: the pnpm task fails with
+  priority 1001). Debian 13 ships its own `nodejs` whose version can rival or beat
+  NodeSource's, so without the pin apt may prefer Debian's — which leaves no `npm`
+  (Debian splits `npm` into a separate package; NodeSource's nodejs bundles it).
+  Priority > 1000 makes apt install NodeSource's nodejs even when that's a version
+  downgrade. Symptom without the pin: the yarn-install task fails with
   `No such file or directory: b'npm'`. The pin only *selects* the candidate,
-  though — it can't downgrade a nodejs that's already installed, so the install
+  though — it can't replace a nodejs that's already installed, so the install
   task uses `state: latest` + `allow_downgrade` to reconcile a CT that picked up
-  Debian's nodejs on an earlier run.
+  the wrong nodejs (Debian's, or a previous major) on an earlier run.
 - **apt is pinned to the `gpgv` verifier on this CT** (`/etc/apt/apt.conf.d/99-zai-gpgv`).
   Debian 13's apt verifies signatures with Sequoia (`sqv`), whose policy rejects
   SHA1 key self-signatures from **2026-02-01**. OpenResty's signing key is SHA1-bound,
@@ -119,11 +119,27 @@ curl -H 'Host: chat.example.com' http://10.1.1.<ctid>/
 - NPM without Docker is **unsupported upstream**; `npm-build.sh` follows the
   community dockerless assembly. Treat a `npm_version` bump as a change to test on
   a real CT, not a no-op.
+- **Build with yarn `--frozen-lockfile`, not pnpm/npm.** Both NPM workspaces
+  (`frontend/`, `backend/`) lock with classic `yarn.lock` and ship no
+  `pnpm-lock.yaml`. pnpm/npm ignore yarn.lock and float every caret range to the
+  newest release — an untested tree (e.g. vite 8 / typescript 6 / `@formatjs/cli`
+  6.16.11) that breaks the build. yarn `--frozen-lockfile` reproduces the exact
+  tested versions; the backend adds `--production` (no build step, runs directly
+  under node).
+- **Node 20 is required to build, not just run.** The frontend toolchain is
+  modern — `vite ^8.0.14` needs Node ≥ 20.19, and `@formatjs/cli`'s ESM binary
+  won't run on Node 18 (`Cannot use import statement outside a module`). Node 20
+  also still ships `--openssl-legacy-provider` (removed in 22), which the backend's
+  runtime sets (see the systemd unit). The backend declares no `engines`, so one
+  Node 20 install both builds the frontend and runs the backend.
 - **The frontend locale bundles are generated, not committed.** `npm-build.sh`
-  runs `pnpm run locale-compile` (formatjs: `src/locale/src/` → `src/locale/lang/`)
-  before `pnpm run build`, because the source tarball ships only the message
+  runs `yarn run locale-compile` (formatjs: `src/locale/src/` → `src/locale/lang/`)
+  before `yarn run build`, because the source tarball ships only the message
   sources. Without it `tsc` fails with `Cannot find module './lang/en.json'`.
-  Upstream runs this as a separate CI step that `pnpm run build` doesn't trigger.
+  Upstream runs this as a separate CI step that `yarn build` doesn't trigger.
+- **The backend needs `--openssl-legacy-provider` at runtime.** The systemd unit
+  sets `NODE_OPTIONS=--openssl-legacy-provider` to match upstream's runtime image;
+  without it the Node backend fails on legacy crypto.
 - Resources (2 cores / 2 GiB / 8 GB) match the proven Proxmox community-script NPM
   LXC; the build script cleans its scratch tree so 8 GB holds.
 - For how the CT is assigned a CTID, created and reached, see the

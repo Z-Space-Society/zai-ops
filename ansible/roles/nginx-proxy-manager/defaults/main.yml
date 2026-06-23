@@ -7,10 +7,15 @@
 # build is reproducible only against a fixed source tree. Bump deliberately.
 npm_version: "2.15.1"
 
-# Toolchain pins. Node 18 is the runtime NPM's backend targets; pnpm is its
-# package manager. Both are version-pinned so a rebuild resolves the same tree.
-npm_node_major: "18"
-npm_pnpm_version: "8.15"
+# Toolchain pins. Node 20: NPM's frontend build needs it (vite 8 requires Node
+# >= 20.19, and formatjs's ESM CLI won't run on 18), and the backend runs on it
+# too (no engines constraint; Node 20 still ships --openssl-legacy-provider, which
+# 22 dropped and the backend's runtime expects). yarn (classic) is NPM's package
+# manager — both frontend and backend lock with yarn.lock, so we install with
+# `yarn --frozen-lockfile` to reproduce the exact tested tree. Using pnpm here is
+# wrong: it ignores yarn.lock and floats every dep to latest (untested + breaks).
+npm_node_major: "20"
+npm_yarn_version: "1.22.22"
 
 # OpenResty apt suite. OpenResty does NOT publish a Debian 13 (trixie) repo yet
 # (openresty/openresty#1054), so we pin its latest published codename, bookworm.

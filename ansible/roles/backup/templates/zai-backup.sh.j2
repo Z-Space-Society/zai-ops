@@ -25,6 +25,19 @@ paths=(
 [ -e "{{ p }}" ] && paths+=( "{{ p }}" )
 {% endfor %}
 
+{% if backup_npm_enabled %}
+# --- Tier 2: Nginx Proxy Manager /data ------------------------------------
+# NPM's proxy hosts live only in its SQLite DB (made in the UI, not git). Pull
+# /data from the npm CT over the injected root key into a staging dir, which then
+# rides the same restic backup below. --delete keeps the mirror faithful.
+echo "zai-backup: syncing NPM /data from the npm CT"
+mkdir -p "{{ backup_npm_staging }}"
+rsync -a --delete \
+  "root@{{ hostvars['npm'].ansible_host }}:{{ backup_npm_data_path }}/" \
+  "{{ backup_npm_staging }}/"
+paths+=( "{{ backup_npm_staging }}" )
+{% endif %}
+
 echo "zai-backup: backing up control-node state"
 restic backup --tag zai-control-node "${paths[@]}"
 

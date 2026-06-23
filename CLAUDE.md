@@ -42,8 +42,9 @@ out and update the docs.
   (confirmed) — do not fall back to root@pam.
 - **Internal network on `vmbr1` (`10.1.1.0/24`, no uplink).** Host = `10.1.1.1`
   and is the NAT gateway for internal-only CTs. CT 100 = `.100`, services =
-  `.10X` (static). nginx (CT 101) is the only LAN-facing CT (dual-homed on
-  `vmbr0` + `vmbr1`); CT 102-104 are internal-only and route out via the host.
+  `.10X` (static). npm — Nginx Proxy Manager (CT 101) — is the only LAN-facing CT
+  (dual-homed on `vmbr0` + `vmbr1`); CT 102-104 are internal-only and route out
+  via the host.
 - **SSH into service CTs via an injected key.** CT 100's root ed25519 public key
   is injected at create time; key-only root login. No per-CT passwords.
 - **Secrets:** API token in `ansible/group_vars/all/vault.yml` (Ansible Vault,

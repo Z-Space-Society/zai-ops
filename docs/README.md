@@ -65,8 +65,8 @@ pct enter 100
 cd /opt/zai-ops/ansible
 ansible-playbook site.yml                       # configure the control node
 ansible-playbook verify-proxmox.yml             # confirm the API token
-zai-assign nginx 101                            # assign nginx its CTID (10.1.1.101)
-ansible-playbook provision.yml --limit nginx    # create + configure nginx
+zai-assign npm 101                              # assign npm its CTID (10.1.1.101)
+ansible-playbook provision.yml --limit npm      # create + configure npm
 ```
 
 ---
@@ -80,7 +80,7 @@ ansible-playbook provision.yml --limit nginx    # create + configure nginx
         │           │      • runs Ansible, holds the vault + SSH key        │
         │           │      • net0 vmbr0 (DHCP), net1 vmbr1 10.1.1.100       │
         │           │                                                        │
-   ┌────┴─────┐     │   CT 101  nginx   (reverse proxy, LAN-facing)         │
+   ┌────┴─────┐     │   CT 101  npm  (Nginx Proxy Manager, LAN-facing)      │
    │ clients  │────▶│      • net0 vmbr0 (DHCP), net1 vmbr1 10.1.1.101       │
    └──────────┘     │                                                        │
                     │   CT 102+ postgres / litellm / open-webui  (internal) │
@@ -90,10 +90,12 @@ ansible-playbook provision.yml --limit nginx    # create + configure nginx
 
 - **CT 100** creates and configures every other container over the Proxmox API
   (create) and SSH (configure). It is the only machine that holds secrets.
-- **CT 101 (nginx)** is the only LAN-facing service; it reverse-proxies the
-  internal services.
+- **CT 101 (npm — Nginx Proxy Manager)** is the only LAN-facing service; it
+  reverse-proxies the internal services. Proxy hosts are managed in its web UI
+  (port 81, internal-only); that config is runtime state in `/data`, captured by
+  the [`backup`](#backups) job — not in git.
 - **CT 102-104** (postgres, litellm, open-webui) live only on the internal
-  network and are reached through nginx.
+  network and are reached through npm.
 - **CT 105** (object-store, Garage) is internal-only too — it's the restic
   backend the [`backup`](#backups) job writes to, not a user-facing service.
 - **Inference nodes** (salmon, orca, …) are **bare-metal**, *outside* the Proxmox
@@ -111,7 +113,7 @@ LAN.
 | -------------------- | ------------- | --------------------------------- |
 | Proxmox host         | physical NIC  | `10.1.1.1` (NAT gateway)          |
 | CT 100 control node  | DHCP          | `10.1.1.100`                      |
-| CT 101 nginx         | DHCP          | `10.1.1.101`                      |
+| CT 101 npm (NPM)     | DHCP          | `10.1.1.101`                      |
 | CT 102+ services     | —             | `10.1.1.10X` (gw `10.1.1.1`)      |
 | CT 105 object-store  | —             | `10.1.1.105` (gw `10.1.1.1`)      |
 
@@ -119,7 +121,7 @@ LAN.
   internal traffic out via `vmbr0`, so internal-only CTs can still `apt`/`pip`.
 - Service CTs get **static** internal IPs, so CT 100 always knows where to SSH
   (no DHCP guessing).
-- nginx is **dual-homed** (LAN + internal); the rest are internal-only.
+- npm is **dual-homed** (LAN + internal); the rest are internal-only.
 - The specific numbers above (101–105) are this cluster's **assigned** layout, not
   committed identity — each is bound with `zai-assign` and could differ on another
   host. What's fixed is the `10.1.1.{ctid}` convention. See
@@ -142,7 +144,7 @@ already uses for the API token.
   [`enroll-inference-node.yml`](#playbooks) (inference roster) and
   [`assign.yml`](#service-ctid-assignment) (`zai-assign`, service CTIDs), and
   never committed. The committed `hosts.yml` carries **no container numbers** at
-  all — services are keyed by logical name (`nginx`, `litellm`, …) and their IP
+  all — services are keyed by logical name (`npm`, `litellm`, …) and their IP
   is *derived* from the assigned CTID, so there's no second field to drift.
 - The inventory is loaded as a **directory** (`inventory/`), so the committed
   blueprint (`hosts.yml`, with an empty `inference_nodes` group and number-free
@@ -159,13 +161,13 @@ lives in the committed inventory and is slated for the same treatment — see
 
 ## Service CTID assignment
 
-The committed blueprint names services generically (`nginx`, `litellm`, …) and
+The committed blueprint names services generically (`npm`, `litellm`, …) and
 carries **no container numbers**. The operator binds a service to a container ID
 once, with the `zai-assign` CLI on the control node:
 
 ```bash
-zai-assign nginx 104                  # nginx is now CT 104 at 10.1.1.104, cluster-wide
-zai-assign nginx 105 -e reassign=true # move it (reassign guards against accidental clobber)
+zai-assign npm 104                  # npm is now CT 104 at 10.1.1.104, cluster-wide
+zai-assign npm 105 -e reassign=true # move it (reassign guards against accidental clobber)
 ```
 
 `zai-assign` is thin sugar over [`assign.yml`](#playbooks); the playbook is the
@@ -254,7 +256,7 @@ specs aren't filled in yet, so a no-`--limit` run is safe.
 | Role                                       | Applied to | What it does                                            |
 | ------------------------------------------ | ---------- | ------------------------------------------------------- |
 | [`control_node`](roles/control_node.md)    | CT 100     | Base config for the Ansible control node                |
-| [`nginx`](roles/nginx.md)                  | `nginx`    | Install + configure nginx as the cluster reverse proxy  |
+| [`nginx-proxy-manager`](roles/nginx-proxy-manager.md) | `npm` | Install Nginx Proxy Manager natively (no Docker) — the cluster reverse proxy |
 | [`nvidia_cuda`](roles/nvidia_cuda.md)      | inference nodes | NVIDIA driver + CUDA toolkit (bare-metal Debian 13) |
 | [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
@@ -311,9 +313,12 @@ ansible-playbook provision.yml --limit object-store
 ansible-playbook backup.yml
 ```
 
-**Tiers.** Tier 1 (control-node state) is live today. Tier 2 (service databases —
-`pg_dump` over SSH into the same repo) is a documented seam in
-[`backup`](roles/backup.md), inert until the Postgres CT exists.
+**Tiers.** Tier 1 (control-node state) is live today. Tier 2 pulls service-CT
+state into the same repo: **NPM's `/data`** (the SQLite DB where proxy hosts live —
+made in the UI, not git) is wired and ready, enabled with
+`backup_npm_enabled: true` once the `npm` CT is up; service databases (`pg_dump`
+over SSH) remain a documented seam, inert until the Postgres CT exists. See
+[`backup`](roles/backup.md).
 
 > **Scope caveat — this is not yet disaster recovery.** The object store sits on
 > the *same physical disk* as everything else, so today's backup guards

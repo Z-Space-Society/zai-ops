@@ -109,8 +109,15 @@ restic restore latest --target /tmp/restore
 ## Notes
 
 - Secrets live only in `restic.env` (`0600`) and the vault — never in the repo.
-- **Tier 2 (service data)** — once the Postgres CT is online, set
-  `backup_postgres_enabled: true` and wire the `pg_dump`-over-SSH block in
-  `zai-backup.sh.j2`; it streams into the *same* restic repo.
+- **Tier 2 (service data)** — service-CT state pulled into the *same* restic repo:
+  - **NPM `/data`** (the SQLite DB where Nginx Proxy Manager's proxy hosts live —
+    made in the UI, not git) is wired. Set `backup_npm_enabled: true` once the
+    `npm` CT is up; the wrapper `rsync`s `/data` from the npm CT over the injected
+    root key into `backup_npm_staging` (`/var/backups/npm-data`), which rides the
+    backup. **Restore:** `restic restore latest --target /tmp/restore`, then
+    `rsync -a /tmp/restore/var/backups/npm-data/ root@<npm-ip>:/data/` and
+    `systemctl restart npm`.
+  - **Postgres** — once that CT is online, set `backup_postgres_enabled: true` and
+    wire the `pg_dump`-over-SSH block in `zai-backup.sh.j2`.
 - For the trust model behind backing up the vault password, see the
   [main docs](../README.md#secrets--trust-model).

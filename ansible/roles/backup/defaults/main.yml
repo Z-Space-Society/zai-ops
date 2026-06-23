@@ -39,10 +39,18 @@ backup_oncalendar: "*-*-* 03:00:00"
 # end-to-end). Turn off for a config-only apply.
 backup_run_now: true
 
-# --- Tier 2 (service data) — inert until Postgres is online ----------------
-# Flip on once CT 102 exists; the wrapper will pg_dump over SSH into the same
-# restic repo. Left here as the documented seam, not yet wired.
+# --- Tier 2 (service data) — service-CT state pulled to the control node -----
+# Postgres: inert until that CT is online; the wrapper will pg_dump over SSH into
+# the same restic repo. Left as the documented seam, not yet wired.
 backup_postgres_enabled: false
+
+# Nginx Proxy Manager: its /data (SQLite DB + per-host nginx config) is the only
+# unreproducible NPM state — proxy hosts are made in the UI, not in git. The
+# wrapper rsyncs it from the npm CT (over the injected root key) into a staging
+# dir that joins the restic backup. Flip on once the npm CT is provisioned.
+backup_npm_enabled: false
+backup_npm_data_path: /data                       # source dir on the npm CT
+backup_npm_staging: /var/backups/npm-data         # control-node landing/restic path
 
 # restic_repo_password + object_store_access_key/secret_key are auto-generated in
 # group_vars/all/main.yml (same values Garage imported) — no manual step.

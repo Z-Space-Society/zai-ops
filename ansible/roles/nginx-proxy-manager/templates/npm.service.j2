@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Nginx Proxy Manager
+After=network.target openresty.service
+Wants=openresty.service
+
+[Service]
+Type=simple
+Environment=NODE_ENV=production
+# NPM expects these scratch/ACME dirs to exist at start; create them defensively.
+ExecStartPre=/bin/mkdir -p /tmp/nginx/body {{ npm_data_dir }}/letsencrypt-acme-challenge
+ExecStart=/usr/bin/node {{ npm_app_dir }}/index.js
+WorkingDirectory={{ npm_app_dir }}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

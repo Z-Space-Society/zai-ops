@@ -1,8 +1,8 @@
 ---
 # Assign a service to a container ID — the CTID allocator.
 #
-#   ansible-playbook assign.yml -e "service=nginx ctid=104"
-#   ansible-playbook assign.yml -e "service=nginx ctid=104 reassign=true"
+#   ansible-playbook assign.yml -e "service=npm ctid=104"
+#   ansible-playbook assign.yml -e "service=npm ctid=104 reassign=true"
 #
 # (`zai-assign <service> <ctid>` on the control node is sugar over this — no logic
 # lives in the wrapper.) From here on the service is authoritatively that CTID at
@@ -33,7 +33,7 @@
           - ctid is defined and (ctid | string | length) > 0
         fail_msg: >-
           Pass both service and ctid, e.g.
-          -e "service=nginx ctid=104"
+          -e "service=npm ctid=104"
 
     - name: Validate the service exists in the blueprint
       # groups['service_containers'] is the blueprint membership from hosts.yml;

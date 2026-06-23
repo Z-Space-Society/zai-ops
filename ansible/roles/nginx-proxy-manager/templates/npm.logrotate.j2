@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+{{ npm_data_dir }}/logs/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+    su root root
+}

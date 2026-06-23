@@ -47,8 +47,8 @@ itself from this repo.
    `--limit` while the stack comes online:
 
    ```bash
-   zai-assign nginx 101                          # nginx → CTID 101 (10.1.1.101)
-   ansible-playbook provision.yml --limit nginx  # create + configure it
+   zai-assign npm 101                            # npm → CTID 101 (10.1.1.101)
+   ansible-playbook provision.yml --limit npm    # create + configure it
    ```
 
    From here Ansible uses the Proxmox API to create and configure all
@@ -84,8 +84,8 @@ can reach the internet for package installs without being exposed on the LAN.
 
 - The control node (CT 100) sits at `10.1.1.100` and reaches every service at
   its static internal IP — no DHCP guessing.
-- nginx (CT 101) is the only LAN-facing container: dual-homed on `vmbr0` (DHCP)
-  for inbound traffic and `vmbr1` (`10.1.1.101`) to reach upstreams.
+- npm (CT 101, Nginx Proxy Manager) is the only LAN-facing container: dual-homed
+  on `vmbr0` (DHCP) for inbound traffic and `vmbr1` (`10.1.1.101`) to reach upstreams.
 - The remaining services live on `vmbr1` only and route out through the host.
 
 ## Secrets
@@ -135,7 +135,7 @@ architecture, networking, and a note for every role.
   - `add-github-user.yml` — creates a human admin account from GitHub keys (CT 100 + inference nodes)
   - `inventory/` — committed blueprint (`hosts.yml`) + git-ignored runtime roster (`local.yml`)
   - `group_vars/all/` — shared vars (`main.yml`) and the encrypted `vault.yml`
-  - `roles/` — `control_node`, `nginx`, `nvidia_cuda`, `llama_server`, and more as they come online
+  - `roles/` — `control_node`, `nginx-proxy-manager`, `nvidia_cuda`, `llama_server`, and more as they come online
 
 ## Contributing
 

@@ -4,8 +4,8 @@
 # injected below). A service must be assigned a CTID first; then drive it by its
 # logical name:
 #
-#   zai-assign nginx 101                 # record nginx → CTID 101 (10.1.1.101)
-#   ansible-playbook provision.yml --limit nginx
+#   zai-assign npm 101                   # record npm → CTID 101 (10.1.1.101)
+#   ansible-playbook provision.yml --limit npm
 #
 # The CTID comes from the runtime assignment (inventory/local.yml); this play
 # parses no number out of a host name. The create play runs ON the control node
@@ -85,11 +85,11 @@
         timeout: 120
       when: ct_netif is defined
 
-- name: Configure the nginx reverse proxy
-  hosts: nginx
+- name: Configure the Nginx Proxy Manager reverse proxy
+  hosts: npm
   gather_facts: true
   roles:
-    - nginx
+    - nginx-proxy-manager
 
 - name: Configure the object store
   hosts: object-store

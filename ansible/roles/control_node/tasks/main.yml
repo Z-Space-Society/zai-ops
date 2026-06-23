@@ -46,7 +46,7 @@
     group: root
 
 # The CTID allocator's CLI. Sugar over `ansible-playbook assign.yml` so the
-# operator runs `zai-assign nginx 104` instead of the full invocation; the repo
+# operator runs `zai-assign npm 104` instead of the full invocation; the repo
 # checkout lives at /opt/zai-ops, which the script hardcodes.
 - name: Install the zai-assign CLI
   ansible.builtin.copy:

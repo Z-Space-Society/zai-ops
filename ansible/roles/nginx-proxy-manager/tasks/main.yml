@@ -1,0 +1,153 @@
+---
+# Install Nginx Proxy Manager (NPM) natively — no Docker (CLAUDE.md pinned).
+# NPM has no apt package, so we add the OpenResty + Node 18 repos, then run a
+# version-aware build script that reproduces NPM's dockerless assembly. The build
+# lives in npm-build.sh (like object_store's garage-init.sh) because it's an
+# inherently shell-shaped, vendored multi-step build; Ansible owns everything
+# around it (repos, dirs, config, unit, services).
+
+- name: Install base build/runtime dependencies
+  ansible.builtin.apt:
+    name:
+      - curl
+      - ca-certificates
+      - gnupg
+      - git
+      - build-essential
+      - python3
+      - sqlite3
+      - logrotate
+      - rsync
+    state: present
+    update_cache: true
+
+- name: Ensure the apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+# Both repos are signed by ASCII-armored keys; apt reads .asc files via signed-by
+# directly, so no dearmor step is needed.
+- name: Install the NodeSource and OpenResty signing keys
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+      dest: /etc/apt/keyrings/nodesource.asc
+    - url: https://openresty.org/package/pubkey.gpg
+      dest: /etc/apt/keyrings/openresty.asc
+
+- name: Add the NodeSource (Node {{ npm_node_major }}) apt repository
+  ansible.builtin.deb822_repository:
+    name: nodesource
+    types: deb
+    uris: "https://deb.nodesource.com/node_{{ npm_node_major }}.x"
+    suites: nodistro
+    components: main
+    signed_by: /etc/apt/keyrings/nodesource.asc
+
+# OpenResty publishes per Debian codename; bookworm is known-good. If the CT's
+# codename isn't published yet, the apt install below is where it surfaces (see
+# role doc notes).
+- name: Add the OpenResty apt repository
+  ansible.builtin.deb822_repository:
+    name: openresty
+    types: deb
+    uris: "http://openresty.org/package/debian"
+    suites: "{{ ansible_distribution_release }}"
+    components: openresty
+    signed_by: /etc/apt/keyrings/openresty.asc
+
+- name: Install Node.js and OpenResty
+  ansible.builtin.apt:
+    name:
+      - nodejs
+      - openresty
+    state: present
+    update_cache: true
+
+- name: Install pnpm (NPM's package manager) at the pinned version
+  ansible.builtin.command: "npm install -g pnpm@{{ npm_pnpm_version }}"
+  args:
+    creates: "/usr/lib/node_modules/pnpm/package.json"
+
+- name: Create the source/scratch directory
+  ansible.builtin.file:
+    path: "{{ npm_src_dir }}"
+    state: directory
+    mode: "0755"
+
+# /data is the runtime state — the SQLite DB, per-host nginx config and any
+# uploaded certs. It's what the backup role's Tier-2 wiring captures.
+- name: Create the NPM data tree
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ npm_data_dir }}"
+    - "{{ npm_data_dir }}/nginx"
+    - "{{ npm_data_dir }}/nginx/proxy_host"
+    - "{{ npm_data_dir }}/custom_ssl"
+    - "{{ npm_data_dir }}/logs"
+    - "{{ npm_data_dir }}/access"
+    - "{{ npm_app_dir }}/config"
+    - /var/www/html
+    - /tmp/nginx/body
+    - /var/cache/nginx/proxy_temp
+
+- name: Render the backend database config (SQLite at {{ npm_data_dir }})
+  ansible.builtin.template:
+    src: production.json.j2
+    dest: "{{ npm_app_dir }}/config/production.json"
+    mode: "0644"
+  notify: restart npm
+
+- name: Install the NPM build script
+  ansible.builtin.template:
+    src: npm-build.sh.j2
+    dest: /usr/local/bin/npm-build.sh
+    mode: "0700"
+
+# Version-aware: the script no-ops when the installed marker already matches
+# npm_version, so a re-run is a no-op and a deliberate bump triggers a rebuild.
+- name: Build and stage NPM v{{ npm_version }}
+  ansible.builtin.command: /usr/local/bin/npm-build.sh
+  register: npm_build
+  changed_when: "'already installed' not in npm_build.stdout"
+  notify: restart npm
+
+- name: Install the npm systemd unit
+  ansible.builtin.template:
+    src: npm.service.j2
+    dest: /etc/systemd/system/npm.service
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart npm
+
+- name: Install the NPM log rotation policy
+  ansible.builtin.template:
+    src: npm.logrotate.j2
+    dest: /etc/logrotate.d/npm
+    mode: "0644"
+
+# Flush so the unit/build are live before we validate and assert reachability.
+- name: Apply pending restarts before validation
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure OpenResty and NPM are started and enabled
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - openresty
+    - npm
+
+- name: Validate the assembled OpenResty configuration
+  ansible.builtin.command: /usr/sbin/nginx -t
+  changed_when: false

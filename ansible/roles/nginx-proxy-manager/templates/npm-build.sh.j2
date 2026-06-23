@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# Assemble Nginx Proxy Manager v{{ npm_version }} natively (no Docker). NPM has no
+# apt package; this reproduces its dockerless build: fetch the pinned release,
+# install NPM's own OpenResty config, build the frontend, stage the backend into
+# {{ npm_app_dir }}, and wire the paths NPM hardcodes (/etc/nginx, /app). It is
+# version-aware — a re-run is a no-op unless {{ npm_version }} differs from the
+# installed marker, so Ansible drives it idempotently.
+set -euo pipefail
+
+VERSION="{{ npm_version }}"
+SRC="{{ npm_src_dir }}"
+APP="{{ npm_app_dir }}"
+DATA="{{ npm_data_dir }}"
+MARKER="$SRC/.installed_version"
+
+if [ -f "$MARKER" ] && [ "$(cat "$MARKER")" = "$VERSION" ]; then
+  echo "npm-build: v$VERSION already installed"
+  exit 0
+fi
+
+echo "npm-build: assembling NPM v$VERSION"
+work="$SRC/src"
+rm -rf "$work"
+mkdir -p "$work"
+
+# Pinned release source tree.
+curl -fsSL "https://codeload.github.com/NginxProxyManager/nginx-proxy-manager/tar.gz/v${VERSION}" \
+  | tar -xz -C "$work" --strip-components=1
+cd "$work"
+
+# Stamp the real version where NPM's build expects it (the UI reads it).
+sed -i "s/\"version\": \"0\.0\.0\"/\"version\": \"${VERSION}\"/" \
+  backend/package.json frontend/package.json 2>/dev/null || true
+
+# NPM hardcodes /etc/nginx and /app. Point /etc/nginx at OpenResty's tree and the
+# nginx binary where NPM looks for it, then install NPM's bundled nginx config
+# (which `include`s the per-host files NPM writes under $DATA/nginx).
+ln -sf /usr/local/openresty/nginx/sbin/nginx /usr/sbin/nginx
+ln -sfn /usr/local/openresty/nginx /etc/nginx
+ln -sf /usr/bin/python3 /usr/bin/python 2>/dev/null || true
+cp -rT "$work/docker/rootfs/etc/nginx" /usr/local/openresty/nginx
+
+# Adapt NPM's container nginx.conf for a systemd host: run in the foreground (the
+# unit supervises it), as root, with no pidfile collision, and absolute includes.
+conf=/usr/local/openresty/nginx/nginx.conf
+sed -i 's/^daemon/#daemon/g; s/^user npm/user root/g; s/^pid/#pid/g; s#include conf.d#include /etc/nginx/conf.d#g' "$conf"
+
+# Frontend: install + build, output copied to $APP/frontend.
+cd "$work/frontend"
+pnpm install
+pnpm run build
+rm -rf "$APP/frontend"
+mkdir -p "$APP"
+cp -r dist "$APP/frontend"
+
+# Backend: stage into $APP and install production deps in place.
+cd "$work/backend"
+cp -r . "$APP/"
+cd "$APP"
+pnpm install
+ln -sf "$APP/migrations" /migrations
+
+# Hand the data tree to the service user (the unit runs as root, but keep perms sane).
+chown -R root:root "$DATA"
+
+# Drop the build scratch (source tree + node_modules) — nothing here is needed at
+# runtime, and removing it keeps the rootfs within 8 GB.
+rm -rf "$work"
+
+echo "$VERSION" > "$MARKER"
+echo "npm-build: built v$VERSION"

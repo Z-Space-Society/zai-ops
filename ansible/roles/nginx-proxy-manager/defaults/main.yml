@@ -1,0 +1,23 @@
+---
+# Nginx Proxy Manager (NPM), built natively — no Docker (CLAUDE.md pinned decision).
+# NPM ships only as a container image, so we assemble its pieces under systemd:
+# OpenResty (its nginx), a Node backend, a built Vue frontend, and a SQLite DB.
+
+# Pinned NPM release tag (without the leading 'v'). Never track "latest": the
+# build is reproducible only against a fixed source tree. Bump deliberately.
+npm_version: "2.15.1"
+
+# Toolchain pins. Node 18 is the runtime NPM's backend targets; pnpm is its
+# package manager. Both are version-pinned so a rebuild resolves the same tree.
+npm_node_major: "18"
+npm_pnpm_version: "8.15"
+
+# Where the install lands. /app holds the backend (NPM hardcodes this path);
+# /data is the runtime state (SQLite DB + per-host nginx config + certs) and is
+# the ONLY thing worth backing up — see the backup role's Tier-2 wiring.
+npm_app_dir: /app
+npm_data_dir: /data
+
+# Source checkout + build scratch. The release tarball unpacks here; the backend
+# is copied to /app and the frontend built and copied to /app/frontend.
+npm_src_dir: /opt/nginx-proxy-manager

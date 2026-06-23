@@ -1,0 +1,13 @@
+{
+  "//": "{{ ansible_managed }}",
+  "database": {
+    "engine": "knex-native",
+    "knex": {
+      "client": "sqlite3",
+      "connection": {
+        "filename": "{{ npm_data_dir }}/database.sqlite"
+      },
+      "useNullAsDefault": true
+    }
+  }
+}

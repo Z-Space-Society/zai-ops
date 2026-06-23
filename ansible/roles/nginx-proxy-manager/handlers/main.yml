@@ -1,0 +1,17 @@
+---
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart openresty
+  ansible.builtin.service:
+    name: openresty
+    state: restarted
+
+# The NPM backend regenerates and (re)loads OpenResty's per-host config itself, so
+# restarting npm is what picks up a changed app/unit. OpenResty is restarted
+# separately only when its own base config changes.
+- name: restart npm
+  ansible.builtin.service:
+    name: npm
+    state: restarted

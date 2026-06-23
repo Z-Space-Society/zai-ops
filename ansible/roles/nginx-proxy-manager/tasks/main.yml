@@ -5,21 +5,11 @@
 # lives in npm-build.sh (like object_store's garage-init.sh) because it's an
 # inherently shell-shaped, vendored multi-step build; Ansible owns everything
 # around it (repos, dirs, config, unit, services).
-
-- name: Install base build/runtime dependencies
-  ansible.builtin.apt:
-    name:
-      - curl
-      - ca-certificates
-      - gnupg
-      - git
-      - build-essential
-      - python3
-      - sqlite3
-      - logrotate
-      - rsync
-    state: present
-    update_cache: true
+#
+# Order matters: configure the NodeSource + OpenResty repos BEFORE any apt cache
+# update. The OpenResty repo file is (re)written here too, so a re-run after a
+# failed attempt that left a stale (trixie) openresty.sources self-heals — the
+# bookworm suite lands before the first `apt update` instead of wedging on it.
 
 - name: Ensure the apt keyrings directory exists
   ansible.builtin.file:
@@ -49,21 +39,32 @@
     components: main
     signed_by: /etc/apt/keyrings/nodesource.asc
 
-# OpenResty publishes per Debian codename; bookworm is known-good. If the CT's
-# codename isn't published yet, the apt install below is where it surfaces (see
-# role doc notes).
+# OpenResty publishes per Debian codename but has no trixie repo yet, so pin
+# npm_openresty_suite (bookworm). It installs cleanly on trixie because OpenResty
+# bundles its own PCRE/OpenSSL — see the var comment in defaults/main.yml.
 - name: Add the OpenResty apt repository
   ansible.builtin.deb822_repository:
     name: openresty
     types: deb
     uris: "http://openresty.org/package/debian"
-    suites: "{{ ansible_distribution_release }}"
+    suites: "{{ npm_openresty_suite }}"
     components: openresty
     signed_by: /etc/apt/keyrings/openresty.asc
 
-- name: Install Node.js and OpenResty
+# Single apt update, now that both repos are correct. Base build/runtime deps
+# plus the toolchain land together.
+- name: Install base deps, Node.js and OpenResty
   ansible.builtin.apt:
     name:
+      - curl
+      - ca-certificates
+      - gnupg
+      - git
+      - build-essential
+      - python3
+      - sqlite3
+      - logrotate
+      - rsync
       - nodejs
       - openresty
     state: present

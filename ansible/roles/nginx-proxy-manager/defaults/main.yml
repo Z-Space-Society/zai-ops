@@ -12,6 +12,13 @@ npm_version: "2.15.1"
 npm_node_major: "18"
 npm_pnpm_version: "8.15"
 
+# OpenResty apt suite. OpenResty does NOT publish a Debian 13 (trixie) repo yet
+# (openresty/openresty#1054), so we pin its latest published codename, bookworm.
+# Safe on trixie even though trixie dropped the EOL libpcre3: OpenResty bundles
+# its own PCRE/OpenSSL (the openresty-pcre / openresty-openssl3 packages), so it
+# doesn't pull the system libs trixie removed. Bump to trixie once it's published.
+npm_openresty_suite: bookworm
+
 # Where the install lands. /app holds the backend (NPM hardcodes this path);
 # /data is the runtime state (SQLite DB + per-host nginx config + certs) and is
 # the ONLY thing worth backing up — see the backup role's Tier-2 wiring.

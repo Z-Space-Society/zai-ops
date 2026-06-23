@@ -47,9 +47,15 @@ cp -rT "$work/docker/rootfs/etc/nginx" /usr/local/openresty/nginx
 conf=/usr/local/openresty/nginx/nginx.conf
 sed -i 's/^daemon/#daemon/g; s/^user npm/user root/g; s/^pid/#pid/g; s#include conf.d#include /etc/nginx/conf.d#g' "$conf"
 
-# Frontend: install + build, output copied to $APP/frontend.
+# Frontend: install, compile locales, build. The compiled per-language bundles
+# (src/locale/lang/*.json) are NOT committed — they're generated from the message
+# sources in src/locale/src/ by formatjs. Upstream runs locale-compile as its own
+# CI step before the build; `pnpm run build` (tsc && vite build) does not, so tsc
+# fails with "Cannot find module './lang/en.json'" unless we compile them first.
 cd "$work/frontend"
 pnpm install
+mkdir -p src/locale/lang
+pnpm run locale-compile
 pnpm run build
 rm -rf "$APP/frontend"
 mkdir -p "$APP"

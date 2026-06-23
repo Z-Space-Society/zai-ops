@@ -119,6 +119,11 @@ curl -H 'Host: chat.example.com' http://10.1.1.<ctid>/
 - NPM without Docker is **unsupported upstream**; `npm-build.sh` follows the
   community dockerless assembly. Treat a `npm_version` bump as a change to test on
   a real CT, not a no-op.
+- **The frontend locale bundles are generated, not committed.** `npm-build.sh`
+  runs `pnpm run locale-compile` (formatjs: `src/locale/src/` → `src/locale/lang/`)
+  before `pnpm run build`, because the source tarball ships only the message
+  sources. Without it `tsc` fails with `Cannot find module './lang/en.json'`.
+  Upstream runs this as a separate CI step that `pnpm run build` doesn't trigger.
 - Resources (2 cores / 2 GiB / 8 GB) match the proven Proxmox community-script NPM
   LXC; the build script cleans its scratch tree so 8 GB holds.
 - For how the CT is assigned a CTID, created and reached, see the

@@ -42,10 +42,27 @@ ln -sfn /usr/local/openresty/nginx /etc/nginx
 ln -sf /usr/bin/python3 /usr/bin/python 2>/dev/null || true
 cp -rT "$work/docker/rootfs/etc/nginx" /usr/local/openresty/nginx
 
+# dev.conf is NPM's development server block; it also `listen 81 default`, so it
+# collides with production.conf ("duplicate default server for 0.0.0.0:81"). NPM's
+# Docker entrypoint deletes it for NODE_ENV=production — do the same.
+rm -f /usr/local/openresty/nginx/conf.d/dev.conf
+
 # Adapt NPM's container nginx.conf for a systemd host: run in the foreground (the
 # unit supervises it), as root, with no pidfile collision, and absolute includes.
 conf=/usr/local/openresty/nginx/nginx.conf
 sed -i 's/^daemon/#daemon/g; s/^user npm/user root/g; s/^pid/#pid/g; s#include conf.d#include /etc/nginx/conf.d#g' "$conf"
+
+# The openresty unit runs `nginx` with no -c, so it loads the compiled default
+# conf/nginx.conf — NOT the nginx.conf we just staged at the prefix root. Overwrite
+# that default with NPM's (already path-patched above) so the service actually
+# serves NPM's config: the admin UI on :81 and the proxy on :80/:443. Without this
+# OpenResty silently keeps serving its stock welcome page on :80 and :81 never opens.
+cp "$conf" /usr/local/openresty/nginx/conf/nginx.conf
+
+# NPM's config declares a proxy_cache_path under /var/lib/nginx/cache; nginx only
+# mkdir's the leaf, so the parent must exist or `nginx -t`/startup fails with
+# 'mkdir() "/var/lib/nginx/cache/public" failed'.
+mkdir -p /var/lib/nginx/cache/public
 
 # Frontend: install, compile locales, build. Both NPM workspaces lock with
 # yarn.lock (classic), so install with --frozen-lockfile to reproduce the exact

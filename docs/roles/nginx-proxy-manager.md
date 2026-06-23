@@ -140,6 +140,19 @@ curl -H 'Host: chat.example.com' http://10.1.1.<ctid>/
 - **The backend needs `--openssl-legacy-provider` at runtime.** The systemd unit
   sets `NODE_OPTIONS=--openssl-legacy-provider` to match upstream's runtime image;
   without it the Node backend fails on legacy crypto.
+- **OpenResty must actually load NPM's config — three traps.** The `openresty`
+  unit runs `nginx` with no `-c`, so it reads the compiled default
+  `conf/nginx.conf`, *not* the `nginx.conf` NPM stages at the prefix root — so
+  `npm-build.sh` overwrites `conf/nginx.conf` with NPM's (path-patched) one, or
+  OpenResty silently keeps serving its stock `:80` welcome page and the admin UI
+  (`:81`) never opens. The build also (a) deletes `dev.conf`, whose `listen 81
+  default` collides with `production.conf` (NPM's Docker entrypoint does the same
+  for production), and (b) creates `/var/lib/nginx/cache/public`, since nginx
+  mkdir's only the leaf of its `proxy_cache_path`. Because the build stages
+  OpenResty's own config, the build task notifies **`restart openresty`** (not
+  just `restart npm`). Symptom when any of these is missing: a green `PLAY RECAP`
+  but `:81` refuses connections (`nginx -t` passes because it validated the stock
+  config, not NPM's).
 - Resources (2 cores / 2 GiB / 8 GB) match the proven Proxmox community-script NPM
   LXC; the build script cleans its scratch tree so 8 GB holds.
 - For how the CT is assigned a CTID, created and reached, see the

@@ -135,6 +135,9 @@
     - /var/www/html
     - /tmp/nginx/body
     - /var/cache/nginx/proxy_temp
+    # NPM's nginx.conf proxy_cache_path lives here; nginx mkdir's only the leaf, so
+    # the parent must exist or `nginx -t`/openresty startup fails.
+    - /var/lib/nginx/cache/public
 
 - name: Render the backend database config (SQLite at {{ npm_data_dir }})
   ansible.builtin.template:
@@ -155,7 +158,11 @@
   ansible.builtin.command: /usr/local/bin/npm-build.sh
   register: npm_build
   changed_when: "'already installed' not in npm_build.stdout"
-  notify: restart npm
+  # The build also stages OpenResty's own nginx.conf (admin UI on :81, proxy on
+  # :80/:443), so OpenResty must reload too — not just the npm backend.
+  notify:
+    - restart openresty
+    - restart npm
 
 - name: Install the npm systemd unit
   ansible.builtin.template:

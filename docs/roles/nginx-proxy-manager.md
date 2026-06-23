@@ -32,11 +32,9 @@ cluster, so `certbot` is intentionally omitted — NPM serves plain HTTP on `:80
 | Task | Module | Why |
 | ---- | ------ | --- |
 | Install base deps | `apt` | curl, git, build-essential, python3, sqlite3, rsync, etc. |
-| Add NodeSource + OpenResty keys/repos | `get_url` + `apt_repository` | No apt package for Node 18 / OpenResty in Debian; signed-by `.asc` keyrings. |
-| Pin `nodejs` to NodeSource | `copy` (preferences.d, priority 1001) | Debian 13's nodejs is newer (20.x) so apt would prefer it, breaking the Node-18 pin and leaving no `npm`. See Notes. |
+| Add OpenResty key + repo | `get_url` + `apt_repository` | No apt package for OpenResty in Debian; signed-by `.asc` keyring. (Node comes from Debian.) |
 | Force apt to verify with `gpgv` | `copy` (apt.conf.d drop-in) | Debian 13's Sequoia `sqv` rejects OpenResty's SHA1-bound key; gpgv still verifies it. See Notes. |
-| Install base deps + OpenResty | `apt` (`state: present`) | Build/runtime deps and NPM's nginx (OpenResty). |
-| Install Node.js | `apt` (`state: latest`, `allow_downgrade`) | NodeSource's nodejs; latest+downgrade so a CT with Debian's nodejs reconciles to the pinned major. See Notes. |
+| Install base deps, Node.js + OpenResty | `apt` (`state: present`) | Build/runtime deps, Debian's `nodejs` + `npm`, and NPM's nginx (OpenResty). |
 | Install yarn | `command` (`creates:`) | NPM's package manager (classic yarn), version-pinned. Both workspaces lock with `yarn.lock`. |
 | Create the `/data` tree + scratch dirs | `file` | Runtime state + nginx/cache scratch NPM expects at start. |
 | Render `production.json` | `template` | Points the backend at SQLite (`/data/database.sqlite`). |
@@ -61,8 +59,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/nginx-proxy-manager/default
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `npm_version` | `2.15.1` | Pinned NPM release tag (no leading `v`). Never `latest` — the build is reproducible only against a fixed tree. Bump deliberately. |
-| `npm_node_major` | `20` | Node major from NodeSource. Frontend build needs ≥ 20.19 (vite 8); backend runs on it too. |
-| `npm_yarn_version` | `1.22.22` | Classic yarn — both workspaces lock with `yarn.lock`. |
+| `npm_yarn_version` | `1.22.22` | Classic yarn — both workspaces lock with `yarn.lock`. (Node is Debian's nodejs 20.19.x — no var.) |
 | `npm_app_dir` | `/app` | Backend install dir (NPM hardcodes this). |
 | `npm_data_dir` | `/data` | Runtime state (SQLite DB, per-host nginx config, certs) — the backup target. |
 | `npm_src_dir` | `/opt/nginx-proxy-manager` | Build scratch + the `.installed_version` marker. |
@@ -99,16 +96,14 @@ curl -H 'Host: chat.example.com' http://10.1.1.<ctid>/
   OpenResty bundles its own PCRE/OpenSSL (`openresty-pcre`/`openresty-openssl3`)
   and doesn't pull the EOL `libpcre3` that trixie removed. Bump the var to `trixie`
   once upstream publishes it.
-- **`nodejs` is pinned to NodeSource** (`/etc/apt/preferences.d/nodesource.pref`,
-  priority 1001). Debian 13 ships its own `nodejs` whose version can rival or beat
-  NodeSource's, so without the pin apt may prefer Debian's — which leaves no `npm`
-  (Debian splits `npm` into a separate package; NodeSource's nodejs bundles it).
-  Priority > 1000 makes apt install NodeSource's nodejs even when that's a version
-  downgrade. Symptom without the pin: the yarn-install task fails with
-  `No such file or directory: b'npm'`. The pin only *selects* the candidate,
-  though — it can't replace a nodejs that's already installed, so the install
-  task uses `state: latest` + `allow_downgrade` to reconcile a CT that picked up
-  the wrong nodejs (Debian's, or a previous major) on an earlier run.
+- **Node is Debian's `nodejs` + `npm`, not NodeSource.** trixie ships nodejs
+  20.19.x, which is new enough to build the frontend (vite 8 needs ≥ 20.19) and run
+  the backend, so NodeSource buys nothing — it only ever made sense for an older
+  major. We install Debian's `nodejs` *and* `npm` (Debian splits npm into its own
+  package; we need it to install yarn globally). This dropped a whole class of
+  fragility: NodeSource pins a *lower* node major than trixie ships, so an earlier
+  NodeSource-based version of this role had to fight apt with a priority-1001 pin
+  and a downgrade-reconcile task just to win — all of which is gone now.
 - **apt is pinned to the `gpgv` verifier on this CT** (`/etc/apt/apt.conf.d/99-zai-gpgv`).
   Debian 13's apt verifies signatures with Sequoia (`sqv`), whose policy rejects
   SHA1 key self-signatures from **2026-02-01**. OpenResty's signing key is SHA1-bound,

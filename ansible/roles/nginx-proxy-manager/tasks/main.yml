@@ -1,15 +1,15 @@
 ---
 # Install Nginx Proxy Manager (NPM) natively — no Docker (CLAUDE.md pinned).
-# NPM has no apt package, so we add the OpenResty + Node 18 repos, then run a
-# version-aware build script that reproduces NPM's dockerless assembly. The build
-# lives in npm-build.sh (like object_store's garage-init.sh) because it's an
-# inherently shell-shaped, vendored multi-step build; Ansible owns everything
-# around it (repos, dirs, config, unit, services).
+# NPM has no apt package, so we add the OpenResty repo (Node comes from Debian),
+# then run a version-aware build script that reproduces NPM's dockerless assembly.
+# The build lives in npm-build.sh (like object_store's garage-init.sh) because
+# it's an inherently shell-shaped, vendored multi-step build; Ansible owns
+# everything around it (repos, dirs, config, unit, services).
 #
-# Order matters: configure the NodeSource + OpenResty repos BEFORE any apt cache
-# update. The OpenResty repo file is (re)written here too, so a re-run after a
-# failed attempt that left a stale (trixie) openresty.sources self-heals — the
-# bookworm suite lands before the first `apt update` instead of wedging on it.
+# Order matters: configure the OpenResty repo BEFORE any apt cache update. The
+# repo file is (re)written here too, so a re-run after a failed attempt that left
+# a stale (trixie) openresty.sources self-heals — the bookworm suite lands before
+# the first `apt update` instead of wedging on it.
 
 - name: Ensure the apt keyrings directory exists
   ansible.builtin.file:
@@ -17,42 +17,15 @@
     state: directory
     mode: "0755"
 
-# Both repos are signed by ASCII-armored keys; apt reads .asc files via signed-by
-# directly, so no dearmor step is needed.
-- name: Install the NodeSource and OpenResty signing keys
+# OpenResty's repo is signed by an ASCII-armored key; apt reads .asc files via
+# signed-by directly, so no dearmor step is needed. (Node comes from Debian's own
+# repo — trixie ships nodejs 20.19.x, which is new enough to build NPM's frontend
+# (vite 8 needs >= 20.19) and run its backend, so we don't add NodeSource.)
+- name: Install the OpenResty signing key
   ansible.builtin.get_url:
-    url: "{{ item.url }}"
-    dest: "{{ item.dest }}"
+    url: https://openresty.org/package/pubkey.gpg
+    dest: /etc/apt/keyrings/openresty.asc
     mode: "0644"
-  loop:
-    - url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
-      dest: /etc/apt/keyrings/nodesource.asc
-    - url: https://openresty.org/package/pubkey.gpg
-      dest: /etc/apt/keyrings/openresty.asc
-
-- name: Add the NodeSource (Node {{ npm_node_major }}) apt repository
-  ansible.builtin.deb822_repository:
-    name: nodesource
-    types: deb
-    uris: "https://deb.nodesource.com/node_{{ npm_node_major }}.x"
-    suites: nodistro
-    components: main
-    signed_by: /etc/apt/keyrings/nodesource.asc
-
-# Pin nodejs to NodeSource. Debian 13 ships a *newer* nodejs (20.x) than our
-# pinned NodeSource 18.x, so without this apt prefers Debian's by version and
-# (a) silently breaks the Node-18 pin and (b) leaves no `npm` — Debian splits npm
-# into its own package, while NodeSource's nodejs bundles it. Priority > 1000 so
-# apt installs NodeSource's nodejs even though it's a downgrade from Debian's.
-- name: Pin nodejs to the NodeSource repository
-  ansible.builtin.copy:
-    dest: /etc/apt/preferences.d/nodesource.pref
-    mode: "0644"
-    content: |
-      # Managed by Ansible (nginx-proxy-manager role). See tasks/main.yml.
-      Package: nodejs
-      Pin: origin deb.nodesource.com
-      Pin-Priority: 1001
 
 # OpenResty publishes per Debian codename but has no trixie repo yet, so pin
 # npm_openresty_suite (bookworm). It installs cleanly on trixie because OpenResty
@@ -81,9 +54,11 @@
       // Managed by Ansible (nginx-proxy-manager role). See tasks/main.yml.
       APT::Key::gpgvcommand "gpgv";
 
-# Single apt update, now that both repos are correct. Base build/runtime deps
-# plus OpenResty land together. nodejs is handled separately just below.
-- name: Install base deps and OpenResty
+# Single apt update, now that the OpenResty repo is in place. Base build/runtime
+# deps, Node.js + npm (Debian's — npm is a separate package from nodejs here), and
+# OpenResty land together. node-gyp needs build-essential + python3 for the native
+# modules NPM's install compiles (e.g. @parcel/watcher).
+- name: Install base deps, Node.js and OpenResty
   ansible.builtin.apt:
     name:
       - curl
@@ -95,22 +70,11 @@
       - sqlite3
       - logrotate
       - rsync
+      - nodejs
+      - npm
       - openresty
     state: present
     update_cache: true
-
-# nodejs gets its own task because the NodeSource pin can only *choose* the
-# candidate — it can't replace an already-installed package whose version differs.
-# A CT left with Debian's nodejs (no bundled npm) from an earlier run, or with a
-# previous NodeSource major, would never switch under `state: present` (a no-op
-# for installed packages). `state: latest` reconciles to the pinned candidate
-# (NodeSource's npm_node_major, which carries npm) and `allow_downgrade` permits
-# the change in either direction. Idempotent once on the pinned major.
-- name: Install Node.js from NodeSource (reconcile to the pinned major)
-  ansible.builtin.apt:
-    name: nodejs
-    state: latest
-    allow_downgrade: true
 
 - name: Install yarn (NPM's package manager) at the pinned version
   ansible.builtin.command: "npm install -g yarn@{{ npm_yarn_version }}"

@@ -7,14 +7,15 @@
 # build is reproducible only against a fixed source tree. Bump deliberately.
 npm_version: "2.15.1"
 
-# Toolchain pins. Node 20: NPM's frontend build needs it (vite 8 requires Node
-# >= 20.19, and formatjs's ESM CLI won't run on 18), and the backend runs on it
-# too (no engines constraint; Node 20 still ships --openssl-legacy-provider, which
-# 22 dropped and the backend's runtime expects). yarn (classic) is NPM's package
-# manager — both frontend and backend lock with yarn.lock, so we install with
-# `yarn --frozen-lockfile` to reproduce the exact tested tree. Using pnpm here is
-# wrong: it ignores yarn.lock and floats every dep to latest (untested + breaks).
-npm_node_major: "20"
+# Node comes from Debian (trixie ships nodejs 20.19.x): new enough to build the
+# frontend (vite 8 needs Node >= 20.19) and run the backend (no engines constraint;
+# Node 20 still ships --openssl-legacy-provider, which 22 dropped and the backend's
+# runtime expects). No NodeSource — we'd only have needed it for an older major.
+#
+# yarn (classic) is NPM's package manager — both frontend and backend lock with
+# yarn.lock, so the build installs with `yarn --frozen-lockfile` to reproduce the
+# exact tested tree. Never pnpm/npm here: they ignore yarn.lock and float every dep
+# to latest (an untested tree that breaks the build).
 npm_yarn_version: "1.22.22"
 
 # OpenResty apt suite. OpenResty does NOT publish a Debian 13 (trixie) repo yet

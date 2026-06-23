@@ -33,6 +33,7 @@ cluster, so `certbot` is intentionally omitted — NPM serves plain HTTP on `:80
 | ---- | ------ | --- |
 | Install base deps | `apt` | curl, git, build-essential, python3, sqlite3, rsync, etc. |
 | Add NodeSource + OpenResty keys/repos | `get_url` + `apt_repository` | No apt package for Node 18 / OpenResty in Debian; signed-by `.asc` keyrings. |
+| Force apt to verify with `gpgv` | `copy` (apt.conf.d drop-in) | Debian 13's Sequoia `sqv` rejects OpenResty's SHA1-bound key; gpgv still verifies it. See Notes. |
 | Install Node.js + OpenResty | `apt` | The runtime (Node) and NPM's nginx (OpenResty). |
 | Install pnpm | `command` (`creates:`) | NPM's package manager, version-pinned. |
 | Create the `/data` tree + scratch dirs | `file` | Runtime state + nginx/cache scratch NPM expects at start. |
@@ -96,6 +97,13 @@ curl -H 'Host: chat.example.com' http://10.1.1.<ctid>/
   OpenResty bundles its own PCRE/OpenSSL (`openresty-pcre`/`openresty-openssl3`)
   and doesn't pull the EOL `libpcre3` that trixie removed. Bump the var to `trixie`
   once upstream publishes it.
+- **apt is pinned to the `gpgv` verifier on this CT** (`/etc/apt/apt.conf.d/99-zai-gpgv`).
+  Debian 13's apt verifies signatures with Sequoia (`sqv`), whose policy rejects
+  SHA1 key self-signatures from **2026-02-01**. OpenResty's signing key is SHA1-bound,
+  so sqv reports the (correctly signed) repo as "not signed" and the apt update fails
+  with `Sub-process /usr/bin/sqv returned an error code`. `gpgv` still verifies the
+  signature against the pinned key but accepts SHA1 self-sigs — authenticity is kept,
+  not disabled. This is independent of the bookworm suite pin (same key either way).
 - NPM without Docker is **unsupported upstream**; `npm-build.sh` follows the
   community dockerless assembly. Treat a `npm_version` bump as a change to test on
   a real CT, not a no-op.

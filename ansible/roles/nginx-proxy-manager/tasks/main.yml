@@ -51,6 +51,21 @@
     components: openresty
     signed_by: /etc/apt/keyrings/openresty.asc
 
+# Debian 13's apt verifies repo signatures with Sequoia (`sqv`), whose policy
+# rejects SHA1 key self-signatures from 2026-02-01. OpenResty's signing key is
+# SHA1-bound, so sqv reports the (correctly signed) repo as "not signed" and the
+# apt update wedges. Point apt at the classic GnuPG verifier (`gpgv`) instead:
+# it still verifies the signature against the pinned key, but accepts SHA1
+# self-sigs, so authenticity is preserved without disabling verification. This
+# applies to every repo on the CT; that's fine — gpgv verifies the others too.
+- name: Use gpgv (not Sequoia sqv) for apt signature verification
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/99-zai-gpgv
+    mode: "0644"
+    content: |
+      // Managed by Ansible (nginx-proxy-manager role). See tasks/main.yml.
+      APT::Key::gpgvcommand "gpgv";
+
 # Single apt update, now that both repos are correct. Base build/runtime deps
 # plus the toolchain land together.
 - name: Install base deps, Node.js and OpenResty

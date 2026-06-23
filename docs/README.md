@@ -345,6 +345,17 @@ Debian 13's `ansible` 12). These will recur on the remaining service CTs:
 
 [community.proxmox #98]: https://github.com/ansible-collections/community.proxmox/issues/98
 
+Lessons on third-party apt repos under **Debian 13** (any CT):
+
+- **Debian 13 verifies apt signatures with Sequoia (`sqv`), which rejects SHA1
+  key self-signatures from 2026-02-01.** A third-party repo whose signing key is
+  SHA1-bound (e.g. OpenResty) fails the apt update with `Sub-process /usr/bin/sqv
+  returned an error code … not signed`, even though the signature is valid. Fix:
+  drop an apt.conf so apt uses the classic `gpgv` verifier
+  (`APT::Key::gpgvcommand "gpgv";`) — it checks the same signature but accepts
+  SHA1 self-sigs, so authenticity is kept rather than disabled. See the
+  [nginx-proxy-manager](roles/nginx-proxy-manager.md) role.
+
 Hard-won lessons on the bare-metal **inference nodes** (Debian 13 + NVIDIA):
 
 - **Secure Boot must be disabled** in BIOS — unsigned NVIDIA kernel modules

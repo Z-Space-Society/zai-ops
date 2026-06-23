@@ -3,6 +3,11 @@
 # this file). Kept out of the vault on purpose: the Proxmox node name isn't a
 # secret, and hardcoding it into playbooks breaks the "rebuilds on any host"
 # principle. Override per deployment.
+#
+# TODO: this is the LAST this-cluster fact still committed to the repo — the
+# service-CT numbers/IPs are now runtime data (inventory/local.yml). Source the
+# node name from runtime data the same way to finish the ADR-0001 split, so the
+# committed tree targets any host. Tracked in docs/README.md#todo.
 proxmox_node_name: alhambra
 
 # CTIDs the assign action (ansible/assign.yml) refuses to hand out — the safety

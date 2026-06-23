@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # zai-assign — thin wrapper over ansible/assign.yml. Assign a service to a CTID:
 #
-#   zai-assign nginx 104                  # nginx → CTID 104 (10.1.1.104)
-#   zai-assign nginx 105 -e reassign=true # move an existing assignment
+#   zai-assign npm 104                  # npm → CTID 104 (10.1.1.104)
+#   zai-assign npm 105 -e reassign=true # move an existing assignment
 #
 # No logic lives here — the playbook validates and persists the assignment.
 set -euo pipefail
@@ -11,5 +11,10 @@ if [[ $# -lt 2 ]]; then
   exit 64
 fi
 service="$1"; ctid="$2"; shift 2
-exec ansible-playbook /opt/zai-ops/ansible/assign.yml \
+# Run from the ansible dir so ansible.cfg loads regardless of the caller's CWD —
+# it supplies the inventory (relative: inventory/) and the vault password file.
+# Without this, calling zai-assign from elsewhere finds no inventory and can't
+# decrypt the vault.
+cd /opt/zai-ops/ansible
+exec ansible-playbook assign.yml \
   -e "service=$service ctid=$ctid" "$@"

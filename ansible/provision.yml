@@ -5,6 +5,7 @@
 # logical name:
 #
 #   zai-assign npm 101                   # record npm → CTID 101 (10.1.1.101)
+#   zai-assign caddy 106                  # the trial Caddy proxy → CTID 106
 #   ansible-playbook provision.yml --limit npm
 #
 # The CTID comes from the runtime assignment (inventory/local.yml); this play
@@ -90,6 +91,12 @@
   gather_facts: true
   roles:
     - nginx-proxy-manager
+
+- name: Configure the Caddy reverse proxy (trial)
+  hosts: caddy
+  gather_facts: true
+  roles:
+    - caddy
 
 - name: Configure the object store
   hosts: object-store

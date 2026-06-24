@@ -1,0 +1,21 @@
+---
+# Caddy — a trial reverse proxy running alongside npm (nginx-proxy-manager) for
+# an in-place comparison. Unlike npm, whose proxy hosts live in a UI/SQLite DB,
+# Caddy's routes are declarative and committed here — the CT holds no
+# unreproducible state (config in git, cert in the vault).
+
+# Where the Cloudflare Origin CA cert/key land on the CT. The material itself is
+# a secret and comes from the vault (cloudflare_origin_cert/_key); these are just
+# the install paths the Caddyfile points its `tls` directive at.
+caddy_cert_path: /etc/caddy/cloudflare-origin.pem
+caddy_key_path: /etc/caddy/cloudflare-origin.key
+
+# Data-driven proxy routes — the reproducibility win over npm. Each entry maps a
+# public domain to an internal service; the upstream IP is DERIVED from that
+# service's CTID via hostvars (10.1.1.<ctid>), never hardcoded — same convention
+# the inventory uses. Empty by default: with no entries the Caddyfile still
+# validates (the :80 health/redirect site below). Fill in as services come online
+# and are assigned a CTID with `zai-assign`.
+caddy_proxy_hosts: []
+#  - { domain: chat.example.com, service: open-webui, port: 8080 }
+#  - { domain: api.example.com,  service: litellm,    port: 4000 }

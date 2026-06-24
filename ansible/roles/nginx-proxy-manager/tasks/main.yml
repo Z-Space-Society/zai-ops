@@ -152,6 +152,32 @@
     dest: /usr/local/bin/npm-build.sh
     mode: "0700"
 
+# The packaged openresty unit runs `nginx` with no -c, so it loads the stock
+# conf/nginx.conf and ignores NPM's config (the admin UI on :81 never opens). NPM's
+# nginx.conf lives at the prefix root and its relative includes (conf.d/...) resolve
+# against that dir, so point nginx at it explicitly with prefix = root. Done as a
+# drop-in (not by moving the file into conf/, which breaks those relative includes).
+- name: Ensure the OpenResty unit drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/openresty.service.d
+    state: directory
+    mode: "0755"
+
+- name: Point OpenResty at NPM's nginx.conf (systemd drop-in)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/openresty.service.d/override.conf
+    mode: "0644"
+    content: |
+      # Managed by Ansible (nginx-proxy-manager role). See tasks/main.yml.
+      [Service]
+      ExecStartPre=
+      ExecStartPre=/usr/local/openresty/nginx/sbin/nginx -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/nginx.conf -t -q -g 'daemon on; master_process on;'
+      ExecStart=
+      ExecStart=/usr/local/openresty/nginx/sbin/nginx -p /usr/local/openresty/nginx -c /usr/local/openresty/nginx/nginx.conf -g 'daemon on; master_process on;'
+  notify:
+    - reload systemd
+    - restart openresty
+
 # Version-aware: the script no-ops when the installed marker already matches
 # npm_version, so a re-run is a no-op and a deliberate bump triggers a rebuild.
 - name: Build and stage NPM v{{ npm_version }}
@@ -192,6 +218,11 @@
     - openresty
     - npm
 
+# Validate the config the service actually runs (NPM's, from the prefix root) —
+# NOT a bare `nginx -t`, which tests the stock conf/nginx.conf and would pass even
+# when NPM's config is broken (exactly how a green run once hid a dead :81).
 - name: Validate the assembled OpenResty configuration
-  ansible.builtin.command: /usr/sbin/nginx -t
+  ansible.builtin.command: >-
+    /usr/sbin/nginx -p /usr/local/openresty/nginx
+    -c /usr/local/openresty/nginx/nginx.conf -t
   changed_when: false

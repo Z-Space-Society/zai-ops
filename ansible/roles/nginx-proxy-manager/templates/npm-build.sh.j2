@@ -49,15 +49,13 @@ rm -f /usr/local/openresty/nginx/conf.d/dev.conf
 
 # Adapt NPM's container nginx.conf for a systemd host: run in the foreground (the
 # unit supervises it), as root, with no pidfile collision, and absolute includes.
+# This nginx.conf stays at the prefix ROOT — NPM's relative includes (conf.d/...)
+# resolve against the main config file's directory, so it MUST load from here, not
+# from conf/. The openresty systemd drop-in points nginx at it (-c) with prefix at
+# the root; see the role's tasks. (Don't copy it into conf/: relative includes
+# would then resolve to conf/conf.d/... and fail.)
 conf=/usr/local/openresty/nginx/nginx.conf
 sed -i 's/^daemon/#daemon/g; s/^user npm/user root/g; s/^pid/#pid/g; s#include conf.d#include /etc/nginx/conf.d#g' "$conf"
-
-# The openresty unit runs `nginx` with no -c, so it loads the compiled default
-# conf/nginx.conf — NOT the nginx.conf we just staged at the prefix root. Overwrite
-# that default with NPM's (already path-patched above) so the service actually
-# serves NPM's config: the admin UI on :81 and the proxy on :80/:443. Without this
-# OpenResty silently keeps serving its stock welcome page on :80 and :81 never opens.
-cp "$conf" /usr/local/openresty/nginx/conf/nginx.conf
 
 # NPM's config declares a proxy_cache_path under /var/lib/nginx/cache; nginx only
 # mkdir's the leaf, so the parent must exist or `nginx -t`/startup fails with

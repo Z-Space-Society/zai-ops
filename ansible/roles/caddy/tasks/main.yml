@@ -1,0 +1,67 @@
+---
+# Install and configure Caddy as a trial reverse proxy, beside npm. A single apt
+# package replaces npm's whole OpenResty + Node + yarn source build; the config
+# is a declarative Caddyfile rendered from caddy_proxy_hosts, so the CT keeps no
+# unreproducible state.
+
+# Debian's own package — no third-party apt repo, so none of the signing-key /
+# sqv friction the OpenResty repo needs on Debian 13. Ships the `caddy` user,
+# /etc/caddy/, /var/lib/caddy and caddy.service.
+- name: Install Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+
+# Cloudflare Origin CA cert + key (long-lived, no ACME) come from the vault.
+# Installed before the Caddyfile so the `tls` directive's files exist when the
+# config is validated/started. Key is 0600 owned by the caddy daemon user; the
+# cert is world-readable (it's public).
+- name: Install the Cloudflare Origin CA certificate
+  ansible.builtin.copy:
+    content: "{{ cloudflare_origin_cert }}"
+    dest: "{{ caddy_cert_path }}"
+    owner: caddy
+    group: caddy
+    mode: "0644"
+  no_log: true
+  notify: reload caddy
+
+- name: Install the Cloudflare Origin CA private key
+  ansible.builtin.copy:
+    content: "{{ cloudflare_origin_key }}"
+    dest: "{{ caddy_key_path }}"
+    owner: caddy
+    group: caddy
+    mode: "0600"
+  no_log: true
+  notify: reload caddy
+
+# Render the routes. `validate` is the nginx -t analog — a bad Caddyfile (e.g. an
+# upstream service with no CTID) fails the task instead of being deployed.
+- name: Deploy the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: caddy
+    group: caddy
+    mode: "0644"
+    validate: "caddy validate --adapter caddyfile --config %s"
+  notify: reload caddy
+
+- name: Ensure caddy is started and enabled
+  ansible.builtin.systemd:
+    name: caddy
+    state: started
+    enabled: true
+
+# Flush the reload now so the running daemon reflects the just-deployed config
+# before we assert on it.
+- name: Apply pending caddy reloads before validating
+  ansible.builtin.meta: flush_handlers
+
+# Final guard: confirm the live config file is valid (mirrors npm's nginx -t).
+- name: Validate the deployed Caddyfile
+  ansible.builtin.command:
+    cmd: caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
+  changed_when: false

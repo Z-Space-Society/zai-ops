@@ -82,7 +82,9 @@ ansible-playbook provision.yml --limit npm      # create + configure npm
         │           │                                                        │
    ┌────┴─────┐     │   CT 101  npm  (Nginx Proxy Manager, LAN-facing)      │
    │ clients  │────▶│      • net0 vmbr0 (DHCP), net1 vmbr1 10.1.1.101       │
-   └──────────┘     │                                                        │
+   └──────────┘     │   CT 106  caddy  (trial reverse proxy, LAN-facing)    │
+                    │      • net0 vmbr0 (DHCP), net1 vmbr1 10.1.1.106       │
+                    │                                                        │
                     │   CT 102+ postgres / litellm / open-webui  (internal) │
                     │      • vmbr1 only, route out via host NAT (10.1.1.1)   │
                     └────────────────────────────────────────────────────────┘
@@ -94,6 +96,11 @@ ansible-playbook provision.yml --limit npm      # create + configure npm
   reverse-proxies the internal services. Proxy hosts are managed in its web UI
   (port 81, internal-only); that config is runtime state in `/data`, captured by
   the [`backup`](#backups) job — not in git.
+- **CT 106 (caddy)** is a **trial** second reverse proxy standing beside npm for
+  an in-place comparison (npm is untouched). Also LAN-facing, but its routes are
+  declarative in git ([`caddy` role](roles/caddy.md)) rather than UI state — so
+  the CT holds nothing that needs backing up. Only one public hostname should
+  point at a given proxy at a time (controlled at Cloudflare).
 - **CT 102-104** (postgres, litellm, open-webui) live only on the internal
   network and are reached through npm.
 - **CT 105** (object-store, Garage) is internal-only too — it's the restic
@@ -114,6 +121,7 @@ LAN.
 | Proxmox host         | physical NIC  | `10.1.1.1` (NAT gateway)          |
 | CT 100 control node  | DHCP          | `10.1.1.100`                      |
 | CT 101 npm (NPM)     | DHCP          | `10.1.1.101`                      |
+| CT 106 caddy (trial) | DHCP          | `10.1.1.106`                      |
 | CT 102+ services     | —             | `10.1.1.10X` (gw `10.1.1.1`)      |
 | CT 105 object-store  | —             | `10.1.1.105` (gw `10.1.1.1`)      |
 
@@ -121,7 +129,8 @@ LAN.
   internal traffic out via `vmbr0`, so internal-only CTs can still `apt`/`pip`.
 - Service CTs get **static** internal IPs, so CT 100 always knows where to SSH
   (no DHCP guessing).
-- npm is **dual-homed** (LAN + internal); the rest are internal-only.
+- npm — and the trial caddy CT — are **dual-homed** (LAN + internal); the rest
+  are internal-only.
 - The specific numbers above (101–105) are this cluster's **assigned** layout, not
   committed identity — each is bound with `zai-assign` and could differ on another
   host. What's fixed is the `10.1.1.{ctid}` convention. See
@@ -257,6 +266,7 @@ specs aren't filled in yet, so a no-`--limit` run is safe.
 | ------------------------------------------ | ---------- | ------------------------------------------------------- |
 | [`control_node`](roles/control_node.md)    | CT 100     | Base config for the Ansible control node                |
 | [`nginx-proxy-manager`](roles/nginx-proxy-manager.md) | `npm` | Install Nginx Proxy Manager natively (no Docker) — the cluster reverse proxy |
+| [`caddy`](roles/caddy.md)                  | `caddy`    | Caddy reverse proxy (trial, beside npm) — single apt package, git-tracked routes |
 | [`nvidia_cuda`](roles/nvidia_cuda.md)      | inference nodes | NVIDIA driver + CUDA toolkit (bare-metal Debian 13) |
 | [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |

@@ -1,0 +1,8 @@
+---
+# Graceful, zero-downtime config swap: the Debian unit's reload runs
+# `caddy reload`, which loads the new Caddyfile via the admin API without
+# dropping connections.
+- name: reload caddy
+  ansible.builtin.service:
+    name: caddy
+    state: reloaded

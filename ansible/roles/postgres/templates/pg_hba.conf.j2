@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+# Client authentication. Full-file template — reproducible auth posture.
+#
+# TYPE  DATABASE  USER  ADDRESS                      METHOD
+
+# Local Unix-socket access via peer auth. Load-bearing: `su - postgres -c psql`
+# (used by the backup's pg_dumpall and the role's verify) relies on these.
+local   all       postgres                           peer
+local   all       all                                peer
+
+# Loopback TCP — password auth (SCRAM).
+host    all       all   127.0.0.1/32                 scram-sha-256
+host    all       all   ::1/128                      scram-sha-256
+
+# Internal network — other CTs on vmbr1 authenticate with SCRAM passwords. Inert
+# until an app role creates a password-bearing role; this is the rule that lets it
+# connect when it does.
+host    all       all   {{ postgres_hba_subnet }}    scram-sha-256

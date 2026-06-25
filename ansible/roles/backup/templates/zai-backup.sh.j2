@@ -42,9 +42,15 @@ echo "zai-backup: backing up control-node state"
 restic backup --tag zai-control-node "${paths[@]}"
 
 {% if backup_postgres_enabled %}
-# --- Tier 2: service databases (enabled) ----------------------------------
-# pg_dump each database over SSH and stream it straight into restic.
-# (Wired when Postgres / CT 102 is online.)
+# --- Tier 2: service databases --------------------------------------------
+# Cluster-wide pg_dumpall over SSH (peer auth as the postgres superuser on the
+# CT) streamed straight into restic via stdin — no dump file lands on disk on
+# either box. --clean --if-exists makes the dump restorable onto a populated
+# cluster. set -euo pipefail + exit propagation through su/ssh mean a failed dump
+# fails the whole job rather than snapshotting a partial dump.
+echo "zai-backup: dumping Postgres from the postgres CT"
+ssh root@{{ hostvars['postgres'].ansible_host }} "su - postgres -c 'pg_dumpall --clean --if-exists'" \
+  | restic backup --tag zai-postgres --stdin --stdin-filename pg_dumpall.sql
 {% endif %}
 
 echo "zai-backup: pruning old snapshots"
@@ -53,5 +59,13 @@ restic forget --tag zai-control-node \
   --keep-weekly {{ backup_keep_weekly }} \
   --keep-monthly {{ backup_keep_monthly }} \
   --prune
+
+{% if backup_postgres_enabled %}
+restic forget --tag zai-postgres \
+  --keep-daily {{ backup_keep_daily }} \
+  --keep-weekly {{ backup_keep_weekly }} \
+  --keep-monthly {{ backup_keep_monthly }} \
+  --prune
+{% endif %}
 
 echo "zai-backup: done"

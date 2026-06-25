@@ -103,3 +103,9 @@
   gather_facts: true
   roles:
     - object_store
+
+- name: Configure the Postgres database server
+  hosts: postgres
+  gather_facts: true
+  roles:
+    - postgres

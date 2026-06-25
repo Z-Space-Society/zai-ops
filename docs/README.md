@@ -273,10 +273,10 @@ specs aren't filled in yet, so a no-`--limit` run is safe.
 | [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
 | [`object_store`](roles/object_store.md)    | `object-store` | Single-node Garage (S3-compatible) — the on-box backup target |
+| [`postgres`](roles/postgres.md)            | `postgres` | PostgreSQL 17 (Debian-native) — the internal database server |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
 
-(More roles — postgres, litellm, open-webui — will be added here as they come
-online.)
+(More roles — litellm, open-webui — will be added here as they come online.)
 
 ---
 
@@ -327,11 +327,11 @@ ansible-playbook backup.yml
 ```
 
 **Tiers.** Tier 1 (control-node state) is live today. Tier 2 pulls service-CT
-state into the same repo: **NPM's `/data`** (the SQLite DB where proxy hosts live —
-made in the UI, not git) is wired and ready, enabled with
-`backup_npm_enabled: true` once the `npm` CT is up; service databases (`pg_dump`
-over SSH) remain a documented seam, inert until the Postgres CT exists. See
-[`backup`](roles/backup.md).
+state into the same repo, each enabled with a flag once its CT is up:
+**NPM's `/data`** (the SQLite DB where proxy hosts live — made in the UI, not git)
+with `backup_npm_enabled: true`, and **Postgres** (a cluster-wide `pg_dumpall`
+streamed over SSH straight into the repo, tag `zai-postgres`) with
+`backup_postgres_enabled: true`. See [`backup`](roles/backup.md).
 
 > **Scope caveat — this is not yet disaster recovery.** The object store sits on
 > the *same physical disk* as everything else, so today's backup guards

@@ -1,0 +1,70 @@
+---
+# Install PostgreSQL natively from Debian's own repo (no Docker, no PGDG repo).
+# Debian 13 ships PG 17, so this avoids the third-party-apt-key gotcha entirely.
+# This is a BARE server: it stands up the cluster and opens it to the internal
+# network with scram-sha-256, but creates no app databases or roles — each app
+# role provisions its own later (and must run AFTER this one so password_encryption
+# is already in effect when it sets a role password).
+
+- name: Install PostgreSQL
+  # postgresql-{{ ver }} pulls in postgresql-client-{{ ver }} and the -common
+  # packages; Debian's package auto-creates the `main` cluster (data + config under
+  # /etc/postgresql/{{ ver }}/main) and a stock postgresql.conf that already
+  # carries `include_dir = 'conf.d'`, so the drop-in below is read without touching
+  # the stock file.
+  ansible.builtin.apt:
+    name: "postgresql-{{ postgres_version }}"
+    state: present
+    update_cache: true
+
+- name: Configure listen addresses and password encryption
+  # conf.d drop-in, not an edit of the stock postgresql.conf — survives a cluster
+  # rebuild. zz- prefix so it's read last and wins. listen_addresses needs a full
+  # restart (not just a reload), hence the restart handler.
+  ansible.builtin.template:
+    src: zz-zai.conf.j2
+    dest: "/etc/postgresql/{{ postgres_version }}/main/conf.d/zz-zai.conf"
+    owner: postgres
+    group: postgres
+    mode: "0644"
+  notify: restart postgresql
+
+- name: Deploy pg_hba.conf
+  # Full-file template (reproducible auth posture). Keeps the local peer lines so
+  # `su - postgres -c psql` and the backup's pg_dumpall keep working, and adds the
+  # internal-subnet scram rule. A pg_hba change only needs a reload (SIGHUP).
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: "0640"
+  notify: reload postgresql
+
+- name: Ensure PostgreSQL is started and enabled
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true
+
+# Bring the server up with the final config BEFORE validating it.
+- name: Apply pending restarts/reloads before validation
+  ansible.builtin.meta: flush_handlers
+
+# The listener on the internal IP is the feature being shipped — a local-socket
+# check wouldn't prove listen_addresses took effect. pg_isready returns success
+# once the address accepts connections (no credentials needed).
+- name: Verify PostgreSQL is accepting connections on the internal IP
+  ansible.builtin.command: "pg_isready -h {{ ansible_host }} -p 5432"
+  changed_when: false
+
+# Final guard, the pg_hba analogue of caddy's `caddy validate`: PG parses pg_hba
+# at reload and records any bad line in pg_hba_file_rules.error. Fail on a malformed
+# rule instead of silently serving a half-applied auth policy.
+- name: Assert pg_hba.conf has no parse errors
+  ansible.builtin.command: >-
+    su - postgres -c
+    "psql -tAc 'SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL'"
+  register: postgres_hba_errors
+  changed_when: false
+  failed_when: postgres_hba_errors.stdout | trim | int > 0

@@ -40,8 +40,10 @@ backup_oncalendar: "*-*-* 03:00:00"
 backup_run_now: true
 
 # --- Tier 2 (service data) — service-CT state pulled to the control node -----
-# Postgres: inert until that CT is online; the wrapper will pg_dump over SSH into
-# the same restic repo. Left as the documented seam, not yet wired.
+# Postgres: the wrapper streams a cluster-wide pg_dumpall over SSH straight into
+# the same restic repo (tag zai-postgres). Wired and ready — flip on once the
+# postgres CT is provisioned. Requires postgres's CTID to be assigned first
+# (zai-assign), so hostvars['postgres'].ansible_host resolves.
 backup_postgres_enabled: false
 
 # Nginx Proxy Manager: its /data (SQLite DB + per-host nginx config) is the only

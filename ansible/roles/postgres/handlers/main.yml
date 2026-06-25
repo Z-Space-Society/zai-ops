@@ -1,0 +1,15 @@
+---
+# A listen_addresses change needs a full restart. The `postgresql` wrapper unit
+# fans a restart out to the instance, so it's fine here.
+- name: restart postgresql
+  ansible.builtin.service:
+    name: postgresql
+    state: restarted
+
+# A pg_hba change only needs a SIGHUP. Reload the INSTANCE unit, not the
+# `postgresql` wrapper: the wrapper is a oneshot, so reloading it is a no-op and
+# would silently leave pg_hba.conf un-reloaded.
+- name: reload postgresql
+  ansible.builtin.service:
+    name: "postgresql@{{ postgres_version }}-main"
+    state: reloaded

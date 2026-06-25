@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+# Read last (zz- prefix) from conf.d, so these win over the stock postgresql.conf.
+
+listen_addresses = '{{ postgres_listen_addresses }}'
+
+# scram-sha-256 is PG 17's default, but pin it so any role password set after this
+# is stored as SCRAM (must match the host scram rule in pg_hba.conf).
+password_encryption = scram-sha-256

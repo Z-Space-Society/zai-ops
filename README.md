@@ -39,22 +39,45 @@ itself from this repo.
    ansible-playbook verify-proxmox.yml  # confirm the API token authenticates
    ```
 
-4. Build the service containers. First **assign** each service a container ID
-   (`./zai-assign <service> <ctid>`, run from `ansible/`); the number is recorded
-   in git-ignored runtime state, so the committed blueprint stays number-free and
-   the same repo can stand up a cluster on whatever CTIDs are free. Then
-   `provision.yml` creates the CT over the Proxmox API and configures it over SSH.
-   Drive one at a time with `--limit` while the stack comes online:
+4. Build the service containers, one at a time. For each service, **assign** it a
+   container ID (`./zai-assign <service> <ctid>`, run from `ansible/`) then
+   provision it — `provision.yml` creates the CT over the Proxmox API and
+   configures it over SSH. The CTID is recorded in git-ignored runtime state, so
+   the committed blueprint stays number-free and the same repo stands up a cluster
+   on whatever CTIDs are free. **The numbers below are examples** — pick any free
+   ones; this cluster's actual layout is in the [docs](docs/README.md#networking).
 
    ```bash
-   ./zai-assign npm 101                          # npm → CTID 101 (10.1.1.101)
-   ansible-playbook provision.yml --limit npm    # create + configure it
+   # object store first — it's the restic backend the backup job writes to
+   ./zai-assign object-store 102
+   ansible-playbook provision.yml --limit object-store
+
+   # postgres — the internal database server
+   ./zai-assign postgres 103
+   ansible-playbook provision.yml --limit postgres
+
+   # npm — the only LAN-facing container (the reverse proxy)
+   ./zai-assign npm 101
+   ansible-playbook provision.yml --limit npm
+
+   # caddy — trial second reverse proxy, optional, beside npm
+   ./zai-assign caddy 104
+   ansible-playbook provision.yml --limit caddy
    ```
 
-   From here Ansible uses the Proxmox API to create and configure all
-   remaining containers.
+5. Turn on backups. restic on the control node backs up the unreproducible
+   runtime state to the object store on a daily timer. The control-node state
+   (Tier 1) is captured automatically; to also pull service-CT data into the same
+   repo (Tier 2), flip the relevant flags in
+   [`roles/backup/defaults/main.yml`](ansible/roles/backup/defaults/main.yml) once
+   those CTs are up — `backup_npm_enabled` (NPM's `/data`) and
+   `backup_postgres_enabled` (a cluster-wide `pg_dumpall`). Then:
 
-5. Bring the bare-metal inference nodes (salmon, orca, …) into the cluster.
+   ```bash
+   ansible-playbook backup.yml
+   ```
+
+6. Bring the bare-metal inference nodes (salmon, orca, …) into the cluster.
    Enrolling records the node in a git-ignored runtime inventory on the control
    node (names/IPs stay out of the repo); a second playbook configures it
    (NVIDIA driver + CUDA, then builds llama.cpp). Each node needs one-time prep
@@ -66,7 +89,7 @@ itself from this repo.
    ansible-playbook inference.yml --limit salmon
    ```
 
-6. (Optional) Give a person a login. Pulls their public keys from
+7. (Optional) Give a person a login. Pulls their public keys from
    `https://github.com/<user>.keys` and creates a same-named sudo account on the
    control node and every inference node. A temp password is printed; the user
    changes it on first login.

@@ -1,0 +1,16 @@
+---
+# PostgreSQL major version. Debian 13 (trixie) ships PG 17 in its own repo, so we
+# install postgresql-{{ postgres_version }} from Debian directly — no third-party
+# PGDG repo, which sidesteps the Sequoia/gpgv apt gotcha (see docs/README.md).
+postgres_version: 17
+
+# Addresses the server listens on. localhost for local tooling/peer auth, plus the
+# CT's internal IP (derived from its CTID in group_vars/service_containers.yml) so
+# other CTs on vmbr1 can connect. The CT is internal-only, so there's no LAN to
+# expose to.
+postgres_listen_addresses: "localhost,{{ ansible_host }}"
+
+# Subnet allowed to authenticate over TCP with scram-sha-256 — the internal
+# network. No role has a password yet (bare server), so remote auth is inert until
+# an app role creates one; this is the rule that lets it work when they do.
+postgres_hba_subnet: "10.1.1.0/24"

@@ -70,7 +70,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/backup/defaults/main.yml):
 | `backup_keep_daily/weekly/monthly` | `7 / 4 / 6` | restic retention. |
 | `backup_oncalendar` | `*-*-* 03:00:00` | Timer schedule (+ 15 min jitter). |
 | `backup_run_now` | `true` | Run once at the end of the play. |
-| `backup_postgres_enabled` | `false` | Tier-2 seam; inert until Postgres exists. |
+| `backup_postgres_enabled` | `false` | Tier-2 `pg_dumpall` over SSH; flip on once the `postgres` CT is up. |
 
 ### Secrets (auto-generated — no manual step)
 
@@ -117,7 +117,12 @@ restic restore latest --target /tmp/restore
     backup. **Restore:** `restic restore latest --target /tmp/restore`, then
     `rsync -a /tmp/restore/var/backups/npm-data/ root@<npm-ip>:/data/` and
     `systemctl restart npm`.
-  - **Postgres** — once that CT is online, set `backup_postgres_enabled: true` and
-    wire the `pg_dump`-over-SSH block in `zai-backup.sh.j2`.
+  - **Postgres** — wired. Set `backup_postgres_enabled: true` once the `postgres`
+    CT is up (and its CTID is assigned, so `hostvars['postgres'].ansible_host`
+    resolves); the wrapper streams a cluster-wide `pg_dumpall --clean --if-exists`
+    over SSH straight into the restic repo via `--stdin` (tag `zai-postgres`) — no
+    dump file on disk, on either box. **Restore:** `restic restore latest --target
+    /tmp/restore` (or `--tag zai-postgres`), then
+    `psql -f /tmp/restore/pg_dumpall.sql` as the `postgres` superuser on the CT.
 - For the trust model behind backing up the vault password, see the
   [main docs](../README.md#secrets--trust-model).

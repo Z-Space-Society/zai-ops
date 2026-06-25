@@ -8,10 +8,15 @@ Wants=network-online.target
 User={{ litellm_user }}
 Group={{ litellm_group }}
 EnvironmentFile={{ litellm_env_file }}
-# HOME under the daemon's own dir: LiteLLM's Prisma layer fetches a query-engine
-# binary on first run and caches it under $HOME/.cache — point it somewhere the
-# unit makes writable (below) rather than the unset/“/” default.
+# HOME under the daemon's own dir, and the same Prisma cache vars the role used at
+# provision time so the daemon reads the already-generated client + engine binary
+# instead of trying to fetch them. OFFLINE_MODE makes a missing engine a hard error
+# rather than a silent (and, under ProtectSystem=strict, failing) download attempt.
 Environment=HOME={{ litellm_home }}
+Environment=XDG_CACHE_HOME={{ litellm_prisma_cache }}
+Environment=PRISMA_BINARY_CACHE_DIR={{ litellm_prisma_cache }}/prisma-python/binaries
+Environment=PRISMA_HIDE_UPDATE_MESSAGE=1
+Environment=PRISMA_OFFLINE_MODE=true
 # Run the venv's console script directly (absolute path — no PATH reliance under
 # systemd). Config carries model routing; the port is pinned here. DATABASE_URL,
 # LITELLM_MASTER_KEY and STORE_MODEL_IN_DB come from the EnvironmentFile above.

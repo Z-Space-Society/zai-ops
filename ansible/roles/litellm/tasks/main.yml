@@ -130,20 +130,68 @@
     update_cache: true
 
 # pip with virtualenv= both CREATES the venv and installs into it — pip runs INSIDE
-# that venv, so PEP 668 doesn't apply (it's not the system environment). Pin the
-# version so the bundled Prisma schema is deterministic; a bump redeploys via the
-# restart handler.
-- name: Install litellm[proxy] into the dedicated venv
+# that venv, so PEP 668 doesn't apply (it's not the system environment). prisma is
+# installed alongside because litellm[proxy] omits it (it's in the extra_proxy
+# extra); pinning both keeps the schema + client deterministic. A bump redeploys
+# via the restart handler. PRISMA_SKIP_POSTINSTALL_GENERATE stops prisma's pip
+# hook from trying to generate with no schema in scope — we generate explicitly
+# below.
+- name: Install litellm[proxy] and prisma into the dedicated venv
   ansible.builtin.pip:
-    name: "litellm[proxy]=={{ litellm_version }}"
+    name:
+      - "litellm[proxy]=={{ litellm_version }}"
+      - "prisma=={{ litellm_prisma_version }}"
     virtualenv: "{{ litellm_venv }}"
     virtualenv_command: /usr/bin/python3 -m venv
+  environment:
+    PRISMA_SKIP_POSTINSTALL_GENERATE: "1"
   notify: restart litellm
 
-- name: Give the litellm user ownership of the venv
-  # pip ran as root; the daemon runs as litellm and needs to read the interpreter +
-  # the `litellm` console script (and, under ProtectSystem=strict, write Prisma's
-  # engine cache here). recurse so the whole tree is consistently owned.
+# --- Prisma client + schema (the native equivalent of the Docker build steps) ---
+# litellm[proxy] ships only the schema; running `litellm` directly neither
+# generates the Prisma client nor migrates the DB (the Docker entrypoint does both
+# out of band). So we do it here, at provision time, before the daemon ever starts.
+
+- name: Locate the litellm Prisma schema
+  # The schema ships inside the litellm_proxy_extras package; ask the venv where it
+  # is rather than hardcode a python3.13 site-packages path that a point release
+  # could move.
+  ansible.builtin.command:
+    cmd: >-
+      {{ litellm_venv }}/bin/python -c
+      "import litellm_proxy_extras, os;
+      print(os.path.join(os.path.dirname(litellm_proxy_extras.__file__), 'schema.prisma'))"
+  register: litellm_schema
+  changed_when: false
+
+- name: Generate the Prisma client
+  # Builds the Python client from the schema and fetches the query-engine binary
+  # into the cache (over the host NAT). venv/bin on PATH lets the prisma CLI find
+  # its prisma-client-py generator. No DB needed here, so no secret — left visible
+  # to aid debugging. Deterministic, so it carries no useful changed signal.
+  ansible.builtin.command:
+    cmd: "{{ litellm_venv }}/bin/prisma generate --schema {{ litellm_schema.stdout }}"
+  environment: "{{ litellm_prisma_env }}"
+  changed_when: false
+
+- name: Apply the litellm database schema (prisma migrate deploy)
+  # Creates/updates litellm's tables in the (already-created) litellm DB by applying
+  # the migration files litellm_proxy_extras ships. Idempotent: a converged DB
+  # reports "No pending migrations to apply". DATABASE_URL carries the password, so
+  # no_log; to debug a failure here, drop no_log temporarily.
+  ansible.builtin.command:
+    cmd: "{{ litellm_venv }}/bin/prisma migrate deploy --schema {{ litellm_schema.stdout }}"
+  environment: "{{ litellm_prisma_env | combine({'DATABASE_URL': litellm_database_url}) }}"
+  register: litellm_migrate
+  changed_when: "'No pending migrations to apply' not in litellm_migrate.stdout"
+  no_log: true
+  notify: restart litellm
+
+- name: Give the litellm user ownership of its home (venv, client, engine cache)
+  # pip/generate/migrate ran as root; the daemon runs as litellm and needs to read
+  # the interpreter, the `litellm` console script, the generated Prisma client and
+  # the engine cache. Runs AFTER generate/migrate so all of that is covered. recurse
+  # so the whole tree is consistently owned.
   ansible.builtin.file:
     path: "{{ litellm_home }}"
     state: directory
@@ -195,10 +243,9 @@
     enabled: true
     daemon_reload: true
 
-# Flush now so the daemon actually comes up (running its first-boot Prisma
-# migrations against the now-existing litellm DB) before we smoke-test it. The DB,
-# role and a valid DATABASE_URL all exist above this point — exactly what Prisma
-# needs on that first start.
+# Flush now so the daemon actually comes up before we smoke-test it. By this point
+# the Prisma client is generated and the schema is migrated, so startup connects to
+# a ready DB instead of crashing on a missing table.
 - name: Apply pending litellm restarts before the smoke test
   ansible.builtin.meta: flush_handlers
 

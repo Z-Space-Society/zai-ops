@@ -10,6 +10,14 @@
 # Releases: https://github.com/BerriAI/litellm/releases
 litellm_version: "1.89.4"
 
+# Prisma client (prisma-client-py). LiteLLM uses Prisma for its Postgres store but
+# `litellm[proxy]` does NOT pull it — prisma lives in the `extra_proxy` extra, and
+# even then the client must be generated + the schema migrated by hand (the Docker
+# image does this at build; we're native, so the role does it — see tasks). Pinned:
+# 0.15.0 is the newest prisma-client-py and the first to run on Python 3.13 (Debian
+# 13's interpreter), though its trove classifiers only list ≤3.12. Bump with care.
+litellm_prisma_version: "0.15.0"
+
 # Port the proxy listens on. 4000 is LiteLLM's own default and what the Caddy
 # route (caddy_proxy_hosts) assumes.
 litellm_port: 4000
@@ -36,6 +44,30 @@ litellm_env_file: /etc/litellm/litellm.env
 # hostvars['postgres'].ansible_host, so the DB IP is derived, never hardcoded.
 litellm_db_name: litellm
 litellm_db_user: litellm
+
+# The Postgres DSN, built once from the parts above so the env template and the
+# provision-time `prisma migrate deploy` use the identical string. The DB IP is
+# derived from postgres's CTID via hostvars, never hardcoded.
+litellm_database_url: "postgresql://{{ litellm_db_user }}:{{ litellm_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ litellm_db_name }}"
+
+# Where Prisma keeps its query-engine binary. Set identically at provision time
+# (generate/migrate) and in the systemd unit, so the engine fetched once during
+# provisioning is the one the daemon reads at runtime. Lives under litellm_home,
+# which is inside the unit's ReadWritePaths.
+litellm_prisma_cache: "{{ litellm_home }}/.cache"
+
+# Environment shared by the provision-time Prisma commands (generate + migrate).
+# venv/bin must lead PATH so the prisma CLI finds its `prisma-client-py` generator
+# sidecar; the cache vars pin where the engine lands. No DATABASE_URL here — only
+# `migrate` needs it, and it's added per-task (and no_log'd) to avoid leaking the
+# password into generate's visible output.
+litellm_prisma_env:
+  PATH: "{{ litellm_venv }}/bin:{{ ansible_env.PATH | default('/usr/sbin:/usr/bin:/sbin:/bin') }}"
+  HOME: "{{ litellm_home }}"
+  XDG_CACHE_HOME: "{{ litellm_prisma_cache }}"
+  PRISMA_BINARY_CACHE_DIR: "{{ litellm_prisma_cache }}/prisma-python/binaries"
+  PRISMA_HIDE_UPDATE_MESSAGE: "1"
+  PRISMA_SKIP_POSTINSTALL_GENERATE: "1"
 
 # Model routing. Empty by default so the proxy starts clean; STORE_MODEL_IN_DB
 # also lets models be added at runtime via the admin UI/API, persisted in Postgres.

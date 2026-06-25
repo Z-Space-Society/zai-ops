@@ -67,7 +67,7 @@ itself from this repo.
 
    # litellm - The AI Gateway
    zai-assign litellm 112
-   ansible-playbook provision.yml --limit postgres,litellm
+   ansible-playbook provision.yml --limit litellm
    ```
 
    (`zai-assign`, `zai-backup`, … are operator commands in the repo's

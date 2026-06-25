@@ -63,3 +63,11 @@ restic_repo_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ 
 # would need percent-encoding inside the DATABASE_URL.
 litellm_master_key: "sk-{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/litellm_master_key chars=digits,abcdef length=48') }}"
 litellm_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/litellm_db_password chars=digits,abcdef length=48') }}"
+
+# salt_key encrypts every provider credential STORE_MODEL_IN_DB writes to Postgres.
+# DISTINCT from master_key on purpose: LiteLLM falls back to the master key when this
+# is unset, which couples credential encryption to a key that is otherwise rotatable
+# — and the salt key CANNOT be changed once a model is stored (no recovery short of
+# dropping the encrypted rows). A dedicated, stable salt key keeps the two concerns
+# independent. Generated and pinned like master_key so it never silently changes.
+litellm_salt_key: "sk-{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/litellm_salt_key chars=digits,abcdef length=48') }}"

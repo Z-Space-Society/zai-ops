@@ -23,8 +23,9 @@ Environment=PRISMA_OFFLINE_MODE=true
 ExecStart={{ litellm_bin }} --config {{ litellm_config_file }} --port {{ litellm_port }}
 Restart=on-failure
 RestartSec=5
-# First start runs Prisma migrations, which can take longer than the default;
-# give the proxy room to come up before systemd treats it as failed.
+# Prisma migrations already ran at provision time, so startup is just app boot +
+# DB connect — but keep generous headroom so a slow first connect isn't treated as
+# a failure.
 TimeoutStartSec=120
 
 # Hardening: persistent state lives in Postgres. ProtectSystem=strict makes /

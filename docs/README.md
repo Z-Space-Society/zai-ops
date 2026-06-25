@@ -42,19 +42,23 @@ What it does, in order (each phase prints a numbered banner):
 1. **Configure apt repositories** — disable the enterprise/Ceph repos, add
    `pve-no-subscription`, update.
 2. **Upgrade host packages** — `apt-get full-upgrade`.
-3. **Create the internal network** — adds the `vmbr1` bridge (no uplink) with
+3. **Suppress the subscription nag** — patch `proxmox-widget-toolkit` so the
+   "No valid subscription" popup never fires, and install a dpkg post-invoke
+   hook (`/etc/apt/apt.conf.d/00-zai-no-nag`) so the patch is re-applied after
+   any upgrade that ships a fresh `proxmoxlib.js`. See [Known gotchas](#known-gotchas).
+4. **Create the internal network** — adds the `vmbr1` bridge (no uplink) with
    the host at `10.1.1.1`, plus a NAT/masquerade rule so internal-only CTs can
    reach the internet. See [Networking](#networking).
-4. **Enable IPv4 forwarding** — persisted in `/etc/sysctl.d/99-zai-forward.conf`.
-5. **Prepare the container template** — download `debian-13-standard` if absent.
-6. **Create the control node** — CT 100 (`ansible-control`), unprivileged,
+5. **Enable IPv4 forwarding** — persisted in `/etc/sysctl.d/99-zai-forward.conf`.
+6. **Prepare the container template** — download `debian-13-standard` if absent.
+7. **Create the control node** — CT 100 (`ansible-control`), unprivileged,
    2 cores / 2 GB / 8 GB, `net0` on `vmbr0` (DHCP). Skipped if it already exists.
-7. **Attach to the internal network** — give CT 100 a `vmbr1` NIC at `10.1.1.100`.
-8. **Provision the control node** — fix the locale (must happen before Ansible
+8. **Attach to the internal network** — give CT 100 a `vmbr1` NIC at `10.1.1.100`.
+9. **Provision the control node** — fix the locale (must happen before Ansible
    can run at all), install `ansible` + `git`, clone this repo to `/opt/zai-ops`,
    and put the repo's [`bin/`](#operator-commands) on PATH (so a fresh
    `pct enter` can run `zai-assign`/`zai-backup` before `site.yml` has run).
-9. **Mint the Proxmox API token + vault** — create the `ansible@pve` user, the
+10. **Mint the Proxmox API token + vault** — create the `ansible@pve` user, the
    `ZaiProvision` role, and a token; write the credentials into an encrypted
    Ansible Vault on CT 100. See [Secrets & trust model](#secrets--trust-model).
 
@@ -406,6 +410,18 @@ On the **control node** itself:
   Debian's interactive *non-login* bash does read. Both the bootstrap seed and the
   `control_node` role install both hooks; the snippet case-guards `$PATH` so nested
   shells don't keep prepending. (Check which you're in: `shopt -q login_shell`.)
+
+On the **Proxmox host** itself:
+
+- **The "No valid subscription" nag comes back after every upgrade.** The popup
+  is a client-side check in `proxmox-widget-toolkit`; a one-shot `sed` on
+  `proxmoxlib.js` is undone the moment `apt full-upgrade` ships a fresh copy of
+  that package. `bootstrap.sh` instead writes a tiny idempotent patcher
+  (`/usr/local/sbin/pve-no-nag`, marker-guarded so re-runs are no-ops) and wires
+  it as a dpkg `Post-Invoke` hook (`/etc/apt/apt.conf.d/00-zai-no-nag`), so the
+  patch is re-applied automatically after any package operation that replaces the
+  file. It restarts `pveproxy` only when it actually patches; hard-refresh the
+  browser afterward to clear the cached JS.
 
 Lessons on third-party apt repos under **Debian 13** (any CT):
 

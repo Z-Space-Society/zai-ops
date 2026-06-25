@@ -62,6 +62,36 @@ info "this can take a minute…"
 $APT full-upgrade
 done_ok "host up to date"
 
+# --- Suppress the "No valid subscription" web-UI nag -------------------------
+# The popup is a client-side check in proxmox-widget-toolkit; on the
+# no-subscription repo it's pure noise. We patch the toolkit's checked_command
+# to run the original command and return before the dialog fires, and install a
+# dpkg post-invoke hook so the patch survives every upgrade that ships a fresh
+# proxmoxlib.js (which would otherwise restore the nag — see Known gotchas).
+# Both the patcher and the hook key off a marker comment: absent on a
+# freshly-shipped file (so the hook re-patches), present on an already-patched
+# one (so re-runs are no-ops). pveproxy is restarted only when a patch is
+# actually applied, so firing on every apt run is cheap.
+step "Suppressing the subscription nag"
+cat > /usr/local/sbin/pve-no-nag <<'EOF'
+#!/bin/sh
+# Managed by zai-ops (bootstrap.sh). Re-applied after every apt run via
+# /etc/apt/apt.conf.d/00-zai-no-nag. Idempotent via the marker comment.
+JS=/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
+[ -f "$JS" ] || exit 0
+grep -q 'zai-ops: nag suppressed' "$JS" && exit 0
+sed -i "s|checked_command: function(orig_cmd) {|checked_command: function(orig_cmd) {\n\t    orig_cmd(); return; // zai-ops: nag suppressed|" "$JS"
+systemctl restart pveproxy.service 2>/dev/null || true
+EOF
+chmod 0755 /usr/local/sbin/pve-no-nag
+cat > /etc/apt/apt.conf.d/00-zai-no-nag <<'EOF'
+// Managed by zai-ops (bootstrap.sh): re-suppress the subscription nag after any
+// package operation that may have replaced proxmoxlib.js.
+DPkg::Post-Invoke { "/usr/local/sbin/pve-no-nag || true"; };
+EOF
+/usr/local/sbin/pve-no-nag
+done_ok "subscription nag suppressed (survives upgrades)"
+
 # --- Internal network: vmbr1 (no uplink) + NAT for outbound ---
 # The service containers (102-104) live only on this isolated bridge with no
 # LAN NIC, so the host masquerades their traffic out via vmbr0 — otherwise

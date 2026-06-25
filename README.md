@@ -61,7 +61,7 @@ itself from this repo.
    zai-assign postgres 102
    ansible-playbook provision.yml --limit postgres
 
-   # proxy — the LAN-facing reverse proxy (the cluster's edge)
+   # proxy — the LAN-facing reverse proxy
    zai-assign proxy 110
    ansible-playbook provision.yml --limit proxy
    ```

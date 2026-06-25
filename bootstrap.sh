@@ -80,7 +80,9 @@ cat > /usr/local/sbin/pve-no-nag <<'EOF'
 JS=/usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
 [ -f "$JS" ] || exit 0
 grep -q 'zai-ops: nag suppressed' "$JS" && exit 0
-sed -i "s|checked_command: function(orig_cmd) {|checked_command: function(orig_cmd) {\n\t    orig_cmd(); return; // zai-ops: nag suppressed|" "$JS"
+# PVE 9 renders this as `function (orig_cmd)` (with a space), PVE 8 without it;
+# the optional-space match + \1 backreference patches either without hardcoding.
+sed -i -E "s|(checked_command: function ?\(orig_cmd\) \{)|\1\n\t    orig_cmd(); return; // zai-ops: nag suppressed|" "$JS"
 systemctl restart pveproxy.service 2>/dev/null || true
 EOF
 chmod 0755 /usr/local/sbin/pve-no-nag

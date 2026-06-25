@@ -396,6 +396,17 @@ Debian 13's `ansible` 12). These will recur on the remaining service CTs:
 
 [community.proxmox #98]: https://github.com/ansible-collections/community.proxmox/issues/98
 
+On the **control node** itself:
+
+- **`pct enter` is a non-login shell, so `/etc/profile.d` never loads.** Putting
+  the repo's `bin/` on PATH via a `/etc/profile.d/zai-ops.sh` snippet alone left
+  `zai-assign` "command not found" inside `pct enter 100` — that shell is
+  interactive but *non-login*, and only login shells (and ssh) source
+  `/etc/profile.d`. Fix: also source the snippet from `/etc/bash.bashrc`, which
+  Debian's interactive *non-login* bash does read. Both the bootstrap seed and the
+  `control_node` role install both hooks; the snippet case-guards `$PATH` so nested
+  shells don't keep prepending. (Check which you're in: `shopt -q login_shell`.)
+
 Lessons on third-party apt repos under **Debian 13** (any CT):
 
 - **Debian 13 verifies apt signatures with Sequoia (`sqv`), which rejects SHA1

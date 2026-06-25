@@ -47,20 +47,33 @@
 
 # Operator commands (zai-assign, zai-backup, …) live in the repo's bin/ and run
 # in place — nothing is copied to /usr/local/bin, so the command you run is always
-# the one in git and a `git pull` is enough to update it. Put bin/ on PATH for
-# interactive root shells via /etc/profile.d so they're discoverable as `zai-*`.
-# Bootstrap seeds this same file (so a fresh `pct enter` works before site.yml
-# runs); we re-assert it here as the owning role — same seed-then-own pattern as
-# the locale above.
-- name: Put the repo's bin/ on PATH for interactive shells
+# the one in git and a `git pull` is enough to update it. Put bin/ on PATH so
+# they're discoverable as `zai-*`. Bootstrap seeds these same hooks (so a fresh
+# `pct enter` works before site.yml runs); we re-assert them here as the owning
+# role — same seed-then-own pattern as the locale above.
+- name: Put the repo's bin/ on PATH (login shells via /etc/profile.d)
   ansible.builtin.copy:
     dest: /etc/profile.d/zai-ops.sh
     owner: root
     group: root
     mode: "0644"
+    # Guard against re-prepending in nested shells so PATH doesn't grow.
     content: |
-      # Managed by the control_node role. Operator commands live in the repo.
-      export PATH="/opt/zai-ops/bin:$PATH"
+      # Managed by zai-ops. Operator commands (zai-assign, zai-backup) live in the repo.
+      case ":$PATH:" in
+        *:/opt/zai-ops/bin:*) ;;
+        *) export PATH="/opt/zai-ops/bin:$PATH" ;;
+      esac
+
+# `pct enter` gives an interactive *non-login* shell, which skips /etc/profile.d
+# entirely — so the snippet above never loads there. Interactive non-login bash
+# does read /etc/bash.bashrc on Debian, so source the snippet from there too.
+- name: Put the repo's bin/ on PATH (interactive non-login shells via /etc/bash.bashrc)
+  ansible.builtin.blockinfile:
+    path: /etc/bash.bashrc
+    marker: "# {mark} ANSIBLE MANAGED — zai-ops PATH"
+    block: |
+      [ -r /etc/profile.d/zai-ops.sh ] && . /etc/profile.d/zai-ops.sh
 
 # Home for auto-generated runtime secrets (object-store key, restic repo
 # password, …). The `password` lookup writes them here on first use; creating it

@@ -152,7 +152,7 @@ sleep 5
 # control_node role) re-runs locale-gen from this file; anything not listed
 # here gets wiped. Set LANG only — no LANGUAGE/LC_ALL.
 step "Provisioning control node (locale, Ansible, repo)"
-info "installing Ansible can take a few minutes…"
+info "installing Ansible…"
 pct exec "$CTID" -- bash -c "
   export DEBIAN_FRONTEND=noninteractive
   apt-get -qq update
@@ -161,12 +161,21 @@ pct exec "$CTID" -- bash -c "
   grep -q '^LANG=' /etc/environment || echo 'LANG=en_US.UTF-8' >> /etc/environment
   apt-get -qq -y install ansible git
   [ -d /opt/zai-ops ] || git clone --quiet $REPO_URL /opt/zai-ops
-  # Put the repo's operator commands (zai-assign, zai-backup, …) on PATH for
-  # interactive shells, so a fresh \`pct enter $CTID\` login can run them by name
-  # before site.yml has run. The control_node role re-asserts this idempotently
-  # (same pattern as the locale: seeded here, owned by Ansible thereafter).
-  printf '%s\n' '# Managed by zai-ops (bootstrap + control_node role).' \
-    'export PATH=\"/opt/zai-ops/bin:\$PATH\"' > /etc/profile.d/zai-ops.sh
+  # Put the repo's operator commands (zai-assign, zai-backup, …) on PATH so a
+  # fresh \`pct enter $CTID\` can run them by name before site.yml has run. The
+  # control_node role re-asserts these idempotently (seeded here, owned by Ansible
+  # thereafter — same pattern as the locale). Two hooks: /etc/profile.d covers
+  # login/ssh shells; sourcing it from /etc/bash.bashrc covers the interactive
+  # *non-login* shell \`pct enter\` gives, which skips profile.d. The case-guard
+  # stops nested shells from re-prepending and growing PATH.
+  printf '%s\n' \
+    '# Managed by zai-ops (bootstrap + control_node role).' \
+    'case \":\$PATH:\" in' \
+    '  *:/opt/zai-ops/bin:*) ;;' \
+    '  *) export PATH=\"/opt/zai-ops/bin:\$PATH\" ;;' \
+    'esac' > /etc/profile.d/zai-ops.sh
+  grep -q '/etc/profile.d/zai-ops.sh' /etc/bash.bashrc || \
+    printf '%s\n' '[ -r /etc/profile.d/zai-ops.sh ] && . /etc/profile.d/zai-ops.sh' >> /etc/bash.bashrc
 "
 done_ok "control node provisioned"
 
@@ -236,10 +245,12 @@ echo "Next, configure the control node and build the service containers:"
 echo
 echo "  pct enter $CTID"
 echo "  cd /opt/zai-ops/ansible"
-echo "  ansible-playbook site.yml                           # configure the control node"
-echo "  ansible-playbook verify-proxmox.yml                 # confirm API token"
-echo "  zai-assign proxy 110                                # assign proxy its CTID"
-echo "  ansible-playbook provision.yml --limit proxy        # create + configure proxy"
+echo "  ansible-playbook site.yml                            # configure the control node"
+echo "  ansible-playbook verify-proxmox.yml                  # confirm API token"
+echo "  zai-assign object-store 101                          # assign object-store its CTID"
+echo "  ansible-playbook provision.yml --limit object-store  # create + configure object-store"
+echo "  zai-assign postgres 102                              # assign postgres its CTID"
+echo "  ansible-playbook provision.yml --limit postgres      # create + configure postgres"
 
 # --- Vault password — printed LAST so it isn't scrolled away ---
 if [[ "$PROVISIONED" -eq 1 ]]; then

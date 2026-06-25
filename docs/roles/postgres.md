@@ -69,9 +69,10 @@ ssh root@10.1.1.<ctid> "su - postgres -c \"psql -c 'SELECT version()'\""
   like the Caddyfile / `garage.toml`). The local `peer` lines are load-bearing:
   `su - postgres -c psql` — used by the [`backup`](backup.md) role's `pg_dumpall`
   and this role's verify — depends on them.
-- **Backup:** the [`backup`](backup.md) role streams a cluster-wide `pg_dumpall`
-  over SSH into the restic repo (tag `zai-postgres`). Enable with
-  `backup_postgres_enabled: true` once this CT is up.
+- **Backup:** the [`backup`](backup.md) job streams a cluster-wide `pg_dumpall`
+  over SSH into the restic repo (tag `zai-postgres`). Enable by setting
+  `postgres_enabled=true` in [`bin/zai-backup`](../../bin/zai-backup) once this CT
+  is up (then `git pull` on the control node).
 - For how the CT is assigned a CTID, created and reached, see
   [`provision.yml`](../../ansible/provision.yml) and the
   [main docs](../README.md#service-ctid-assignment).

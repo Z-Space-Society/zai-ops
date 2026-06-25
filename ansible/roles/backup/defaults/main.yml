@@ -1,23 +1,13 @@
 ---
 # Control-node backup, via restic, to the cluster object store.
 #
-# What this protects: the git-ignored runtime state that turns a reflash from
-# "lost cluster" into "repo + restored state". Everything here is small but
-# unreproducible — losing it means re-minting the Proxmox token and re-enrolling
-# nodes by hand.
-
-# Always backed up (these exist after site.yml has configured the control node).
-backup_paths:
-  - /opt/zai-ops/ansible/group_vars/all/vault.yml   # Proxmox API token (encrypted)
-  - /root/.vault_pass                               # vault password (host root = trust boundary)
-  - /root/.ssh/id_ed25519                           # key injected into every service CT
-  - /root/.ssh/id_ed25519.pub
-  - /root/.zai-secrets                              # auto-generated secrets (object-store key, restic pw)
-
-# Backed up only if present — the inference-node roster doesn't exist until the
-# first node is enrolled.
-backup_optional_paths:
-  - /opt/zai-ops/ansible/inventory/local.yml
+# This role only holds the values needed to render the secret env file and run
+# the timer. The backup *behaviour* — what paths to capture, retention, the
+# postgres toggle, the schedule — lives in git, not here:
+#   - paths / retention / postgres on-off → /opt/zai-ops/bin/zai-backup (config block)
+#   - schedule (OnCalendar)               → roles/backup/files/zai-backup.timer
+# Edit those and `git pull`; no need to re-run this play (the timer schedule also
+# needs `systemctl daemon-reload`). See docs/roles/backup.md.
 
 # restic repository = the Garage S3 endpoint on the object-store CT. The IP is
 # read from inventory (not duplicated here) so it tracks a hosts.yml change.
@@ -26,32 +16,13 @@ backup_s3_bucket: "zai-backups"
 backup_s3_region: "garage"
 backup_repository: "s3:{{ backup_s3_endpoint }}/{{ backup_s3_bucket }}"
 
-# Snapshot retention applied after each run (restic forget --prune).
-backup_keep_daily: 7
-backup_keep_weekly: 4
-backup_keep_monthly: 6
-
-# When the timer fires (systemd OnCalendar). A randomized delay avoids a thundering
-# herd if more timed jobs are added later.
-backup_oncalendar: "*-*-* 03:00:00"
-
 # Run a backup immediately at the end of the play (validates the whole path
 # end-to-end). Turn off for a config-only apply.
 backup_run_now: true
 
-# --- Tier 2 (service data) — service-CT state pulled to the control node -----
-# Postgres: the wrapper streams a cluster-wide pg_dumpall over SSH straight into
-# the same restic repo (tag zai-postgres). Wired and ready — flip on once the
-# postgres CT is provisioned. Requires postgres's CTID to be assigned first
-# (zai-assign), so hostvars['postgres'].ansible_host resolves.
-backup_postgres_enabled: false
-
-# The proxy CT (Caddy) needs no Tier-2 backup: its routes live in git (the proxy
-# role's caddy_proxy_hosts) and its TLS cert in the vault, so the CT holds no
-# unreproducible state to capture.
-
 # restic_repo_password + object_store_access_key/secret_key are auto-generated in
-# group_vars/all/main.yml (same values Garage imported) — no manual step.
+# group_vars/all/main.yml (same values Garage imported) — no manual step. They
+# and ZAI_POSTGRES_HOST are rendered into /etc/zai-backup/restic.env (0600).
 #
 # NOTE for disaster recovery: the restic repo is encrypted with
 # restic_repo_password, which lives in /root/.zai-secrets *and* inside the repo

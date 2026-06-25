@@ -65,7 +65,7 @@ pct enter 100
 cd /opt/zai-ops/ansible
 ansible-playbook site.yml                       # configure the control node
 ansible-playbook verify-proxmox.yml             # confirm the API token
-./zai-assign proxy 110                          # assign proxy its CTID (10.1.1.110)
+zai-assign proxy 110                            # assign proxy its CTID (10.1.1.110)
 ansible-playbook provision.yml --limit proxy    # create + configure proxy
 ```
 
@@ -182,13 +182,13 @@ lives in the committed inventory and is slated for the same treatment — see
 
 The committed blueprint names services generically (`proxy`, `litellm`, …) and
 carries **no container numbers**. The operator binds a service to a container ID
-once, with the `zai-assign` script — run in place from `ansible/` on the control
-node (it isn't installed anywhere; it self-locates to load `ansible.cfg`):
+once, with the `zai-assign` command — one of the [operator
+commands](#operator-commands) in the repo's `bin/`, on PATH. It runs in place from
+git (self-locating to load `ansible.cfg`), so there's no installed copy to drift:
 
 ```bash
-cd /opt/zai-ops/ansible
-./zai-assign proxy 110                  # proxy is now CT 110 at 10.1.1.110, cluster-wide
-./zai-assign proxy 111 -e reassign=true # move it (reassign guards against accidental clobber)
+zai-assign proxy 110                  # proxy is now CT 110 at 10.1.1.110, cluster-wide
+zai-assign proxy 111 -e reassign=true # move it (reassign guards against accidental clobber)
 ```
 
 `zai-assign` is thin sugar over [`assign.yml`](#playbooks); the playbook is the
@@ -272,6 +272,29 @@ specs aren't filled in yet, so a no-`--limit` run is safe.
 
 ---
 
+## Operator commands
+
+The things an operator *runs by hand* live in the repo's [`bin/`](../bin/), put on
+PATH when the control node is configured. The convention:
+
+- **Named for what they do, not the tool underneath** — `zai-backup`, not
+  `zai-restic`; restic is an implementation detail hidden behind the command.
+- **Run in place from git.** Nothing is copied to `/usr/local/bin`, so the command
+  you run is always the one in the checkout — a `git pull` is the whole update
+  story, no playbook replay (the [prime directive](../CLAUDE.md): pull = live).
+
+| Command | Does | Backed by |
+| ------- | ---- | --------- |
+| `zai-assign <service> <ctid>` | Bind a service to a CTID in runtime inventory | [`assign.yml`](#playbooks) |
+| `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
+| `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
+
+Deployed *service* tooling (the `garage` binary, `garage-init.sh`) is a different
+category — it lives on its service CT, not the control node, and isn't an operator
+command. Only control-node operator commands belong in `bin/`.
+
+---
+
 ## Roles
 
 | Role                                       | Applied to | What it does                                            |
@@ -328,19 +351,23 @@ internal-only on `vmbr1`. restic encrypts and deduplicates, so the vault passwor
 and SSH key are safe at rest in the bucket.
 
 ```bash
-# Object store is the restic backend, so it's assigned and comes up first
-# (run zai-assign from /opt/zai-ops/ansible):
-./zai-assign object-store 105
+# Object store is the restic backend, so it's assigned and comes up first:
+zai-assign object-store 105
 ansible-playbook provision.yml --limit object-store
 ansible-playbook backup.yml
 ```
 
+The backup is one command, [`zai-backup`](#operator-commands) — `zai-backup` runs
+it (also what the timer fires), and any restic subcommand (`zai-backup snapshots`,
+`zai-backup check`, `zai-backup restore …`) is forwarded against the repo. restic
+is an implementation detail; operators never invoke it directly.
+
 **Tiers.** Tier 1 (control-node state) is live today. Tier 2 pulls service-CT
 state into the same repo, enabled with a flag once its CT is up: **Postgres**
 (a cluster-wide `pg_dumpall` streamed over SSH straight into the repo, tag
-`zai-postgres`) with `backup_postgres_enabled: true`. The proxy CT needs no
-Tier-2 backup — its routes are in git and its cert in the vault, so it holds no
-runtime state. See [`backup`](roles/backup.md).
+`zai-postgres`) with `postgres_enabled=true` in [`bin/zai-backup`](../bin/zai-backup).
+The proxy CT needs no Tier-2 backup — its routes are in git and its cert in the
+vault, so it holds no runtime state. See [`backup`](roles/backup.md).
 
 > **Scope caveat — this is not yet disaster recovery.** The object store sits on
 > the *same physical disk* as everything else, so today's backup guards

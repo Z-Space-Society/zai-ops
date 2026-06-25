@@ -45,10 +45,19 @@
     owner: root
     group: root
 
-# The CTID allocator's CLI (ansible/zai-assign) is NOT installed anywhere — it's
-# run in place from the repo checkout (`./zai-assign proxy 110` from /opt/zai-ops/
-# ansible). It self-locates to its own dir to load ansible.cfg, so there's no copy
-# on the box to drift from git.
+# Operator commands (zai-assign, zai-backup, …) live in the repo's bin/ and run
+# in place — nothing is copied to /usr/local/bin, so the command you run is always
+# the one in git and a `git pull` is enough to update it. Put bin/ on PATH for
+# interactive root shells via /etc/profile.d so they're discoverable as `zai-*`.
+- name: Put the repo's bin/ on PATH for interactive shells
+  ansible.builtin.copy:
+    dest: /etc/profile.d/zai-ops.sh
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by the control_node role. Operator commands live in the repo.
+      export PATH="/opt/zai-ops/bin:$PATH"
 
 # Home for auto-generated runtime secrets (object-store key, restic repo
 # password, …). The `password` lookup writes them here on first use; creating it

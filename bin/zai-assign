@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# zai-assign — thin wrapper over assign.yml. Assign a service to a CTID:
+#
+#   zai-assign proxy 110                  # proxy → CTID 110 (10.1.1.110)
+#   zai-assign proxy 111 -e reassign=true # move an existing assignment
+#
+# Lives in the repo's bin/ (on PATH via /etc/profile.d/zai-ops.sh) and runs in
+# place — the script you run is always the one in git, no installed copy to drift.
+# No logic lives here; the playbook validates and persists the assignment.
+set -euo pipefail
+if [[ $# -lt 2 ]]; then
+  echo "usage: zai-assign <service> <ctid> [extra ansible args]" >&2
+  exit 64
+fi
+service="$1"; ctid="$2"; shift 2
+# cd to the ansible dir (sibling of this bin/) so ansible.cfg loads no matter the
+# caller's CWD — it supplies the inventory (relative: inventory/) and the vault
+# password file. Self-locating off this script's path (not hardcoded) so the same
+# script works from any checkout: /opt/zai-ops on the box, a dev tree elsewhere.
+cd "$(dirname "$(readlink -f "$0")")/../ansible"
+exec ansible-playbook assign.yml \
+  -e "service=$service ctid=$ctid" "$@"

@@ -73,7 +73,8 @@ vault ([`group_vars/all/vault.yml`](../../ansible/group_vars/all/vault.yml)).
 Generate a (wildcard `*.example.com`) cert once in the Cloudflare dashboard
 (SSL/TLS → Origin Server → Create Certificate), paste cert + key into the vault,
 then set the Cloudflare SSL mode to **Full (strict)**. The vault is already in
-the [`backup`](backup.md) role's `backup_paths`, so no backup change is needed.
+the [`backup`](backup.md) job's `backup_paths` (in `bin/zai-backup`), so no
+backup change is needed.
 
 ## Verify
 

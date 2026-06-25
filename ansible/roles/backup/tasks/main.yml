@@ -1,6 +1,9 @@
 ---
-# Install restic on the control node and schedule a recurring backup of the
-# runtime state to the cluster object store.
+# Schedule a recurring backup of the control node's runtime state to the cluster
+# object store. The backup logic is /opt/zai-ops/bin/zai-backup (in git, on
+# PATH) — this role only installs restic, renders the secret env, and wires up
+# the systemd timer. Nothing is copied out of the repo, so a `git pull` makes
+# script/config changes live without re-running this play.
 
 - name: Install restic
   ansible.builtin.apt:
@@ -16,8 +19,10 @@
     group: root
     mode: "0700"
 
-# Holds the repo password + S3 credentials; root-only. The wrapper sources it.
-- name: Deploy the restic environment file
+# Holds the repo URL + password, S3 credentials, and the postgres CT's IP — the
+# secret/host-specific values the in-git script can't carry. Root-only; the
+# script sources it.
+- name: Render the restic environment file
   ansible.builtin.template:
     src: restic.env.j2
     dest: /etc/zai-backup/restic.env
@@ -25,30 +30,19 @@
     group: root
     mode: "0600"
 
-- name: Install the backup wrapper script
-  ansible.builtin.template:
-    src: zai-backup.sh.j2
-    dest: /usr/local/bin/zai-backup.sh
-    owner: root
-    group: root
-    mode: "0700"
-
-- name: Install the backup systemd service
-  ansible.builtin.template:
-    src: zai-backup.service.j2
-    dest: /etc/systemd/system/zai-backup.service
-    owner: root
-    group: root
-    mode: "0644"
-  notify: reload systemd
-
-- name: Install the backup systemd timer
-  ansible.builtin.template:
-    src: zai-backup.timer.j2
-    dest: /etc/systemd/system/zai-backup.timer
-    owner: root
-    group: root
-    mode: "0644"
+# Symlink (not copy) the systemd units from the repo so editing them in git and
+# pulling makes the change live after a daemon-reload — no re-render. ExecStart
+# already points at /opt/zai-ops/bin/zai-backup, so behaviour changes need
+# neither this play nor a reload, just a pull.
+- name: Symlink the backup systemd units into place
+  ansible.builtin.file:
+    src: "{{ role_path }}/files/{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    state: link
+    force: true
+  loop:
+    - zai-backup.service
+    - zai-backup.timer
   notify: reload systemd
 
 - name: Enable the backup timer
@@ -62,7 +56,7 @@
 # uninitialised repo) fails the play instead of silently waiting for 03:00.
 - name: Run an initial backup
   ansible.builtin.command:
-    cmd: /usr/local/bin/zai-backup.sh
+    cmd: /opt/zai-ops/bin/zai-backup run
   register: backup_initial
   changed_when: true
   when: backup_run_now | bool

@@ -1,9 +1,0 @@
-# {{ ansible_managed }}
-[Unit]
-Description=ZAI control-node backup (restic -> object store)
-Wants=network-online.target
-After=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/zai-backup.sh

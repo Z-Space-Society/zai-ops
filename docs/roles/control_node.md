@@ -23,6 +23,7 @@ used to reach service containers.
 | Install the Proxmox API client library | `ansible.builtin.apt` (`python3-proxmoxer`, `python3-requests`) | `community.proxmox` modules talk to the API through `proxmoxer`. |
 | Ensure root has an ed25519 SSH keypair | `ansible.builtin.user` (`generate_ssh_key`) | The public key is injected into each service CT at create time (the proxmox module's `pubkey`) so Ansible can SSH in afterward. Idempotent — only generates if absent. |
 | Assert the vault password file is root-only | `ansible.builtin.file` (`mode: 0600`) | Defense-in-depth: catches permission drift on `/root/.vault_pass`. The bootstrap already writes it with `umask 077`. |
+| Put the repo's `bin/` on PATH | `ansible.builtin.copy` (`/etc/profile.d/zai-ops.sh`) | Make the operator commands (`zai-assign`, `zai-backup`, …) discoverable as `zai-*` for interactive shells. They run in place from git — nothing is copied to `/usr/local/bin`, so `git pull` is enough to update them. |
 
 ## Variables
 
@@ -39,6 +40,10 @@ well-known control node.
 
 - **Order matters:** the locale task runs before the upgrade on purpose (see the
   table). Don't reorder.
+- **Operator commands live in [`bin/`](../../bin/), run in place.** `zai-assign`,
+  `zai-backup`, … are named for what they *do*, not the tool underneath; this role
+  only puts the directory on PATH. Nothing is installed to `/usr/local/bin`, so the
+  command you run is always the one in git — `git pull` updates them with no replay.
 - The generated key lives at `/root/.ssh/id_ed25519`; the create play reads
   `/root/.ssh/id_ed25519.pub` via a `lookup('file', ...)`.
 - See the [Secrets & trust model](../README.md#secrets--trust-model) for why the

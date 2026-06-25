@@ -4,7 +4,7 @@
 # injected below). A service must be assigned a CTID first; then drive it by its
 # logical name:
 #
-#   ./zai-assign proxy 110                # record proxy → CTID 110 (10.1.1.110)
+#   zai-assign proxy 110                  # record proxy → CTID 110 (10.1.1.110)
 #   ansible-playbook provision.yml --limit proxy
 #
 # The CTID comes from the runtime assignment (inventory/local.yml); this play
@@ -35,8 +35,8 @@
       ansible.builtin.assert:
         that: ctid is defined
         fail_msg: >-
-          {{ inventory_hostname }} has no CTID — run from ansible/:
-          ./zai-assign {{ inventory_hostname }} <ctid>
+          {{ inventory_hostname }} has no CTID —
+          run: zai-assign {{ inventory_hostname }} <ctid>
       when: ct_netif is defined
 
     - name: Create the LXC container

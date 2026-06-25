@@ -1,0 +1,14 @@
+# Managed by the `backup` role (symlinked into /etc/systemd/system). Static — no
+# templating — so it lives in git and edits are live on `git pull` + daemon-reload.
+# Changing the schedule is the one backup change that needs a daemon-reload (a
+# systemd constraint): `systemctl daemon-reload && systemctl restart zai-backup.timer`.
+[Unit]
+Description=Daily ZAI control-node backup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -40,7 +40,7 @@ itself from this repo.
    ```
 
 4. Build the service containers, one at a time. For each service, **assign** it a
-   container ID (`./zai-assign <service> <ctid>`, run from `ansible/`) then
+   container ID (`zai-assign <service> <ctid>`) then
    provision it — `provision.yml` creates the CT over the Proxmox API and
    configures it over SSH. The CTID is recorded in git-ignored runtime state, so
    the committed blueprint stays number-free and the same repo stands up a cluster
@@ -54,28 +54,38 @@ itself from this repo.
 
    ```bash
    # object store first — it's the restic backend the backup job writes to
-   ./zai-assign object-store 101
+   zai-assign object-store 101
    ansible-playbook provision.yml --limit object-store
 
    # postgres — the internal database server
-   ./zai-assign postgres 102
+   zai-assign postgres 102
    ansible-playbook provision.yml --limit postgres
 
    # proxy — the LAN-facing reverse proxy (the cluster's edge)
-   ./zai-assign proxy 110
+   zai-assign proxy 110
    ansible-playbook provision.yml --limit proxy
    ```
 
-5. Turn on backups. restic on the control node backs up the unreproducible
-   runtime state to the object store on a daily timer. The control-node state
-   (Tier 1) is captured automatically; to also pull service-CT data into the same
-   repo (Tier 2), flip the relevant flag in
-   [`roles/backup/defaults/main.yml`](ansible/roles/backup/defaults/main.yml) once
-   that CT is up — `backup_postgres_enabled` (a cluster-wide `pg_dumpall`). Then:
+   (`zai-assign`, `zai-backup`, … are operator commands in the repo's
+   [`bin/`](bin/), put on `PATH` when the control node is configured. They run in
+   place from git — nothing is copied to `/usr/local/bin`, so a `git pull` updates
+   them.)
+
+5. Turn on backups. The control node backs up the unreproducible runtime state
+   to the object store on a daily timer. The backup is one command, `zai-backup`:
 
    ```bash
-   ansible-playbook backup.yml
+   ansible-playbook backup.yml          # install the daily timer + run once now
+   zai-backup                           # run a backup by hand (what the timer fires)
+   zai-backup snapshots                 # list snapshots (any restic subcommand works)
+   zai-backup check                     # verify repository integrity
    ```
+
+   The control-node state (Tier 1) is captured automatically. To also pull
+   service-CT data into the same repo (Tier 2), set `postgres_enabled=true` in the
+   config block of [`bin/zai-backup`](bin/zai-backup) once the postgres CT is up
+   (a cluster-wide `pg_dumpall`) and `git pull` on the control node — no replay of
+   `backup.yml` needed.
 
 6. Bring the bare-metal inference nodes (salmon, orca, …) into the cluster.
    Enrolling records the node in a git-ignored runtime inventory on the control

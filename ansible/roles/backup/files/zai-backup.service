@@ -1,0 +1,10 @@
+# Managed by the `backup` role (symlinked into /etc/systemd/system). Static — no
+# templating — so it lives in git and edits are live on `git pull` + daemon-reload.
+[Unit]
+Description=ZAI control-node backup (to the cluster object store)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/zai-ops/bin/zai-backup run

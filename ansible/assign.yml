@@ -4,7 +4,7 @@
 #   ansible-playbook assign.yml -e "service=proxy ctid=110"
 #   ansible-playbook assign.yml -e "service=proxy ctid=110 reassign=true"
 #
-# (`./zai-assign <service> <ctid>`, run from this ansible dir, is sugar over this —
+# (`zai-assign <service> <ctid>`, the operator command in bin/, is sugar over this —
 # no logic lives in the wrapper.) From here on the service is authoritatively that CTID at
 # 10.1.1.<ctid> for every playbook, cluster-wide.
 #
@@ -104,7 +104,7 @@
         that: existing_ctid is none or is_noop or (reassign | default(false) | bool)
         fail_msg: >-
           '{{ service }}' is already assigned CTID {{ existing_ctid }}. To move it,
-          re-run with reassign=true (./zai-assign {{ service }} {{ ctid }} -e reassign=true).
+          re-run with reassign=true (zai-assign {{ service }} {{ ctid }} -e reassign=true).
 
     - name: Report the no-op and finish
       ansible.builtin.debug:

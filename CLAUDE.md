@@ -61,6 +61,16 @@ out and update the docs.
   rootfs storage `local-lvm` (overridable via `ct_rootfs_storage`).
 - **Inventory is data-driven.** Per-CT create specs (cores/memory/disk/netif)
   live on the host entry in `inventory/hosts.yml`; the create play reads them.
+- **Operator commands live in `bin/`, run in place from git.** Things a human runs
+  by hand (`zai-assign`, `zai-backup`) live in the repo's `bin/`, put on PATH by
+  the `control_node` role — *nothing* is copied to `/usr/local/bin`, so `git pull`
+  is the whole update story (pull = live; no playbook replay to sync a script).
+  Name them for what they *do*, not the tool underneath (`zai-backup`, not
+  `zai-restic`; restic is hidden behind a subcommand dispatch). Roles render only
+  the secret/host-specific bits an in-git script can't carry (e.g. creds + IPs in
+  `/etc/zai-backup/restic.env`), and symlink — not copy — committed systemd units
+  so unit edits are live on pull too. This generalizes the same rule that keeps the
+  blueprint number-free: the artifact is the repo, never a deployed copy.
 
 ## community.proxmox gotchas
 

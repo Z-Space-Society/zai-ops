@@ -232,7 +232,7 @@ echo "  pct enter $CTID"
 echo "  cd /opt/zai-ops/ansible"
 echo "  ansible-playbook site.yml                           # configure the control node"
 echo "  ansible-playbook verify-proxmox.yml                 # confirm API token"
-echo "  zai-assign npm 101                                  # assign npm its CTID"
+echo "  ./zai-assign npm 101                                # assign npm its CTID"
 echo "  ansible-playbook provision.yml --limit npm          # create + configure npm"
 
 # --- Vault password — printed LAST so it isn't scrolled away ---

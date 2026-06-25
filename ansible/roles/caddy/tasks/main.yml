@@ -13,10 +13,11 @@
     state: present
     update_cache: true
 
-# Cloudflare Origin CA cert + key (long-lived, no ACME) come from the vault.
-# Installed before the Caddyfile so the `tls` directive's files exist when the
-# config is validated/started. Key is 0600 owned by the caddy daemon user; the
-# cert is world-readable (it's public).
+# Cloudflare Origin CA cert + key (long-lived, no ACME) come from the vault, only
+# once they're present (caddy_tls_enabled). Installed before the Caddyfile so the
+# `tls` directive's files exist when the config is validated/started. Key is 0600
+# owned by the caddy daemon user; the cert is world-readable (it's public). Until
+# the cert lands in the vault the role serves HTTP-only and skips these.
 - name: Install the Cloudflare Origin CA certificate
   ansible.builtin.copy:
     content: "{{ cloudflare_origin_cert }}"
@@ -25,6 +26,7 @@
     group: caddy
     mode: "0644"
   no_log: true
+  when: caddy_tls_enabled | bool
   notify: reload caddy
 
 - name: Install the Cloudflare Origin CA private key
@@ -35,6 +37,7 @@
     group: caddy
     mode: "0600"
   no_log: true
+  when: caddy_tls_enabled | bool
   notify: reload caddy
 
 # Render the routes. `validate` is the nginx -t analog — a bad Caddyfile (e.g. an

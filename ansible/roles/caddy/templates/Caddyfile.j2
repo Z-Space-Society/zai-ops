@@ -2,37 +2,51 @@
 # Caddy reverse proxy — routes are git-tracked (caddy_proxy_hosts), not UI state.
 
 {
+{% if caddy_tls_enabled | bool %}
     # We supply origin TLS ourselves (Cloudflare Origin CA cert); never let Caddy
     # try to obtain its own certs over ACME — the Debian package has no DNS
     # plugin and ACME would fail behind Cloudflare anyway.
     auto_https disable_redirects
+{% else %}
+    # No Origin CA cert in the vault yet — serve plain HTTP only (no ACME).
+    auto_https off
+{% endif %}
 
     # Default admin endpoint, localhost-only — `caddy reload` uses it. Not LAN-exposed.
     admin localhost:2019
 }
 
+{% if caddy_tls_enabled | bool %}
 # Reusable snippet: the wildcard Cloudflare Origin CA cert covers every route.
 (origin_tls) {
     tls {{ caddy_cert_path }} {{ caddy_key_path }}
 }
 
-# Plain HTTP: health probe + redirect everything else to HTTPS. Keeps the config
-# valid (and the CT answerable) even when caddy_proxy_hosts is empty. handle
-# blocks are mutually exclusive and evaluated in order, so /healthz returns "ok"
-# instead of being caught by the catch-all redirect (Caddy sorts `redir` ahead of
-# a bare `respond` otherwise).
+{% endif %}
+# Plain HTTP catch-all: health probe, plus (when TLS is on) redirect everything
+# else to HTTPS. handle blocks are mutually exclusive and evaluated in order, so
+# /healthz returns "ok" instead of being caught by the redirect. Keeps the config
+# valid (and the CT answerable) even when caddy_proxy_hosts is empty.
 :80 {
     handle /healthz {
         respond "ok" 200
     }
+{% if caddy_tls_enabled | bool %}
     handle {
         redir https://{host}{uri}
     }
+{% endif %}
 }
 
 {% for h in caddy_proxy_hosts %}
+{% if caddy_tls_enabled | bool %}
 {{ h.domain }} {
     import origin_tls
     reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
 }
+{% else %}
+http://{{ h.domain }} {
+    reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
+}
+{% endif %}
 {% endfor %}

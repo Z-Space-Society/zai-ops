@@ -4,8 +4,8 @@
 #   ansible-playbook assign.yml -e "service=npm ctid=104"
 #   ansible-playbook assign.yml -e "service=npm ctid=104 reassign=true"
 #
-# (`zai-assign <service> <ctid>` on the control node is sugar over this — no logic
-# lives in the wrapper.) From here on the service is authoritatively that CTID at
+# (`./zai-assign <service> <ctid>`, run from this ansible dir, is sugar over this —
+# no logic lives in the wrapper.) From here on the service is authoritatively that CTID at
 # 10.1.1.<ctid> for every playbook, cluster-wide.
 #
 # Why a playbook and not hand-edited inventory: the container number is per-cluster
@@ -104,7 +104,7 @@
         that: existing_ctid is none or is_noop or (reassign | default(false) | bool)
         fail_msg: >-
           '{{ service }}' is already assigned CTID {{ existing_ctid }}. To move it,
-          re-run with reassign=true (zai-assign {{ service }} {{ ctid }} -e reassign=true).
+          re-run with reassign=true (./zai-assign {{ service }} {{ ctid }} -e reassign=true).
 
     - name: Report the no-op and finish
       ansible.builtin.debug:

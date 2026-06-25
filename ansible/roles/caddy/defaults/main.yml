@@ -10,6 +10,12 @@
 caddy_cert_path: /etc/caddy/cloudflare-origin.pem
 caddy_key_path: /etc/caddy/cloudflare-origin.key
 
+# Origin TLS auto-enables once the Cloudflare Origin CA cert is in the vault. Until
+# then the role stands Caddy up HTTP-only (proxying on :80) so the CT can be brought
+# up and smoke-tested before the cert exists — add cloudflare_origin_cert/_key to
+# the vault and re-run to flip on :443 + the :80→:443 redirect. Override to force.
+caddy_tls_enabled: "{{ cloudflare_origin_cert is defined }}"
+
 # Data-driven proxy routes — the reproducibility win over npm. Each entry maps a
 # public domain to an internal service; the upstream IP is DERIVED from that
 # service's CTID via hostvars (10.1.1.<ctid>), never hardcoded — same convention

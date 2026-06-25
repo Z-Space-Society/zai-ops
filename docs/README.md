@@ -65,7 +65,7 @@ pct enter 100
 cd /opt/zai-ops/ansible
 ansible-playbook site.yml                       # configure the control node
 ansible-playbook verify-proxmox.yml             # confirm the API token
-zai-assign npm 101                              # assign npm its CTID (10.1.1.101)
+./zai-assign npm 101                            # assign npm its CTID (10.1.1.101)
 ansible-playbook provision.yml --limit npm      # create + configure npm
 ```
 
@@ -172,11 +172,13 @@ lives in the committed inventory and is slated for the same treatment — see
 
 The committed blueprint names services generically (`npm`, `litellm`, …) and
 carries **no container numbers**. The operator binds a service to a container ID
-once, with the `zai-assign` CLI on the control node:
+once, with the `zai-assign` script — run in place from `ansible/` on the control
+node (it isn't installed anywhere; it self-locates to load `ansible.cfg`):
 
 ```bash
-zai-assign npm 104                  # npm is now CT 104 at 10.1.1.104, cluster-wide
-zai-assign npm 105 -e reassign=true # move it (reassign guards against accidental clobber)
+cd /opt/zai-ops/ansible
+./zai-assign npm 104                  # npm is now CT 104 at 10.1.1.104, cluster-wide
+./zai-assign npm 105 -e reassign=true # move it (reassign guards against accidental clobber)
 ```
 
 `zai-assign` is thin sugar over [`assign.yml`](#playbooks); the playbook is the
@@ -317,8 +319,9 @@ internal-only on `vmbr1`. restic encrypts and deduplicates, so the vault passwor
 and SSH key are safe at rest in the bucket.
 
 ```bash
-# Object store is the restic backend, so it's assigned and comes up first:
-zai-assign object-store 105
+# Object store is the restic backend, so it's assigned and comes up first
+# (run zai-assign from /opt/zai-ops/ansible):
+./zai-assign object-store 105
 ansible-playbook provision.yml --limit object-store
 ansible-playbook backup.yml
 ```

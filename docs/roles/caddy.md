@@ -24,6 +24,12 @@ to `:443`. That lets Cloudflare run **Full (strict)** to the origin. Caddy's
 automatic-HTTPS/ACME is disabled — the Debian package ships no DNS plugin and
 ACME would fail behind Cloudflare regardless.
 
+**TLS auto-enables on the cert.** `caddy_tls_enabled` defaults to "is
+`cloudflare_origin_cert` in the vault?". Until you add the cert the role stands
+Caddy up **HTTP-only** (routes proxy on `:80`, `auto_https off`), so the CT can be
+built and smoke-tested first; add the cert/key to the vault and re-run to flip on
+`:443` + the `:80`→`:443` redirect. No code change between the two — just the vault.
+
 ## Tasks
 
 | Task | Module | Why |
@@ -48,6 +54,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/caddy/defaults/main.yml):
 | -------- | ------- | ------- |
 | `caddy_cert_path` | `/etc/caddy/cloudflare-origin.pem` | Where the Origin CA cert lands; the `tls` directive points here. |
 | `caddy_key_path` | `/etc/caddy/cloudflare-origin.key` | Where the Origin CA private key lands (`0600`, owned by `caddy`). |
+| `caddy_tls_enabled` | `{{ cloudflare_origin_cert is defined }}` | Auto: serve HTTPS when the Origin CA cert is in the vault, else HTTP-only. Override to force either way. |
 | `caddy_proxy_hosts` | `[]` | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Empty is valid — the `:80` health/redirect site keeps the config sound. |
 
 Example:

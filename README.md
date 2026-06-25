@@ -40,14 +40,14 @@ itself from this repo.
    ```
 
 4. Build the service containers. First **assign** each service a container ID
-   (`zai-assign <service> <ctid>`); the number is recorded in git-ignored runtime
-   state, so the committed blueprint stays number-free and the same repo can stand
-   up a cluster on whatever CTIDs are free. Then `provision.yml` creates the CT
-   over the Proxmox API and configures it over SSH. Drive one at a time with
-   `--limit` while the stack comes online:
+   (`./zai-assign <service> <ctid>`, run from `ansible/`); the number is recorded
+   in git-ignored runtime state, so the committed blueprint stays number-free and
+   the same repo can stand up a cluster on whatever CTIDs are free. Then
+   `provision.yml` creates the CT over the Proxmox API and configures it over SSH.
+   Drive one at a time with `--limit` while the stack comes online:
 
    ```bash
-   zai-assign npm 101                            # npm → CTID 101 (10.1.1.101)
+   ./zai-assign npm 101                          # npm → CTID 101 (10.1.1.101)
    ansible-playbook provision.yml --limit npm    # create + configure it
    ```
 

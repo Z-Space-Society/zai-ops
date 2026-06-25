@@ -45,16 +45,10 @@
     owner: root
     group: root
 
-# The CTID allocator's CLI. Sugar over `ansible-playbook assign.yml` so the
-# operator runs `zai-assign npm 104` instead of the full invocation; the repo
-# checkout lives at /opt/zai-ops, which the script hardcodes.
-- name: Install the zai-assign CLI
-  ansible.builtin.copy:
-    src: zai-assign
-    dest: /usr/local/bin/zai-assign
-    owner: root
-    group: root
-    mode: "0755"
+# The CTID allocator's CLI (ansible/zai-assign) is NOT installed anywhere — it's
+# run in place from the repo checkout (`./zai-assign npm 104` from /opt/zai-ops/
+# ansible). It self-locates to its own dir to load ansible.cfg, so there's no copy
+# on the box to drift from git.
 
 # Home for auto-generated runtime secrets (object-store key, restic repo
 # password, …). The `password` lookup writes them here on first use; creating it

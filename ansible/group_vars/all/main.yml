@@ -53,3 +53,13 @@ garage_admin_token: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/
 object_store_access_key: "GK{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/object_store_access_key chars=digits,abcdef length=24') }}"
 object_store_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/object_store_secret_key chars=digits,abcdef length=64') }}"
 restic_repo_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/restic_repo_password chars=digits,abcdef length=64') }}"
+
+# LiteLLM proxy secrets. master_key is the proxy's admin/root API key (the `sk-…`
+# clients and the admin UI authenticate with); db_password is the password for the
+# `litellm` Postgres role the litellm role creates on the postgres CT. Both resolve
+# on the control node, so the litellm play (which renders the env file) and the
+# role-provisioning task (which sets the PG password) see identical values, and
+# they stay stable across rebuilds. Hex chars keep them clear of any character that
+# would need percent-encoding inside the DATABASE_URL.
+litellm_master_key: "sk-{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/litellm_master_key chars=digits,abcdef length=48') }}"
+litellm_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/litellm_db_password chars=digits,abcdef length=48') }}"

@@ -1,0 +1,48 @@
+---
+# LiteLLM proxy — the cluster's OpenAI-compatible gateway in front of the
+# inference nodes (llama-server) and any external providers. A Python app
+# (litellm[proxy]) run natively from a dedicated venv under systemd; no Docker.
+# Internal-only on vmbr1; reached from the LAN only through the Caddy edge.
+
+# Pinned release. LiteLLM moves fast and its DB schema (Prisma) is version-coupled,
+# so pin it and bump deliberately. Installed into the venv below as
+# `litellm[proxy]=={{ litellm_version }}`.
+# Releases: https://github.com/BerriAI/litellm/releases
+litellm_version: "1.89.4"
+
+# Port the proxy listens on. 4000 is LiteLLM's own default and what the Caddy
+# route (caddy_proxy_hosts) assumes.
+litellm_port: 4000
+
+# Dedicated unprivileged service account (nologin) the daemon runs as.
+litellm_user: litellm
+litellm_group: litellm
+
+# On-disk layout. The venv is self-contained under /opt so the app's Python deps
+# never touch the system interpreter (Debian 13 / PEP 668 — see tasks).
+litellm_home: /opt/litellm
+litellm_venv: /opt/litellm/venv
+litellm_bin: /opt/litellm/venv/bin/litellm
+
+# Config + secret env live under /etc. config.yaml is non-secret (model routing);
+# the env file (0600) carries DATABASE_URL + master key + STORE_MODEL_IN_DB.
+litellm_config_dir: /etc/litellm
+litellm_config_file: /etc/litellm/config.yaml
+litellm_env_file: /etc/litellm/litellm.env
+
+# Postgres role + database this role provisions on the postgres CT. The password
+# is the auto-generated litellm_db_password from group_vars/all/main.yml (no manual
+# step, stable across rebuilds); the DATABASE_URL is built from these plus
+# hostvars['postgres'].ansible_host, so the DB IP is derived, never hardcoded.
+litellm_db_name: litellm
+litellm_db_user: litellm
+
+# Model routing. Empty by default so the proxy starts clean; STORE_MODEL_IN_DB
+# also lets models be added at runtime via the admin UI/API, persisted in Postgres.
+# Each entry is a LiteLLM model_list item, rendered verbatim into config.yaml.
+litellm_model_list: []
+#  - model_name: llama-3.3-70b              # name clients request
+#    litellm_params:
+#      model: openai/llama-3.3-70b           # provider/route
+#      api_base: "http://10.1.1.NNN:8080/v1" # an inference node's llama-server
+#      api_key: "none"

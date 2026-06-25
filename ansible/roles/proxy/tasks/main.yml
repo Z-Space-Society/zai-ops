@@ -3,6 +3,18 @@
 # and the config is a declarative Caddyfile rendered from caddy_proxy_hosts, so
 # the CT keeps no unreproducible state (routes in git, cert in the vault).
 
+# Routes derive their public domain from cluster_domain (api.{{ cluster_domain }}),
+# which is per-cluster runtime data. Fail fast with an actionable message if routes
+# exist but the domain was never set, instead of a raw undefined-variable error
+# when the Caddyfile templates — mirrors the CTID assert in provision.yml.
+- name: Require cluster_domain when proxy routes are defined
+  ansible.builtin.assert:
+    that: cluster_domain is defined and (cluster_domain | string | length) > 0
+    fail_msg: >-
+      caddy_proxy_hosts has routes but cluster_domain is unset —
+      run: zai-set-domain <domain>
+  when: caddy_proxy_hosts | length > 0
+
 # Debian's own package — no third-party apt repo, so none of the signing-key /
 # sqv friction third-party repos need on Debian 13. Ships the `caddy` user,
 # /etc/caddy/, /var/lib/caddy and caddy.service.

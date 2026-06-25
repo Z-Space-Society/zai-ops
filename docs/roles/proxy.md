@@ -56,14 +56,18 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 | `caddy_cert_path` | `/etc/caddy/cloudflare-origin.pem` | Where the Origin CA cert lands; the `tls` directive points here. |
 | `caddy_key_path` | `/etc/caddy/cloudflare-origin.key` | Where the Origin CA private key lands (`0600`, owned by `caddy`). |
 | `caddy_tls_enabled` | `{{ cloudflare_origin_cert is defined }}` | Auto: serve HTTPS when the Origin CA cert is in the vault, else HTTP-only. Override to force either way. |
-| `caddy_proxy_hosts` | `[]` | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Empty is valid — the `:80` health/redirect site keeps the config sound. |
+| `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. |
 
-Example:
+The committed default carries one live route, with the **domain derived from
+`cluster_domain`** (set per cluster with `zai-set-domain`) so the route holds no
+this-cluster facts — the same number-free principle the inventory follows. The
+role asserts `cluster_domain` is set when routes exist, failing with `run:
+zai-set-domain <domain>` instead of a raw undefined-variable error.
 
 ```yaml
 caddy_proxy_hosts:
-  - { domain: chat.example.com, service: open-webui, port: 8080 }
-  - { domain: api.example.com,  service: litellm,    port: 4000 }
+  - { domain: "api.{{ cluster_domain }}", service: litellm, port: 4000 }
+#  - { domain: "chat.{{ cluster_domain }}", service: open-webui, port: 8080 }
 ```
 
 ## Secrets (one manual step)

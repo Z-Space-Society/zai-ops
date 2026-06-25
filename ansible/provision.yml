@@ -102,3 +102,15 @@
   gather_facts: true
   roles:
     - postgres
+
+# litellm runs AFTER postgres: its role creates the litellm role + database ON the
+# postgres CT (delegate_to: postgres) and the server must already be up with
+# scram-sha-256 in effect so the role password hashes correctly. A full
+# provision.yml run satisfies this ordering; a --limit litellm run still needs
+# postgres already provisioned (its host facts + SSH reachability are required for
+# the delegated tasks).
+- name: Configure the LiteLLM proxy
+  hosts: litellm
+  gather_facts: true
+  roles:
+    - litellm

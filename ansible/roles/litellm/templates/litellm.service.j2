@@ -1,0 +1,36 @@
+# {{ ansible_managed }}
+[Unit]
+Description=LiteLLM OpenAI-compatible proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ litellm_user }}
+Group={{ litellm_group }}
+EnvironmentFile={{ litellm_env_file }}
+# HOME under the daemon's own dir: LiteLLM's Prisma layer fetches a query-engine
+# binary on first run and caches it under $HOME/.cache — point it somewhere the
+# unit makes writable (below) rather than the unset/“/” default.
+Environment=HOME={{ litellm_home }}
+# Run the venv's console script directly (absolute path — no PATH reliance under
+# systemd). Config carries model routing; the port is pinned here. DATABASE_URL,
+# LITELLM_MASTER_KEY and STORE_MODEL_IN_DB come from the EnvironmentFile above.
+ExecStart={{ litellm_bin }} --config {{ litellm_config_file }} --port {{ litellm_port }}
+Restart=on-failure
+RestartSec=5
+# First start runs Prisma migrations, which can take longer than the default;
+# give the proxy room to come up before systemd treats it as failed.
+TimeoutStartSec=120
+
+# Hardening: persistent state lives in Postgres. ProtectSystem=strict makes /
+# read-only; PrivateTmp gives a scratch /tmp. ReadWritePaths re-opens just the
+# daemon's home so Prisma can cache its engine binary (under the venv / $HOME)
+# without widening write access anywhere else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ litellm_home }}
+
+[Install]
+WantedBy=multi-user.target

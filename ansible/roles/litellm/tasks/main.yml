@@ -1,0 +1,217 @@
+---
+# Install LiteLLM proxy natively from a dedicated venv (Debian 13 enforces PEP 668,
+# so the system interpreter is externally-managed — we never pip into it). The
+# proxy is a Python app run under systemd as an unprivileged user, fronting the
+# inference nodes + external providers with an OpenAI-compatible API.
+#
+# Ordering is load-bearing: LiteLLM runs Prisma DB migrations on its FIRST start,
+# so the `litellm` Postgres role + database (on the postgres CT) and a valid
+# DATABASE_URL must exist BEFORE the service comes up. We provision the DB first,
+# render config/env, install the unit, then flush handlers to start the daemon.
+# This play runs AFTER the postgres play (provision.yml ordering), so the server
+# is already up with scram-sha-256 password_encryption when we set the role's pw.
+
+# --- Provision the litellm role + database on the postgres CT ---------------
+# The postgres CT is a BARE server: its superuser has no password and is reachable
+# only via local peer auth (`su - postgres -c psql`) ON that CT — NOT as a
+# superuser over TCP. So we delegate these psql calls to the postgres host and run
+# them as the postgres OS user. We deliberately DON'T use community.postgresql:
+# that would need the collection + psycopg2 installed on the postgres CT and STILL
+# need a superuser connection method, which over TCP doesn't exist. delegate_to +
+# peer psql is the connection the box already grants — the same idiom the backup
+# role's pg_dumpall and the postgres role's own verify use.
+
+- name: Check whether the litellm Postgres role exists
+  # psql has no CREATE ROLE IF NOT EXISTS, so probe first and branch. -tAc returns
+  # a bare scalar ("1" on a match, empty otherwise). No secret here, so a clean
+  # login shell (su -) like the postgres role uses is fine.
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname = '{{ litellm_db_user }}'\""
+  delegate_to: postgres
+  register: litellm_role_check
+  changed_when: false
+
+- name: Create the litellm Postgres role with a generated password
+  # Only when the probe found nothing. The password is passed through psql's own
+  # variable interpolation (:'pw'), which emits a correctly-quoted string literal —
+  # no SQL-quoting by hand. It reaches the postgres shell as $LITELLM_DB_PW (the \$
+  # keeps the OUTER shell from expanding it, so the literal never lands in su's
+  # argv); su -m preserves the env var the postgres user's shell then expands.
+  # no_log keeps the rendered secret out of the Ansible log.
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1 -v pw=\"\$LITELLM_DB_PW\"
+      -c \"CREATE ROLE {{ litellm_db_user }} LOGIN PASSWORD :'pw'\""
+  environment:
+    LITELLM_DB_PW: "{{ litellm_db_password }}"
+  delegate_to: postgres
+  when: litellm_role_check.stdout | trim != "1"
+  no_log: true
+
+- name: Ensure the litellm role password matches the generated secret
+  # Covers a rotated secret: ALTER ROLE always succeeds and only re-hashes, so it
+  # carries no useful "changed" signal — mark it unchanged to keep runs quiet.
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1 -v pw=\"\$LITELLM_DB_PW\"
+      -c \"ALTER ROLE {{ litellm_db_user }} LOGIN PASSWORD :'pw'\""
+  environment:
+    LITELLM_DB_PW: "{{ litellm_db_password }}"
+  delegate_to: postgres
+  when: litellm_role_check.stdout | trim == "1"
+  no_log: true
+  changed_when: false
+
+- name: Check whether the litellm database exists
+  # CREATE DATABASE can't run inside a DO block / transaction, so it can't use a
+  # PL/pgSQL guard — probe pg_database, then create conditionally.
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '{{ litellm_db_name }}'\""
+  delegate_to: postgres
+  register: litellm_db_check
+  changed_when: false
+
+- name: Create the litellm database owned by the litellm role
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -v ON_ERROR_STOP=1 -c \"CREATE DATABASE {{ litellm_db_name }}
+      OWNER {{ litellm_db_user }}\""
+  delegate_to: postgres
+  when: litellm_db_check.stdout | trim != "1"
+
+# --- Native LiteLLM install (venv, PEP 668) ---------------------------------
+
+- name: Create the litellm system group
+  ansible.builtin.group:
+    name: "{{ litellm_group }}"
+    system: true
+
+- name: Create the litellm system user
+  ansible.builtin.user:
+    name: "{{ litellm_user }}"
+    group: "{{ litellm_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ litellm_home }}"
+    create_home: false
+
+- name: Create the litellm home and config directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ litellm_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    # home: owned by the daemon (venv + prisma's writable cache live here).
+    # config dir: root-owned, group-readable so the daemon reads config.yaml.
+    - { path: "{{ litellm_home }}", owner: "{{ litellm_user }}", mode: "0755" }
+    - { path: "{{ litellm_config_dir }}", owner: root, mode: "0750" }
+
+# Debian 13 marks the system Python externally-managed (PEP 668): pip into it is
+# refused. python3-venv gives us `python -m venv`; everything LiteLLM needs goes
+# into the dedicated venv below, isolated from the OS interpreter.
+- name: Install python3-venv and pip
+  ansible.builtin.apt:
+    name:
+      - python3-venv
+      - python3-pip
+    state: present
+    update_cache: true
+
+# pip with virtualenv= both CREATES the venv and installs into it — pip runs INSIDE
+# that venv, so PEP 668 doesn't apply (it's not the system environment). Pin the
+# version so the bundled Prisma schema is deterministic; a bump redeploys via the
+# restart handler.
+- name: Install litellm[proxy] into the dedicated venv
+  ansible.builtin.pip:
+    name: "litellm[proxy]=={{ litellm_version }}"
+    virtualenv: "{{ litellm_venv }}"
+    virtualenv_command: /usr/bin/python3 -m venv
+  notify: restart litellm
+
+- name: Give the litellm user ownership of the venv
+  # pip ran as root; the daemon runs as litellm and needs to read the interpreter +
+  # the `litellm` console script (and, under ProtectSystem=strict, write Prisma's
+  # engine cache here). recurse so the whole tree is consistently owned.
+  ansible.builtin.file:
+    path: "{{ litellm_home }}"
+    state: directory
+    owner: "{{ litellm_user }}"
+    group: "{{ litellm_group }}"
+    recurse: true
+
+# --- Config + secret env + unit ---------------------------------------------
+
+- name: Deploy the litellm configuration
+  # Non-secret model routing (model_list) + the master-key env reference. Group-
+  # readable so the daemon reads it; secrets are NOT here, they're in the env file.
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ litellm_config_file }}"
+    owner: root
+    group: "{{ litellm_group }}"
+    mode: "0640"
+  notify: restart litellm
+
+- name: Render the litellm secret environment file
+  # DATABASE_URL (with the generated db password), LITELLM_MASTER_KEY and
+  # STORE_MODEL_IN_DB. 0600 root — only systemd reads it via EnvironmentFile, before
+  # it drops to the litellm user. no_log keeps the rendered secrets out of the log.
+  ansible.builtin.template:
+    src: litellm.env.j2
+    dest: "{{ litellm_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart litellm
+
+- name: Install the litellm systemd unit
+  ansible.builtin.template:
+    src: litellm.service.j2
+    dest: /etc/systemd/system/litellm.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart litellm
+
+- name: Ensure litellm is started and enabled
+  ansible.builtin.systemd:
+    name: litellm
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# Flush now so the daemon actually comes up (running its first-boot Prisma
+# migrations against the now-existing litellm DB) before we smoke-test it. The DB,
+# role and a valid DATABASE_URL all exist above this point — exactly what Prisma
+# needs on that first start.
+- name: Apply pending litellm restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the litellm proxy to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ litellm_port }}"
+    timeout: 90
+
+- name: Verify the litellm health endpoint responds
+  # /health/liveliness is LiteLLM's unauthenticated liveness probe — proves the app
+  # booted and Prisma migrations succeeded, not merely that the port is open.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ litellm_port }}/health/liveliness"
+    status_code: 200
+  register: litellm_health
+  until: litellm_health is succeeded
+  retries: 10
+  delay: 3

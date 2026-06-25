@@ -164,11 +164,13 @@ already uses for the API token.
 - The repo holds **generic** automation (roles, playbooks) and the **blueprint
   constants** every cluster reuses — the `10.1.1.0/24` net and the
   `10.1.1.{ctid}` addressing *convention* (but not the specific numbers).
-- This-cluster specifics — *which inference nodes exist, and which CTID each
-  service got* — live in `ansible/inventory/local.yml`, written by
-  [`enroll-inference-node.yml`](#playbooks) (inference roster) and
+- This-cluster specifics — *which inference nodes exist, which CTID each service
+  got, and the cluster's public base domain* — live in
+  `ansible/inventory/local.yml`, written by
+  [`enroll-inference-node.yml`](#playbooks) (inference roster),
   [`assign.yml`](#service-ctid-assignment) (`zai-assign`, service CTIDs), and
-  never committed. The committed `hosts.yml` carries **no container numbers** at
+  [`set-domain.yml`](#service-ctid-assignment) (`zai-set-domain`, `cluster_domain`),
+  and never committed. The committed `hosts.yml` carries **no container numbers** at
   all — services are keyed by logical name (`proxy`, `litellm`, …) and their IP
   is *derived* from the assigned CTID, so there's no second field to drift.
 - The inventory is loaded as a **directory** (`inventory/`), so the committed
@@ -222,6 +224,23 @@ didn't create.
 > `bootstrap.sh` regardless of its CTID (which may be 199 on a brownfield box), so
 > it carries no `ctid` in the inventory and is never assigned.
 
+### Cluster domain
+
+The cluster's public base domain is the same category of data — per-cluster, not
+committed identity — so it's set the same way, with the `zai-set-domain` operator
+command:
+
+```bash
+zai-set-domain zai.cascadia.design    # cluster_domain, cluster-wide
+```
+
+`zai-set-domain` is thin sugar over [`set-domain.yml`](#playbooks). The playbook
+validates the value is a plausible lowercase FQDN, then **read-modify-writes** the
+same `inventory/local.yml` into `all.vars.cluster_domain` — so the CTID assignments
+and inference roster sharing the file survive. Re-recording the current value is an
+idempotent no-op. From then on `cluster_domain` resolves for every playbook;
+later proxy routes build on it (e.g. `api.{{ cluster_domain }}`).
+
 ---
 
 ## Inference nodes
@@ -265,6 +284,7 @@ later; the repo bakes in neither.
 | `site.yml`            | CT 100 (local) | Configure the control node (applies `control_node`) |
 | `verify-proxmox.yml`  | CT 100 (local) | Read-only check that the API token authenticates    |
 | `assign.yml`          | CT 100 (local) | Bind a service to a CTID in runtime inventory (the `zai-assign` engine) |
+| `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the `zai-set-domain` engine) |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
 | `inference.yml`       | CT 100 → SSH   | Configure inference nodes (`nvidia_cuda` + `llama_server`) |
@@ -292,6 +312,7 @@ PATH when the control node is configured. The convention:
 | Command | Does | Backed by |
 | ------- | ---- | --------- |
 | `zai-assign <service> <ctid>` | Bind a service to a CTID in runtime inventory | [`assign.yml`](#playbooks) |
+| `zai-set-domain <domain>` | Record the cluster's public base domain in runtime inventory | [`set-domain.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
 

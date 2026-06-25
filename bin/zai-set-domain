@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# zai-set-domain — thin wrapper over set-domain.yml. Record the cluster's public
+# base domain:
+#
+#   zai-set-domain zai.cascadia.design    # cluster_domain → zai.cascadia.design
+#
+# Lives in the repo's bin/ (on PATH via /etc/profile.d/zai-ops.sh) and runs in
+# place — the script you run is always the one in git, no installed copy to drift.
+# No logic lives here; the playbook validates and persists the domain.
+set -euo pipefail
+if [[ $# -ne 1 ]]; then
+  echo "usage: zai-set-domain <domain> [extra ansible args]" >&2
+  exit 64
+fi
+domain="$1"; shift
+# cd to the ansible dir (sibling of this bin/) so ansible.cfg loads no matter the
+# caller's CWD — it supplies the inventory (relative: inventory/) and the vault
+# password file. Self-locating off this script's path (not hardcoded) so the same
+# script works from any checkout: /opt/zai-ops on the box, a dev tree elsewhere.
+cd "$(dirname "$(readlink -f "$0")")/../ansible"
+exec ansible-playbook set-domain.yml \
+  -e "domain=$domain" "$@"

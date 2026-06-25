@@ -1,0 +1,86 @@
+---
+# Record the cluster's public base domain — the cluster_domain setter.
+#
+#   ansible-playbook set-domain.yml -e "domain=zai.cascadia.design"
+#
+# (`zai-set-domain <domain>`, the operator command in bin/, is sugar over this —
+# no logic lives in the wrapper.) From here on the domain is authoritatively
+# cluster_domain for every playbook (e.g. Caddy proxy routes like
+# api.{{ cluster_domain }}), cluster-wide.
+#
+# Why a playbook and not hand-edited inventory: the base domain is per-cluster
+# runtime data, not committed identity — same category as the CTID assignments.
+# It goes in the git-ignored runtime inventory (inventory/local.yml) on the
+# control node — backed up like the vault, never committed — which Ansible merges
+# into the blueprint. The repo stays generic; the same blueprint stands up a
+# cluster on whatever domain it's given. See docs ADR-0001 / "Generic repo vs
+# runtime".
+#
+# Read-modify-write the WHOLE structure and re-dump (never line-append): that
+# preserves every service's CTID assignment AND the inference-node roster that
+# share this file, instead of corrupting it.
+
+- name: Record the cluster's public base domain
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    runtime_inventory: "{{ playbook_dir }}/inventory/local.yml"
+    # Plausible FQDN: ≥2 lowercase labels joined by dots, hyphens only between
+    # alphanumerics (not at a label edge), no spaces/scheme/uppercase. `is match`
+    # anchors at the start, so the trailing '$' pins the end too.
+    fqdn_regex: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+  tasks:
+    - name: Require domain
+      ansible.builtin.assert:
+        that:
+          - domain is defined and (domain | string | length) > 0
+        fail_msg: >-
+          Pass a domain, e.g. -e "domain=zai.cascadia.design"
+
+    - name: Validate the domain is a plausible FQDN
+      ansible.builtin.assert:
+        that: domain is match(fqdn_regex)
+        fail_msg: >-
+          '{{ domain }}' is not a plausible domain — expected a lowercase FQDN
+          like 'zai.cascadia.design' (≥2 labels, dots, no scheme/spaces/uppercase).
+
+    # errors='ignore' → empty string when the file doesn't exist yet; 'or {}'
+    # turns that (and an empty/whitespace file) into an empty mapping to merge into.
+    - name: Load the existing runtime inventory (empty if absent)
+      ansible.builtin.set_fact:
+        runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
+
+    # Idempotent no-op: setting the domain that's already recorded exits 0 cleanly.
+    - name: Detect an unchanged (no-op) domain
+      ansible.builtin.set_fact:
+        existing_domain: "{{ runtime_data.get('all', {}).get('vars', {}).get('cluster_domain') | default(none) }}"
+        is_noop: "{{ (runtime_data.get('all', {}).get('vars', {}).get('cluster_domain') | default(none)) == domain }}"
+
+    - name: Report the no-op and finish
+      ansible.builtin.debug:
+        msg: "cluster_domain is already '{{ domain }}' — nothing to do."
+      when: is_noop | bool
+
+    # Read-modify-write: merge ONLY cluster_domain into the whole structure,
+    # recursively, so every CTID assignment and the inference-node roster survive.
+    - name: Merge the domain into the runtime structure
+      ansible.builtin.set_fact:
+        merged_inventory: >-
+          {{
+            runtime_data
+            | combine({'all': {'vars': {'cluster_domain': domain}}}, recursive=True)
+          }}
+      when: not (is_noop | bool)
+
+    - name: Write the runtime inventory
+      ansible.builtin.copy:
+        dest: "{{ runtime_inventory }}"
+        content: "{{ merged_inventory | to_nice_yaml(indent=2) }}"
+        mode: "0644"
+      when: not (is_noop | bool)
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "cluster_domain → {{ domain }} recorded in {{ runtime_inventory }}."
+      when: not (is_noop | bool)

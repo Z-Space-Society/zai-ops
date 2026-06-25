@@ -34,17 +34,19 @@
   changed_when: false
 
 - name: Create the litellm Postgres role with a generated password
-  # Only when the probe found nothing. The password is passed through psql's own
-  # variable interpolation (:'pw'), which emits a correctly-quoted string literal —
-  # no SQL-quoting by hand. It reaches the postgres shell as $LITELLM_DB_PW (the \$
-  # keeps the OUTER shell from expanding it, so the literal never lands in su's
-  # argv); su -m preserves the env var the postgres user's shell then expands.
-  # no_log keeps the rendered secret out of the Ansible log.
+  # Only when the probe found nothing. psql does NOT interpolate :'var' in a -c
+  # string (that only happens for stdin/-f input), so the password is inlined into
+  # the SQL and quoted by hand — safe because litellm_db_password is pure hex
+  # (chars=digits,abcdef), so it can't break the single-quoted literal. It reaches
+  # the postgres shell as $LITELLM_DB_PW (the \$ keeps the OUTER shell from
+  # expanding it, so the secret isn't baked into the templated command string);
+  # su -m preserves the env var the postgres user's shell then expands. no_log
+  # keeps the rendered secret out of the Ansible log.
   ansible.builtin.shell:
     cmd: >-
       su -m postgres -c
-      "psql -v ON_ERROR_STOP=1 -v pw=\"\$LITELLM_DB_PW\"
-      -c \"CREATE ROLE {{ litellm_db_user }} LOGIN PASSWORD :'pw'\""
+      "psql -v ON_ERROR_STOP=1
+      -c \"CREATE ROLE {{ litellm_db_user }} LOGIN PASSWORD '\$LITELLM_DB_PW'\""
   environment:
     LITELLM_DB_PW: "{{ litellm_db_password }}"
   delegate_to: postgres
@@ -54,11 +56,12 @@
 - name: Ensure the litellm role password matches the generated secret
   # Covers a rotated secret: ALTER ROLE always succeeds and only re-hashes, so it
   # carries no useful "changed" signal — mark it unchanged to keep runs quiet.
+  # Same inline-hex quoting as the CREATE above (psql can't interpolate in -c).
   ansible.builtin.shell:
     cmd: >-
       su -m postgres -c
-      "psql -v ON_ERROR_STOP=1 -v pw=\"\$LITELLM_DB_PW\"
-      -c \"ALTER ROLE {{ litellm_db_user }} LOGIN PASSWORD :'pw'\""
+      "psql -v ON_ERROR_STOP=1
+      -c \"ALTER ROLE {{ litellm_db_user }} LOGIN PASSWORD '\$LITELLM_DB_PW'\""
   environment:
     LITELLM_DB_PW: "{{ litellm_db_password }}"
   delegate_to: postgres

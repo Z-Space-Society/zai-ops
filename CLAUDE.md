@@ -62,9 +62,11 @@ out and update the docs.
 - **Inventory is data-driven.** Per-CT create specs (cores/memory/disk/netif)
   live on the host entry in `inventory/hosts.yml`; the create play reads them.
 - **Operator commands live in `bin/`, run in place from git.** Things a human runs
-  by hand (`zai-assign`, `zai-backup`) live in the repo's `bin/`, put on PATH by
-  the `control_node` role — *nothing* is copied to `/usr/local/bin`, so `git pull`
-  is the whole update story (pull = live; no playbook replay to sync a script).
+  by hand (`zai-assign`, `zai-backup`) live in the repo's `bin/`, put on PATH via
+  `/etc/profile.d/zai-ops.sh` (seeded by `bootstrap.sh` so a fresh `pct enter`
+  works pre-Ansible, re-asserted by the `control_node` role) — *nothing* is copied
+  to `/usr/local/bin`, so `git pull` is the whole update story (pull = live; no
+  playbook replay to sync a script).
   Name them for what they *do*, not the tool underneath (`zai-backup`, not
   `zai-restic`; restic is hidden behind a subcommand dispatch). Roles render only
   the secret/host-specific bits an in-git script can't carry (e.g. creds + IPs in

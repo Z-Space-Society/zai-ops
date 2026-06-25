@@ -161,6 +161,12 @@ pct exec "$CTID" -- bash -c "
   grep -q '^LANG=' /etc/environment || echo 'LANG=en_US.UTF-8' >> /etc/environment
   apt-get -qq -y install ansible git
   [ -d /opt/zai-ops ] || git clone --quiet $REPO_URL /opt/zai-ops
+  # Put the repo's operator commands (zai-assign, zai-backup, …) on PATH for
+  # interactive shells, so a fresh \`pct enter $CTID\` login can run them by name
+  # before site.yml has run. The control_node role re-asserts this idempotently
+  # (same pattern as the locale: seeded here, owned by Ansible thereafter).
+  printf '%s\n' '# Managed by zai-ops (bootstrap + control_node role).' \
+    'export PATH=\"/opt/zai-ops/bin:\$PATH\"' > /etc/profile.d/zai-ops.sh
 "
 done_ok "control node provisioned"
 
@@ -232,7 +238,7 @@ echo "  pct enter $CTID"
 echo "  cd /opt/zai-ops/ansible"
 echo "  ansible-playbook site.yml                           # configure the control node"
 echo "  ansible-playbook verify-proxmox.yml                 # confirm API token"
-echo "  ./zai-assign proxy 110                              # assign proxy its CTID"
+echo "  zai-assign proxy 110                                # assign proxy its CTID"
 echo "  ansible-playbook provision.yml --limit proxy        # create + configure proxy"
 
 # --- Vault password — printed LAST so it isn't scrolled away ---

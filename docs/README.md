@@ -51,7 +51,9 @@ What it does, in order (each phase prints a numbered banner):
    2 cores / 2 GB / 8 GB, `net0` on `vmbr0` (DHCP). Skipped if it already exists.
 7. **Attach to the internal network** — give CT 100 a `vmbr1` NIC at `10.1.1.100`.
 8. **Provision the control node** — fix the locale (must happen before Ansible
-   can run at all), install `ansible` + `git`, clone this repo to `/opt/zai-ops`.
+   can run at all), install `ansible` + `git`, clone this repo to `/opt/zai-ops`,
+   and put the repo's [`bin/`](#operator-commands) on PATH (so a fresh
+   `pct enter` can run `zai-assign`/`zai-backup` before `site.yml` has run).
 9. **Mint the Proxmox API token + vault** — create the `ansible@pve` user, the
    `ZaiProvision` role, and a token; write the credentials into an encrypted
    Ansible Vault on CT 100. See [Secrets & trust model](#secrets--trust-model).

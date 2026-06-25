@@ -49,6 +49,9 @@
 # in place — nothing is copied to /usr/local/bin, so the command you run is always
 # the one in git and a `git pull` is enough to update it. Put bin/ on PATH for
 # interactive root shells via /etc/profile.d so they're discoverable as `zai-*`.
+# Bootstrap seeds this same file (so a fresh `pct enter` works before site.yml
+# runs); we re-assert it here as the owning role — same seed-then-own pattern as
+# the locale above.
 - name: Put the repo's bin/ on PATH for interactive shells
   ansible.builtin.copy:
     dest: /etc/profile.d/zai-ops.sh

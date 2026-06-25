@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # zai-assign — thin wrapper over assign.yml. Assign a service to a CTID:
 #
-#   ./zai-assign npm 104                  # npm → CTID 104 (10.1.1.104)
-#   ./zai-assign npm 105 -e reassign=true # move an existing assignment
+#   ./zai-assign proxy 110                  # proxy → CTID 110 (10.1.1.110)
+#   ./zai-assign proxy 111 -e reassign=true # move an existing assignment
 #
 # Run it from this repo (e.g. /opt/zai-ops/ansible on the control node) — there's
 # no copy installed elsewhere, so the script you run is always the one in git.

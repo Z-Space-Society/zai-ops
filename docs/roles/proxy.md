@@ -1,22 +1,23 @@
-# Role: `caddy`
+# Role: `proxy`
 
-Installs [Caddy](https://caddyserver.com/) as a reverse proxy — a **trial second
-edge running beside [`nginx-proxy-manager`](nginx-proxy-manager.md)**, so the two
-can be compared in place. npm is left fully intact; nothing here replaces it.
+Installs [Caddy](https://caddyserver.com/) as the cluster's reverse-proxy **edge**
+— the one LAN-facing service, fronting every internal upstream. (The role is named
+by function, `proxy`; Caddy is the implementation, the same way `object_store`
+runs Garage.)
 
-- **Source:** [`ansible/roles/caddy/`](../../ansible/roles/caddy/)
-- **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure play, `hosts: caddy`)
-- **Target:** the `caddy` service CT (whatever CTID it was assigned), over SSH
+- **Source:** [`ansible/roles/proxy/`](../../ansible/roles/proxy/)
+- **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure play, `hosts: proxy`)
+- **Target:** the `proxy` service CT (whatever CTID it was assigned), over SSH
 
 ## Purpose
 
 Caddy is a single Go binary in Debian's own repos, so this role is one
-`apt install` — none of npm's OpenResty + Node + yarn + SQLite source build, and
-none of the Debian-13 `gpgv`/`sqv` apt workaround that build needs. Its config is
-a declarative `Caddyfile` rendered from `caddy_proxy_hosts`, so **proxy routes
-live in git**, not in a web-UI database. The CT therefore holds no unreproducible
-state: config is committed, the TLS cert is in the vault. (Contrast npm, whose
-routes are UI state in `/data` that the [`backup`](backup.md) role must capture.)
+`apt install` — no third-party repo, and none of the Debian-13 `gpgv`/`sqv` apt
+workaround a third-party repo would need. Its config is a declarative `Caddyfile`
+rendered from `caddy_proxy_hosts`, so **proxy routes live in git**, not in a
+web-UI database. The CT therefore holds no unreproducible state: config is
+committed, the TLS cert is in the vault — nothing for the [`backup`](backup.md)
+role to capture.
 
 **Origin TLS, no ACME.** Caddy serves `:443` using a **Cloudflare Origin CA**
 certificate (a long-lived static cert/key from the vault), with `:80` redirecting
@@ -48,7 +49,7 @@ built and smoke-tested first; add the cert/key to the vault and re-run to flip o
 
 ## Variables
 
-Defined in [`defaults/main.yml`](../../ansible/roles/caddy/defaults/main.yml):
+Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
@@ -87,15 +88,11 @@ curl -kH 'Host: chat.example.com' https://10.1.1.<ctid>/
 
 ## Notes
 
-- **Trial, not a replacement.** This stands beside npm so Caddy can be evaluated
-  on the real cluster. If it wins, retiring npm and renaming to the generic
-  `proxy` / `reverse-proxy` (per the repo's name-by-function convention) is a
-  separate follow-up.
 - **Empty `caddy_proxy_hosts` is safe** — the `:80` site (health probe + HTTPS
   redirect) keeps the Caddyfile valid before any upstream is assigned, mirroring
   the inventory's placeholder pattern.
-- **One public hostname per proxy at a time.** Both npm and caddy are LAN-facing;
-  point a given hostname at only one of them (controlled at Cloudflare) when
-  comparing.
+- **The edge sits at tier 110.** Per the [CTID tier
+  convention](../README.md#networking) the proxy is the first platform-tier CT —
+  one step out from the core data foundations, the only box on the LAN.
 - For how the CT is assigned a CTID, created and reached, see the
   [main docs](../README.md#networking) and [`provision.yml`](../../ansible/provision.yml).

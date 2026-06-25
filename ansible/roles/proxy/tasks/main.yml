@@ -1,11 +1,10 @@
 ---
-# Install and configure Caddy as a trial reverse proxy, beside npm. A single apt
-# package replaces npm's whole OpenResty + Node + yarn source build; the config
-# is a declarative Caddyfile rendered from caddy_proxy_hosts, so the CT keeps no
-# unreproducible state.
+# Install and configure Caddy as the reverse-proxy edge. A single apt package,
+# and the config is a declarative Caddyfile rendered from caddy_proxy_hosts, so
+# the CT keeps no unreproducible state (routes in git, cert in the vault).
 
 # Debian's own package — no third-party apt repo, so none of the signing-key /
-# sqv friction the OpenResty repo needs on Debian 13. Ships the `caddy` user,
+# sqv friction third-party repos need on Debian 13. Ships the `caddy` user,
 # /etc/caddy/, /var/lib/caddy and caddy.service.
 - name: Install Caddy
   ansible.builtin.apt:
@@ -63,7 +62,7 @@
 - name: Apply pending caddy reloads before validating
   ansible.builtin.meta: flush_handlers
 
-# Final guard: confirm the live config file is valid (mirrors npm's nginx -t).
+# Final guard: confirm the live config file is valid (the nginx -t analogue).
 - name: Validate the deployed Caddyfile
   ansible.builtin.command:
     cmd: caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile

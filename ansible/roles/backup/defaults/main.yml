@@ -46,13 +46,9 @@ backup_run_now: true
 # (zai-assign), so hostvars['postgres'].ansible_host resolves.
 backup_postgres_enabled: false
 
-# Nginx Proxy Manager: its /data (SQLite DB + per-host nginx config) is the only
-# unreproducible NPM state — proxy hosts are made in the UI, not in git. The
-# wrapper rsyncs it from the npm CT (over the injected root key) into a staging
-# dir that joins the restic backup. Flip on once the npm CT is provisioned.
-backup_npm_enabled: false
-backup_npm_data_path: /data                       # source dir on the npm CT
-backup_npm_staging: /var/backups/npm-data         # control-node landing/restic path
+# The proxy CT (Caddy) needs no Tier-2 backup: its routes live in git (the proxy
+# role's caddy_proxy_hosts) and its TLS cert in the vault, so the CT holds no
+# unreproducible state to capture.
 
 # restic_repo_password + object_store_access_key/secret_key are auto-generated in
 # group_vars/all/main.yml (same values Garage imported) — no manual step.

@@ -46,7 +46,7 @@
     group: root
 
 # The CTID allocator's CLI (ansible/zai-assign) is NOT installed anywhere — it's
-# run in place from the repo checkout (`./zai-assign npm 104` from /opt/zai-ops/
+# run in place from the repo checkout (`./zai-assign proxy 110` from /opt/zai-ops/
 # ansible). It self-locates to its own dir to load ansible.cfg, so there's no copy
 # on the box to drift from git.
 

@@ -18,8 +18,8 @@ so `password_encryption` is already `scram-sha-256` when a role password is set
 
 **Debian-native, no PGDG repo.** Debian 13 (trixie) ships PostgreSQL 17 in its
 own repo, so the role just `apt install`s `postgresql-17`. That deliberately
-avoids the third-party apt-key / Sequoia `sqv` gotcha that the
-[`nginx-proxy-manager`](nginx-proxy-manager.md) role has to work around (see
+avoids the third-party apt-key / Sequoia `sqv` gotcha that any SHA1-bound
+third-party apt repo hits on Debian 13 (see
 [main docs](../README.md#known-gotchas)).
 
 ## Tasks

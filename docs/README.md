@@ -65,8 +65,8 @@ pct enter 100
 cd /opt/zai-ops/ansible
 ansible-playbook site.yml                       # configure the control node
 ansible-playbook verify-proxmox.yml             # confirm the API token
-./zai-assign npm 101                            # assign npm its CTID (10.1.1.101)
-ansible-playbook provision.yml --limit npm      # create + configure npm
+./zai-assign proxy 110                          # assign proxy its CTID (10.1.1.110)
+ansible-playbook provision.yml --limit proxy    # create + configure proxy
 ```
 
 ---
@@ -80,30 +80,25 @@ ansible-playbook provision.yml --limit npm      # create + configure npm
         │           │      • runs Ansible, holds the vault + SSH key        │
         │           │      • net0 vmbr0 (DHCP), net1 vmbr1 10.1.1.100       │
         │           │                                                        │
-   ┌────┴─────┐     │   CT 101  npm  (Nginx Proxy Manager, LAN-facing)      │
-   │ clients  │────▶│      • net0 vmbr0 (DHCP), net1 vmbr1 10.1.1.101       │
-   └──────────┘     │   CT 106  caddy  (trial reverse proxy, LAN-facing)    │
-                    │      • net0 vmbr0 (DHCP), net1 vmbr1 10.1.1.106       │
-                    │                                                        │
-                    │   CT 102+ postgres / litellm / open-webui  (internal) │
+   ┌────┴─────┐     │   CT 110  proxy  (Caddy reverse proxy, LAN-facing)    │
+   │ clients  │────▶│      • net0 vmbr0 (DHCP), net1 vmbr1 10.1.1.110       │
+   └──────────┘     │                                                        │
+                    │   CT 101+ object-store / postgres / litellm (internal)│
                     │      • vmbr1 only, route out via host NAT (10.1.1.1)   │
                     └────────────────────────────────────────────────────────┘
 ```
 
 - **CT 100** creates and configures every other container over the Proxmox API
   (create) and SSH (configure). It is the only machine that holds secrets.
-- **CT 101 (npm — Nginx Proxy Manager)** is the only LAN-facing service; it
-  reverse-proxies the internal services. Proxy hosts are managed in its web UI
-  (port 81, internal-only); that config is runtime state in `/data`, captured by
-  the [`backup`](#backups) job — not in git.
-- **CT 106 (caddy)** is a **trial** second reverse proxy standing beside npm for
-  an in-place comparison (npm is untouched). Also LAN-facing, but its routes are
-  declarative in git ([`caddy` role](roles/caddy.md)) rather than UI state — so
-  the CT holds nothing that needs backing up. Only one public hostname should
-  point at a given proxy at a time (controlled at Cloudflare).
-- **CT 102-104** (postgres, litellm, open-webui) live only on the internal
-  network and are reached through npm.
-- **CT 105** (object-store, Garage) is internal-only too — it's the restic
+- **CT 110 (proxy — Caddy)** is the only LAN-facing service; it reverse-proxies
+  the internal services. Its routes are declarative in git ([`proxy`
+  role](roles/proxy.md)) — rendered into a `Caddyfile` from `caddy_proxy_hosts`,
+  not held in a UI database — so the CT holds nothing that needs backing up. Only
+  one public hostname should point at a given proxy at a time (controlled at
+  Cloudflare).
+- **CT 102+** (postgres, litellm, open-webui) live only on the internal network
+  and are reached through the proxy.
+- **CT 101** (object-store, Garage) is internal-only too — it's the restic
   backend the [`backup`](#backups) job writes to, not a user-facing service.
 - **Inference nodes** (salmon, orca, …) are **bare-metal**, *outside* the Proxmox
   host — they run `llama-server` only, behind the gateway, and are configured by
@@ -120,20 +115,35 @@ LAN.
 | -------------------- | ------------- | --------------------------------- |
 | Proxmox host         | physical NIC  | `10.1.1.1` (NAT gateway)          |
 | CT 100 control node  | DHCP          | `10.1.1.100`                      |
-| CT 101 npm (NPM)     | DHCP          | `10.1.1.101`                      |
-| CT 106 caddy (trial) | DHCP          | `10.1.1.106`                      |
-| CT 102+ services     | —             | `10.1.1.10X` (gw `10.1.1.1`)      |
-| CT 105 object-store  | —             | `10.1.1.105` (gw `10.1.1.1`)      |
+| CT 101 object-store  | —             | `10.1.1.101` (gw `10.1.1.1`)      |
+| CT 102 postgres      | —             | `10.1.1.102` (gw `10.1.1.1`)      |
+| CT 110 proxy (Caddy) | DHCP          | `10.1.1.110`                      |
+| CT 12X apps          | —             | `10.1.1.12X` (gw `10.1.1.1`)      |
 
 - `vmbr1` has **no uplink** — it's a pure virtual switch. The host masquerades
   internal traffic out via `vmbr0`, so internal-only CTs can still `apt`/`pip`.
 - Service CTs get **static** internal IPs, so CT 100 always knows where to SSH
   (no DHCP guessing).
-- npm — and the trial caddy CT — are **dual-homed** (LAN + internal); the rest
-  are internal-only.
-- The specific numbers above (101–105) are this cluster's **assigned** layout, not
-  committed identity — each is bound with `zai-assign` and could differ on another
-  host. What's fixed is the `10.1.1.{ctid}` convention. See
+- The proxy CT is **dual-homed** (LAN + internal) — it's the edge; every other
+  service is internal-only.
+
+**CTID tiers (a convention, not enforced).** The example numbers follow a tiered
+layout so the CTID itself signals where a service sits in the dependency stack —
+and the gaps leave room to grow a tier without renumbering:
+
+| Range       | Tier         | Examples                                   |
+| ----------- | ------------ | ------------------------------------------ |
+| `100`–`109` | Core infra   | control (100), object-store (101), postgres (102) |
+| `110`–`119` | Platform     | proxy/edge (110), auth (111), gateway (112) |
+| `120`–`129` | Applications | open-webui (120), … other user-facing apps |
+
+The dependency arrows point **downward** (apps → platform → core), and the line
+between core and platform doubles as a trust line: the data foundations stay off
+the LAN, while the only internet-facing box (the proxy) sits one tier out.
+
+- The specific numbers above are this cluster's **assigned** layout, not committed
+  identity — each is bound with `zai-assign` and could differ on another host.
+  What's fixed is the `10.1.1.{ctid}` convention and the tier ranges above. See
   [Service CTID assignment](#service-ctid-assignment).
 
 ---
@@ -153,7 +163,7 @@ already uses for the API token.
   [`enroll-inference-node.yml`](#playbooks) (inference roster) and
   [`assign.yml`](#service-ctid-assignment) (`zai-assign`, service CTIDs), and
   never committed. The committed `hosts.yml` carries **no container numbers** at
-  all — services are keyed by logical name (`npm`, `litellm`, …) and their IP
+  all — services are keyed by logical name (`proxy`, `litellm`, …) and their IP
   is *derived* from the assigned CTID, so there's no second field to drift.
 - The inventory is loaded as a **directory** (`inventory/`), so the committed
   blueprint (`hosts.yml`, with an empty `inference_nodes` group and number-free
@@ -170,15 +180,15 @@ lives in the committed inventory and is slated for the same treatment — see
 
 ## Service CTID assignment
 
-The committed blueprint names services generically (`npm`, `litellm`, …) and
+The committed blueprint names services generically (`proxy`, `litellm`, …) and
 carries **no container numbers**. The operator binds a service to a container ID
 once, with the `zai-assign` script — run in place from `ansible/` on the control
 node (it isn't installed anywhere; it self-locates to load `ansible.cfg`):
 
 ```bash
 cd /opt/zai-ops/ansible
-./zai-assign npm 104                  # npm is now CT 104 at 10.1.1.104, cluster-wide
-./zai-assign npm 105 -e reassign=true # move it (reassign guards against accidental clobber)
+./zai-assign proxy 110                  # proxy is now CT 110 at 10.1.1.110, cluster-wide
+./zai-assign proxy 111 -e reassign=true # move it (reassign guards against accidental clobber)
 ```
 
 `zai-assign` is thin sugar over [`assign.yml`](#playbooks); the playbook is the
@@ -267,8 +277,7 @@ specs aren't filled in yet, so a no-`--limit` run is safe.
 | Role                                       | Applied to | What it does                                            |
 | ------------------------------------------ | ---------- | ------------------------------------------------------- |
 | [`control_node`](roles/control_node.md)    | CT 100     | Base config for the Ansible control node                |
-| [`nginx-proxy-manager`](roles/nginx-proxy-manager.md) | `npm` | Install Nginx Proxy Manager natively (no Docker) — the cluster reverse proxy |
-| [`caddy`](roles/caddy.md)                  | `caddy`    | Caddy reverse proxy (trial, beside npm) — single apt package, git-tracked routes |
+| [`proxy`](roles/proxy.md)                  | `proxy`    | Caddy reverse proxy — the LAN-facing edge; single apt package, git-tracked routes |
 | [`nvidia_cuda`](roles/nvidia_cuda.md)      | inference nodes | NVIDIA driver + CUDA toolkit (bare-metal Debian 13) |
 | [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
@@ -327,11 +336,11 @@ ansible-playbook backup.yml
 ```
 
 **Tiers.** Tier 1 (control-node state) is live today. Tier 2 pulls service-CT
-state into the same repo, each enabled with a flag once its CT is up:
-**NPM's `/data`** (the SQLite DB where proxy hosts live — made in the UI, not git)
-with `backup_npm_enabled: true`, and **Postgres** (a cluster-wide `pg_dumpall`
-streamed over SSH straight into the repo, tag `zai-postgres`) with
-`backup_postgres_enabled: true`. See [`backup`](roles/backup.md).
+state into the same repo, enabled with a flag once its CT is up: **Postgres**
+(a cluster-wide `pg_dumpall` streamed over SSH straight into the repo, tag
+`zai-postgres`) with `backup_postgres_enabled: true`. The proxy CT needs no
+Tier-2 backup — its routes are in git and its cert in the vault, so it holds no
+runtime state. See [`backup`](roles/backup.md).
 
 > **Scope caveat — this is not yet disaster recovery.** The object store sits on
 > the *same physical disk* as everything else, so today's backup guards
@@ -369,8 +378,9 @@ Lessons on third-party apt repos under **Debian 13** (any CT):
   SHA1 self-sigs, so authenticity is kept rather than disabled. **Install `gpgv`
   first** (Debian 13 ships none — sqv replaced it), in its own task before the
   override and before the third-party repo, or the override breaks every repo
-  including the ones needed to install gpgv (`Cannot find gpgv`). See the
-  [nginx-proxy-manager](roles/nginx-proxy-manager.md) role.
+  including the ones needed to install gpgv (`Cannot find gpgv`). No current role
+  needs this — Caddy and Postgres use Debian's own repos — but it's kept here as a
+  forward lesson for the next SHA1-bound third-party repo.
 
 Hard-won lessons on the bare-metal **inference nodes** (Debian 13 + NVIDIA):
 

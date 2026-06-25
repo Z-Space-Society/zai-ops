@@ -109,14 +109,9 @@ restic restore latest --target /tmp/restore
 ## Notes
 
 - Secrets live only in `restic.env` (`0600`) and the vault — never in the repo.
-- **Tier 2 (service data)** — service-CT state pulled into the *same* restic repo:
-  - **NPM `/data`** (the SQLite DB where Nginx Proxy Manager's proxy hosts live —
-    made in the UI, not git) is wired. Set `backup_npm_enabled: true` once the
-    `npm` CT is up; the wrapper `rsync`s `/data` from the npm CT over the injected
-    root key into `backup_npm_staging` (`/var/backups/npm-data`), which rides the
-    backup. **Restore:** `restic restore latest --target /tmp/restore`, then
-    `rsync -a /tmp/restore/var/backups/npm-data/ root@<npm-ip>:/data/` and
-    `systemctl restart npm`.
+- **Tier 2 (service data)** — service-CT state pulled into the *same* restic repo.
+  (The proxy CT needs no Tier-2 backup: its routes live in git and its TLS cert in
+  the vault, so it holds no unreproducible state.)
   - **Postgres** — wired. Set `backup_postgres_enabled: true` once the `postgres`
     CT is up (and its CTID is assigned, so `hostvars['postgres'].ansible_host`
     resolves); the wrapper streams a cluster-wide `pg_dumpall --clean --if-exists`

@@ -41,10 +41,12 @@ out and update the docs.
   `ZaiProvision` (privsep 0). Token is sufficient for the full create lifecycle
   (confirmed) — do not fall back to root@pam.
 - **Internal network on `vmbr1` (`10.1.1.0/24`, no uplink).** Host = `10.1.1.1`
-  and is the NAT gateway for internal-only CTs. CT 100 = `.100`, services =
-  `.10X` (static). npm — Nginx Proxy Manager (CT 101) — is the only LAN-facing CT
-  (dual-homed on `vmbr0` + `vmbr1`); CT 102-104 are internal-only and route out
-  via the host.
+  and is the NAT gateway for internal-only CTs. Addresses derive from the CTID
+  (`10.1.1.{ctid}`, static); CTIDs follow a tiered convention — `100-109` core
+  infra (control `.100`, object-store, postgres), `110-119` platform (proxy/edge,
+  auth, gateway), `120-129` apps. `proxy` (Caddy) is the only LAN-facing CT
+  (dual-homed on `vmbr0` + `vmbr1`); everything else is internal-only and routes
+  out via the host.
 - **SSH into service CTs via an injected key.** CT 100's root ed25519 public key
   is injected at create time; key-only root login. No per-CT passwords.
 - **Secrets:** API token in `ansible/group_vars/all/vault.yml` (Ansible Vault,
@@ -78,7 +80,7 @@ Version bundled with Debian 13's `ansible` 12. These recur on every new CT:
 
 - **Idempotency is required.** Re-running `bootstrap.sh` or any playbook must be
   safe. Guard host-level edits; prefer modules over shell.
-- **Validate before declaring done.** YAML must parse; nginx changes run
-  `nginx -t`. Don't claim a play works without the `PLAY RECAP` showing
+- **Validate before declaring done.** YAML must parse; proxy changes run
+  `caddy validate`. Don't claim a play works without the `PLAY RECAP` showing
   `failed=0`.
 - **Match the surrounding style** — comments explain *why*, not *what*.

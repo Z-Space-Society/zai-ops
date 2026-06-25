@@ -61,9 +61,9 @@ itself from this repo.
    ./zai-assign postgres 102
    ansible-playbook provision.yml --limit postgres
 
-   # caddy — the LAN-facing reverse proxy (the cluster's edge)
-   ./zai-assign caddy 110
-   ansible-playbook provision.yml --limit caddy
+   # proxy — the LAN-facing reverse proxy (the cluster's edge)
+   ./zai-assign proxy 110
+   ansible-playbook provision.yml --limit proxy
    ```
 
 5. Turn on backups. restic on the control node backs up the unreproducible
@@ -107,8 +107,8 @@ can reach the internet for package installs without being exposed on the LAN.
 
 - The control node (CT 100) sits at `10.1.1.100` and reaches every service at
   its static internal IP — no DHCP guessing.
-- caddy (the reverse proxy) is the only LAN-facing container: dual-homed on
-  `vmbr0` (DHCP) for inbound traffic and `vmbr1` (`10.1.1.110`) to reach upstreams.
+- proxy (Caddy) is the only LAN-facing container: dual-homed on `vmbr0` (DHCP)
+  for inbound traffic and `vmbr1` (`10.1.1.110`) to reach upstreams.
 - The remaining services live on `vmbr1` only and route out through the host.
 
 ## Secrets
@@ -158,7 +158,7 @@ architecture, networking, and a note for every role.
   - `add-github-user.yml` — creates a human admin account from GitHub keys (CT 100 + inference nodes)
   - `inventory/` — committed blueprint (`hosts.yml`) + git-ignored runtime roster (`local.yml`)
   - `group_vars/all/` — shared vars (`main.yml`) and the encrypted `vault.yml`
-  - `roles/` — `control_node`, `caddy`, `object_store`, `postgres`, `nvidia_cuda`, `llama_server`, and more as they come online
+  - `roles/` — `control_node`, `proxy`, `object_store`, `postgres`, `nvidia_cuda`, `llama_server`, and more as they come online
 
 ## Contributing
 

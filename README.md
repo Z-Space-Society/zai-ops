@@ -64,6 +64,10 @@ itself from this repo.
    # proxy — the LAN-facing reverse proxy
    zai-assign proxy 110
    ansible-playbook provision.yml --limit proxy
+
+   # litellm - The AI Gateway
+   zai-assign litellm 112
+   ansible-playbook provision.yml --limit postgres,litellm
    ```
 
    (`zai-assign`, `zai-backup`, … are operator commands in the repo's

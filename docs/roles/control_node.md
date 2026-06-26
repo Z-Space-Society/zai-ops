@@ -21,6 +21,7 @@ used to reach service containers.
 | Ensure the `en_US.UTF-8` locale is generated | `community.general.locale_gen` | Re-asserted **before** the upgrade so a `glibc`/`locales` upgrade regenerates `locale-archive` with the locale present instead of wiping it. |
 | Update apt cache and run a full upgrade | `ansible.builtin.apt` (`upgrade: full`) | Keep the control node current. |
 | Install the Proxmox API client library | `ansible.builtin.apt` (`python3-proxmoxer`, `python3-requests`) | `community.proxmox` modules talk to the API through `proxmoxer`. |
+| Install operator diagnostic CLI tools | `ansible.builtin.apt` (`curl`, `jq`) | `debian-13-standard` is minimal; give the operator `curl`/`jq` to probe a service CT's HTTP health endpoint by hand (playbooks themselves use `ansible.builtin.uri`). |
 | Ensure root has an ed25519 SSH keypair | `ansible.builtin.user` (`generate_ssh_key`) | The public key is injected into each service CT at create time (the proxmox module's `pubkey`) so Ansible can SSH in afterward. Idempotent — only generates if absent. |
 | Assert the vault password file is root-only | `ansible.builtin.file` (`mode: 0600`) | Defense-in-depth: catches permission drift on `/root/.vault_pass`. The bootstrap already writes it with `umask 077`. |
 | Put the repo's `bin/` on PATH | `ansible.builtin.copy` (`/etc/profile.d/zai-ops.sh`) | Make the operator commands (`zai-assign`, `zai-backup`, …) discoverable as `zai-*` for interactive shells. They run in place from git — nothing is copied to `/usr/local/bin`, so `git pull` is enough to update them. |

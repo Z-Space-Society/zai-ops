@@ -25,6 +25,17 @@
       - python3-requests
     state: present
 
+# Operator diagnostics. debian-13-standard ships minimal — no curl/jq — so the
+# control node can't probe a service CT's HTTP health endpoint by hand (the
+# playbooks use ansible.builtin.uri, but an operator at a shell reaches for curl).
+# Install them here so `curl http://10.1.1.<ctid>:4000/health/...` just works.
+- name: Install operator diagnostic CLI tools
+  ansible.builtin.apt:
+    name:
+      - curl
+      - jq
+    state: present
+
 # Service CTs are created with this public key injected into their root
 # authorized_keys (the proxmox module's `pubkey`), so Ansible can SSH in over
 # the internal network afterward. Idempotent: only generates if absent.

@@ -77,11 +77,21 @@ Defined in [`defaults/main.yml`](../../ansible/roles/litellm/defaults/main.yml):
 under `/root/.zai-secrets` on CT 100 (same posture as the garage/restic secrets,
 **not** the vault). Because the lookup runs on the control node, the value the
 role sets as the PG password and the value rendered into `DATABASE_URL` are
-identical, and both stay stable across rebuilds. Read the master key with:
+identical, and both stay stable across rebuilds.
+
+**The `.zai-secrets` files hold only the generated hex** — the `sk-` prefix on
+`litellm_master_key` / `litellm_salt_key` is added by the template, *not* stored in
+the file. So `cat`-ing the file gives you the key **without** `sk-`; clients and the
+admin UI authenticate with the full `sk-…` value. Read the actual master key either
+way:
 
 ```bash
-cat /root/.zai-secrets/litellm_master_key   # the sk-… clients authenticate with
+echo "sk-$(cat /root/.zai-secrets/litellm_master_key)"   # reconstruct the sk-… key
+# …or read the rendered value straight off the litellm CT:
+ssh root@10.1.1.<ctid> 'grep MASTER_KEY /etc/litellm/litellm.env'
 ```
+
+The admin UI login is username `admin`, password = that full `sk-…` master key.
 
 ## Dependencies
 

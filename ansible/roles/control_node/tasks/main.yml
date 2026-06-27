@@ -25,6 +25,18 @@
       - python3-requests
     state: present
 
+# Debian's ansible 12 bundles community.proxmox 1.3.0, whose ProxmoxAPI() call
+# omits the connection timeout — proxmoxer then defaults to a 5s read timeout
+# that the LXC-create POST exceeds on a fresh node. 1.6.0+ adds the api_timeout
+# option provision.yml relies on. This installs into ~/.ansible/collections,
+# which precedes the dist-packages copy in Ansible's default search path, so it
+# shadows the bundled 1.3.0 without touching system files. Pin lives in
+# requirements.yml beside ansible.cfg.
+- name: Install/upgrade pinned Ansible collections on the control node
+  community.general.ansible_galaxy_install:
+    type: collection
+    requirements_file: "{{ playbook_dir }}/requirements.yml"
+
 # Operator diagnostics. debian-13-standard ships minimal — no curl/jq — so the
 # control node can't probe a service CT's HTTP health endpoint by hand (the
 # playbooks use ansible.builtin.uri, but an operator at a shell reaches for curl).

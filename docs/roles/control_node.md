@@ -11,8 +11,8 @@ Base configuration for the Ansible control node (CT 100, `ansible-control`).
 The host bootstrap gets CT 100 to the point where Ansible can run (locale,
 Ansible, repo clone, vault). This role takes over from there and makes the
 control node idempotently re-configurable: it re-asserts the locale, brings the
-system up to date, installs the Proxmox API client, and prepares the SSH key
-used to reach service containers.
+system up to date, installs the Proxmox API client and the pinned Ansible
+collections, and prepares the SSH key used to reach service containers.
 
 ## Tasks
 
@@ -21,6 +21,7 @@ used to reach service containers.
 | Ensure the `en_US.UTF-8` locale is generated | `community.general.locale_gen` | Re-asserted **before** the upgrade so a `glibc`/`locales` upgrade regenerates `locale-archive` with the locale present instead of wiping it. |
 | Update apt cache and run a full upgrade | `ansible.builtin.apt` (`upgrade: full`) | Keep the control node current. |
 | Install the Proxmox API client library | `ansible.builtin.apt` (`python3-proxmoxer`, `python3-requests`) | `community.proxmox` modules talk to the API through `proxmoxer`. |
+| Install/upgrade pinned Ansible collections | `community.general.ansible_galaxy_install` (`requirements.yml`) | Debian's `ansible` 12 bundles `community.proxmox` 1.3.0, which can't set the API connection timeout (no `api_timeout` until 1.6.0), so the LXC-create POST dies at proxmoxer's 5s read default. Installs the pin (`>=1.6.0`) into `~/.ansible/collections`, which precedes dist-packages in the search path — shadows the bundled copy without touching system files. See [Known gotchas](../README.md#known-gotchas). |
 | Install operator diagnostic CLI tools | `ansible.builtin.apt` (`curl`, `jq`) | `debian-13-standard` is minimal; give the operator `curl`/`jq` to probe a service CT's HTTP health endpoint by hand (playbooks themselves use `ansible.builtin.uri`). |
 | Ensure root has an ed25519 SSH keypair | `ansible.builtin.user` (`generate_ssh_key`) | The public key is injected into each service CT at create time (the proxmox module's `pubkey`) so Ansible can SSH in afterward. Idempotent — only generates if absent. |
 | Assert the vault password file is root-only | `ansible.builtin.file` (`mode: 0600`) | Defense-in-depth: catches permission drift on `/root/.vault_pass`. The bootstrap already writes it with `umask 077`. |
@@ -33,7 +34,12 @@ well-known control node.
 
 ## Dependencies
 
-- Collections: `community.general` (`locale_gen`).
+- Collections: `community.general` (`locale_gen`, `ansible_galaxy_install`).
+- Pins layered on the distro set via
+  [`ansible/requirements.yml`](../../ansible/requirements.yml) (`community.proxmox
+  >=1.6.0`), installed by this role — so `provision.yml` runs against the pinned
+  collection, not the bundled 1.3.0.
+- Outbound internet (NAT via the host) to reach Ansible Galaxy on first install.
 - Assumes the bootstrap has already run (locale fixed, repo cloned, vault
   written).
 

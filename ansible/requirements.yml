@@ -1,0 +1,16 @@
+---
+# Ansible Galaxy collections layered on top of the distro-bundled set on the
+# control node (CT 100). Installed by the control_node role into
+# ~/.ansible/collections, which precedes the dist-packages copy in Ansible's
+# default search path, so these shadow the bundled versions without touching
+# system files.
+#
+# Why pin community.proxmox >= 1.6.0: Debian 13's ansible 12 ships 1.3.0, whose
+# ProxmoxAPI() call passes no connection timeout — proxmoxer then falls back to a
+# 5s read timeout, which the LXC-create POST blows past on a fresh node
+# ("Read timed out. (read timeout=5)"). 1.6.0 adds the `api_timeout` option that
+# provision.yml sets. Capped below 2.0.0 to stay on the 1.x behavior the rest of
+# this repo's community.proxmox gotchas were verified against.
+collections:
+  - name: community.proxmox
+    version: ">=1.6.0,<2.0.0"

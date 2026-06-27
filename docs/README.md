@@ -407,9 +407,21 @@ vault, so it holds no runtime state. See [`backup`](roles/backup.md).
 
 ## Known gotchas
 
-Hard-won lessons with `community.proxmox.proxmox` (the version bundled with
-Debian 13's `ansible` 12). These will recur on the remaining service CTs:
+Hard-won lessons with `community.proxmox.proxmox`. The collection is pinned to
+**>=1.6.0** in [`ansible/requirements.yml`](../ansible/requirements.yml) and
+installed by the `control_node` role, *not* the 1.3.0 bundled with Debian 13's
+`ansible` 12 (see the timeout lesson). These will recur on the remaining service
+CTs:
 
+- **Create needs `api_timeout`, not just `timeout`.** Bundled 1.3.0 calls
+  `ProxmoxAPI()` without a connection timeout, so proxmoxer falls back to a 5s
+  read timeout that the LXC-create POST exceeds on a fresh node
+  (`Read timed out. (read timeout=5)`). The module's `timeout:` only bounds its
+  task-wait loop, *not* the HTTP read, so raising it changes nothing. `api_timeout`
+  (added in 1.6.0 — hence the pin) is the read timeout; both are set in
+  [`provision.yml`](../ansible/provision.yml)'s `module_defaults`. Symptom: the
+  "Create the LXC container" task fails in ~5s with `read timeout=5` and no CT is
+  left behind.
 - **Disk must use the `storage:size` form.** Use `disk: "local-lvm:8"`, *not*
   `disk: 8` with a separate `storage:` — the latter renders a pathless rootfs
   that PVE rejects under token auth ("Only root can pass arbitrary filesystem

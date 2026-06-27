@@ -26,6 +26,15 @@
       api_token_id: "{{ proxmox_api_token_id }}"
       api_token_secret: "{{ proxmox_api_token_secret }}"
       node: "{{ proxmox_node_name }}"
+      # api_timeout is the proxmoxer HTTPS *read* timeout; community.proxmox
+      # defaults it to 5s, which the LXC-create POST blows past on a fresh node
+      # ("Read timed out. (read timeout=5)"). Needs the collection pinned in
+      # requirements.yml (>=1.6.0) — the distro's bundled 1.3.0 has no such knob
+      # and will reject this param, which is the intended loud failure if the
+      # control node wasn't configured by site.yml first. `timeout` is separate:
+      # it bounds how long the module waits for the create/start task to finish.
+      api_timeout: 120
+      timeout: 120
   tasks:
     - name: Fail fast if the service has no CTID assignment
       # ctid is supplied only by the runtime assignment (inventory/local.yml).
@@ -60,7 +69,6 @@
         pubkey: "{{ lookup('file', '/root/.ssh/id_ed25519.pub') }}"
         netif: "{{ ct_netif }}"
         state: present
-        timeout: 120
       when: ct_netif is defined
 
     - name: Start the container

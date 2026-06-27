@@ -78,8 +78,16 @@ out and update the docs.
 
 ## community.proxmox gotchas
 
-Version bundled with Debian 13's `ansible` 12. These recur on every new CT:
+These recur on every new CT. Note the collection is **pinned to >=1.6.0** in
+`ansible/requirements.yml` and installed by the `control_node` role — *not* the
+1.3.0 bundled with Debian 13's `ansible` 12 (see the timeout gotcha below):
 
+- **Create needs `api_timeout`, not just `timeout`.** The bundled 1.3.0 passes no
+  connection timeout to proxmoxer, so it falls back to a 5s read timeout that the
+  LXC-create POST exceeds on a fresh node ("Read timed out. (read timeout=5)").
+  `timeout:` only bounds the module's task-wait loop, not the HTTP read — it does
+  *not* fix this. The `api_timeout` option that does arrives in 1.6.0; that's why
+  the collection is pinned. Both are set in `provision.yml`'s `module_defaults`.
 - **Disk must be `storage:size`.** Use `disk: "local-lvm:8"`, never `disk: 8`
   with a separate `storage:` (renders a pathless rootfs → PVE rejects under
   token auth: "Only root can pass arbitrary filesystem paths").

@@ -79,8 +79,9 @@ out and update the docs.
 ## community.proxmox gotchas
 
 These recur on every new CT. Note the collection is **pinned to >=1.6.0** in
-`ansible/requirements.yml` and installed by the `control_node` role — *not* the
-1.3.0 bundled with Debian 13's `ansible` 12 (see the timeout gotcha below):
+`ansible/requirements.yml`, seeded by `bootstrap.sh` and re-asserted by the
+`control_node` role — *not* the 1.3.0 bundled with Debian 13's `ansible` 12 (see
+the timeout gotcha below):
 
 - **Create needs `api_timeout`, not just `timeout`.** The bundled 1.3.0 passes no
   connection timeout to proxmoxer, so it falls back to a 5s read timeout that the

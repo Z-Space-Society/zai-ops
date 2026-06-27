@@ -193,6 +193,15 @@ pct exec "$CTID" -- bash -c "
   grep -q '^LANG=' /etc/environment || echo 'LANG=en_US.UTF-8' >> /etc/environment
   apt-get -qq -y install ansible git
   [ -d /opt/zai-ops ] || git clone --quiet $REPO_URL /opt/zai-ops
+  # community.proxmox >=1.6.0 is what CT 100 uses to build every other CT over the
+  # API, so it's as fundamental as Ansible itself and installed right here. Debian's
+  # ansible 12 bundles 1.3.0, which can't set the API read timeout — the LXC-create
+  # POST then dies at proxmoxer's 5s default. Install the repo's pin into
+  # /root/.ansible/collections (which precedes the dist-packages copy in Ansible's
+  # search path); --upgrade makes galaxy honour the version range over the bundled
+  # 1.3.0. Seeded here so provision.yml works straight after bootstrap, before
+  # site.yml; the control_node role re-asserts it (seed-then-own, like the locale).
+  ansible-galaxy collection install -r /opt/zai-ops/ansible/requirements.yml --upgrade
   # Put the repo's operator commands (zai-assign, zai-backup, …) on PATH so a
   # fresh \`pct enter $CTID\` can run them by name before site.yml has run. The
   # control_node role re-asserts these idempotently (seeded here, owned by Ansible

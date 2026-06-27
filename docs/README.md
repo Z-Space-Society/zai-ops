@@ -56,7 +56,9 @@ What it does, in order (each phase prints a numbered banner):
 8. **Attach to the internal network** — give CT 100 a `vmbr1` NIC at `10.1.1.100`.
 9. **Provision the control node** — fix the locale (must happen before Ansible
    can run at all), install `ansible` + `git`, clone this repo to `/opt/zai-ops`,
-   and put the repo's [`bin/`](#operator-commands) on PATH (so a fresh
+   install the pinned Ansible collections (`community.proxmox >=1.6.0`, so
+   `provision.yml` works before `site.yml` — the bundled 1.3.0 can't set the API
+   timeout), and put the repo's [`bin/`](#operator-commands) on PATH (so a fresh
    `pct enter` can run `zai-assign`/`zai-backup` before `site.yml` has run).
 10. **Mint the Proxmox API token + vault** — create the `ansible@pve` user, the
    `ZaiProvision` role, and a token; write the credentials into an encrypted
@@ -408,10 +410,10 @@ vault, so it holds no runtime state. See [`backup`](roles/backup.md).
 ## Known gotchas
 
 Hard-won lessons with `community.proxmox.proxmox`. The collection is pinned to
-**>=1.6.0** in [`ansible/requirements.yml`](../ansible/requirements.yml) and
-installed by the `control_node` role, *not* the 1.3.0 bundled with Debian 13's
-`ansible` 12 (see the timeout lesson). These will recur on the remaining service
-CTs:
+**>=1.6.0** in [`ansible/requirements.yml`](../ansible/requirements.yml), seeded
+by `bootstrap.sh` and re-asserted by the `control_node` role, *not* the 1.3.0
+bundled with Debian 13's `ansible` 12 (see the timeout lesson). These will recur
+on the remaining service CTs:
 
 - **Create needs `api_timeout`, not just `timeout`.** Bundled 1.3.0 calls
   `ProxmoxAPI()` without a connection timeout, so proxmoxer falls back to a 5s

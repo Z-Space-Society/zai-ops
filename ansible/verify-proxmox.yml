@@ -21,6 +21,9 @@
         api_user: "{{ proxmox_api_user }}"
         api_token_id: "{{ proxmox_api_token_id }}"
         api_token_secret: "{{ proxmox_api_token_secret }}"
+        # Proxmox serves a self-signed cert; keep validation off. Explicit because
+        # community.proxmox 2.0.0 flips the default to true (see provision.yml).
+        validate_certs: false
       register: pve_nodes
 
     - name: Show reachable nodes

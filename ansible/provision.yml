@@ -35,6 +35,11 @@
       # it bounds how long the module waits for the create/start task to finish.
       api_timeout: 120
       timeout: 120
+      # Proxmox serves a self-signed cert on 8006, so cert validation must stay
+      # off. community.proxmox <2.0.0 defaults validate_certs to false (with a
+      # deprecation warning); 2.0.0 flips the default to true, which would fail
+      # every API call here — so pin it explicitly rather than rely on the default.
+      validate_certs: false
   tasks:
     - name: Fail fast if the Proxmox node name is unrecorded
       # proxmox_node_name is runtime data in inventory/local.yml (bootstrap.sh

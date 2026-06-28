@@ -104,6 +104,10 @@ the timeout gotcha below):
   `'name'` for freshly-created CTs ([issue #98]). Pass `hostname:` and add a
   small `retries`/`until` for the post-create race.
 - **Systemd 257 wants nesting.** Create service CTs with `features: [nesting=1]`.
+- **Set `validate_certs: false` explicitly.** Proxmox serves a self-signed cert
+  on 8006. <2.0.0 defaults this to false but warns; 2.0.0 flips the default to
+  *true*, which would fail every API call. Pinned in `provision.yml`'s
+  `module_defaults` and on `verify-proxmox.yml`'s task — not left to the default.
 
 [issue #98]: https://github.com/ansible-collections/community.proxmox/issues/98
 

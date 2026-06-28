@@ -303,10 +303,14 @@ echo "  cd /opt/zai-ops/ansible"
 echo "  ansible-playbook site.yml                            # configure the control node"
 echo "  ansible-playbook verify-proxmox.yml                  # confirm API token"
 echo "  zai-set-domain example.com                           # record the cluster's public base domain"
-echo "  zai-assign object-store 101                          # assign object-store its CTID"
-echo "  ansible-playbook provision.yml --limit object-store  # create + configure object-store"
-echo "  zai-assign postgres 102                              # assign postgres its CTID"
-echo "  ansible-playbook provision.yml --limit postgres      # create + configure postgres"
+echo "  zai-assign object-store 101                          # assign all CTIDs up front (creates nothing)"
+echo "  zai-assign postgres 102                              #   — assign before provisioning so cross-service"
+echo "  zai-assign proxy 110                                 #     routes (proxy -> litellm) render in any order"
+echo "  zai-assign litellm 112"
+echo "  ansible-playbook provision.yml --limit object-store  # then provision each: create + configure"
+echo "  ansible-playbook provision.yml --limit postgres"
+echo "  ansible-playbook provision.yml --limit proxy"
+echo "  ansible-playbook provision.yml --limit litellm"
 
 # --- Vault password — printed LAST so it isn't scrolled away ---
 if [[ "$PROVISIONED" -eq 1 ]]; then

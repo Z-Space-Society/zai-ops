@@ -47,13 +47,17 @@ itself from this repo.
    routes are built from `cluster_domain`. Both are stored in git-ignored runtime
    state ([`inventory/local.yml`](docs/README.md#networking)).
 
-4. Build the service containers, one at a time. For each service, **assign** it a
-   container ID (`zai-assign <service> <ctid>`) then
-   provision it — `provision.yml` creates the CT over the Proxmox API and
-   configures it over SSH. The CTID is recorded in git-ignored runtime state, so
-   the committed blueprint stays number-free and the same repo stands up a cluster
-   on whatever CTIDs are free. **The numbers below are examples** — pick any free
-   ones; this cluster's actual layout is in the [docs](docs/README.md#networking).
+4. Build the service containers in two passes: **assign** every service its
+   container ID first, then **provision** them. `zai-assign` only records the
+   number in git-ignored runtime state — nothing is created — so assigning all up
+   front lets each provision render cross-service references regardless of the
+   order you provision in. (The proxy's Caddy route points at litellm's address,
+   `10.1.1.<litellm-ctid>`; if litellm has no CTID yet the proxy's Caddyfile fails
+   to render. Assigning up front sidesteps that.) `provision.yml` then creates
+   each CT over the Proxmox API and configures it over SSH. The committed
+   blueprint stays number-free, so the same repo stands up a cluster on whatever
+   CTIDs are free. **The numbers below are examples** — pick any free ones; this
+   cluster's actual layout is in the [docs](docs/README.md#networking).
 
    The example CTIDs below follow a tiered convention: **100–109 core infra**
    (control, object store, postgres), **110–119 platform** (the edge proxy, auth,
@@ -61,20 +65,17 @@ itself from this repo.
    CTID tells you the tier, and there's room to grow without renumbering.
 
    ```bash
-   # object store first — it's the restic backend the backup job writes to
-   zai-assign object-store 101
+   # 1. assign every CTID up front — records numbers only, creates nothing
+   zai-assign object-store 101   # core infra: the restic backend
+   zai-assign postgres 102       # core infra: the internal database
+   zai-assign proxy 110          # platform: the LAN-facing reverse proxy
+   zai-assign litellm 112        # platform: the AI gateway
+
+   # 2. provision each — create over the API, configure over SSH.
+   #    object store first: it's the restic backend the backup job writes to.
    ansible-playbook provision.yml --limit object-store
-
-   # postgres — the internal database server
-   zai-assign postgres 102
    ansible-playbook provision.yml --limit postgres
-
-   # proxy — the LAN-facing reverse proxy
-   zai-assign proxy 110
    ansible-playbook provision.yml --limit proxy
-
-   # litellm - The AI Gateway
-   zai-assign litellm 112
    ansible-playbook provision.yml --limit litellm
    ```
 

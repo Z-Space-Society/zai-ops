@@ -29,15 +29,23 @@ itself from this repo.
    The script prints a **vault password** on its last line. Back it up
    off-box — it's also stored on the control node at `/root/.vault_pass`.
 
-3. Enter the control node and run the first Ansible playbook, which
-   configures CT 100 itself, then verify the API token works.
+3. Enter the control node, configure CT 100 itself, verify the API token, and
+   record the cluster's public base domain.
 
    ```bash
    pct enter 100
    cd /opt/zai-ops/ansible
-   ansible-playbook site.yml            # configure the control node
-   ansible-playbook verify-proxmox.yml  # confirm the API token authenticates
+   ansible-playbook site.yml             # configure the control node
+   ansible-playbook verify-proxmox.yml   # confirm the API token authenticates
+   zai-set-domain example.com            # record the cluster's public base domain
    ```
+
+   `bootstrap.sh` already recorded the **Proxmox node name** from the host's
+   `hostname`, so there's no node step here; run `zai-set-node <node>` only to
+   correct it (e.g. after renaming the host). The **domain** has no auto-source,
+   so `zai-set-domain` is required before provisioning the proxy — its Caddy
+   routes are built from `cluster_domain`. Both are stored in git-ignored runtime
+   state ([`inventory/local.yml`](docs/README.md#networking)).
 
 4. Build the service containers, one at a time. For each service, **assign** it a
    container ID (`zai-assign <service> <ctid>`) then

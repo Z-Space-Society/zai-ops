@@ -1,14 +1,14 @@
 ---
 # Non-secret cluster-wide vars (the encrypted secrets live in vault.yml beside
-# this file). Kept out of the vault on purpose: the Proxmox node name isn't a
-# secret, and hardcoding it into playbooks breaks the "rebuilds on any host"
-# principle. Override per deployment.
+# this file). These are committed BLUEPRINT defaults — generic, no this-cluster
+# identity.
 #
-# TODO: this is the LAST this-cluster fact still committed to the repo — the
-# service-CT numbers/IPs are now runtime data (inventory/local.yml). Source the
-# node name from runtime data the same way to finish the ADR-0001 split, so the
-# committed tree targets any host. Tracked in docs/README.md#todo.
-proxmox_node_name: alhambra
+# proxmox_node_name is deliberately NOT here: it's the host you flashed, not
+# committed identity — the same category as the CTID assignments and the domain
+# (ADR-0001). bootstrap.sh records it from `hostname` into the git-ignored runtime
+# inventory (inventory/local.yml); set it by hand with `zai-set-node <node>`.
+# Provision targets it as the `node:` of every API call; a stale value makes
+# pveproxy proxy every create to a phantom node and time out (HTTP 595).
 
 # cluster_domain — the cluster's public base domain (e.g. zai.cascadia.design),
 # consumed by Caddy proxy routes like api.{{ cluster_domain }}. Deliberately NOT

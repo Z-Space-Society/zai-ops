@@ -278,6 +278,20 @@ else
   info "vault already present; skipping token mint"
 fi
 
+# --- Record the Proxmox node name as runtime data ---
+# The node name is a this-cluster fact, not committed identity (ADR-0001): it's
+# whatever host you flashed. bootstrap runs ON that host, so capture it here and
+# record it in CT 100's git-ignored runtime inventory, where provision.yml reads
+# it as the `node:` every API call targets. Nothing about the node is committed,
+# so the same blueprint stands up on any host. A stale/committed value makes
+# pveproxy try to proxy every create to a phantom node and time out (HTTP 595).
+# `hostname` is the Proxmox node name. Idempotent: set-node.yml no-ops when the
+# recorded value already matches.
+step "Recording the Proxmox node name"
+PVE_NODE=$(hostname)
+pct exec "$CTID" -- bash -c "cd /opt/zai-ops/ansible && ansible-playbook set-node.yml -e node='$PVE_NODE'"
+done_ok "proxmox_node_name → $PVE_NODE"
+
 # --- Done ---
 printf '\n%s==================================================================%s\n' "$GREEN$BOLD" "$RESET"
 printf '%s CT %s (%s) ready.%s\n' "$GREEN$BOLD" "$CTID" "$HOSTNAME" "$RESET"

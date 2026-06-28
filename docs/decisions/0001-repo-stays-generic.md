@@ -37,11 +37,20 @@ then `inference.yml` configures it.
 
 ## Scope / status
 
-Applied to the **inference nodes** now. The existing committed inventory still
-carries some this-cluster data — `proxmox_node_name: alhambra` and the service-CT
-internal IPs — pending the same treatment. Tracked as TODOs in
-[`docs/README.md`](../README.md#todo). The `10.1.1.0/24` net and CT IDs are
-considered blueprint constants and stay in the repo.
+The split is **complete**. All this-cluster identity now lives in the git-ignored
+runtime inventory (`inventory/local.yml`), written by per-fact setter playbooks
+and merged with the committed blueprint via the directory inventory:
+
+- inference roster — `enroll-inference-node.yml`
+- service CTIDs (and the `10.1.1.{ctid}` IPs derived from them) — `assign.yml`
+- `cluster_domain` — `set-domain.yml`
+- `proxmox_node_name` — `set-node.yml` (recorded automatically by `bootstrap.sh`
+  from the host's `hostname`)
+
+Only genuine blueprint constants stay committed: the `10.1.1.0/24` net, the
+`10.1.1.{ctid}` addressing *convention*, the `reserved_ctids` defaults, and each
+service's create specs. The committed tree carries no node, no domain, and no
+container numbers — the same blueprint stands up a cluster on any host.
 
 ## Consequences
 

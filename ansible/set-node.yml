@@ -1,0 +1,89 @@
+---
+# Record the Proxmox node name — the proxmox_node_name setter.
+#
+#   ansible-playbook set-node.yml -e "node=asusnuc"
+#
+# (`zai-set-node <node>`, the operator command in bin/, is sugar over this — no
+# logic lives in the wrapper.) From here on this is authoritatively
+# proxmox_node_name for every playbook — most importantly the `node:` every
+# provision.yml API call targets.
+#
+# Why a playbook and not a committed var: the node name is the one remaining
+# this-cluster fact — it's whatever host you flashed, not committed identity, the
+# same category as the CTID assignments and the domain (ADR-0001). bootstrap.sh
+# runs ON the host, where the real node name is in hand, and records it here
+# automatically; nothing about the node is committed, so the same blueprint
+# stands up on any host. A wrong/stale value makes pveproxy try to proxy every
+# create to a phantom node and time out with HTTP 595 ("Errors during connection
+# establishment, proxy handshake: Connection timed out").
+#
+# It goes in the git-ignored runtime inventory (inventory/local.yml) on the
+# control node — backed up like the vault, never committed — which Ansible merges
+# into the blueprint. Read-modify-write the WHOLE structure and re-dump (never
+# line-append): that preserves every service's CTID assignment, the domain, and
+# the inference-node roster that share this file, instead of corrupting it.
+
+- name: Record the Proxmox node name
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    runtime_inventory: "{{ playbook_dir }}/inventory/local.yml"
+    # A plausible RFC 1123 hostname label (what a PVE node name is): alphanumerics
+    # and hyphens, no leading/trailing hyphen, no dots/spaces/scheme. `is match`
+    # anchors at the start; the trailing '$' pins the end.
+    node_regex: '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$'
+  tasks:
+    - name: Require node
+      ansible.builtin.assert:
+        that:
+          - node is defined and (node | string | length) > 0
+        fail_msg: >-
+          Pass a node, e.g. -e "node=asusnuc"
+
+    - name: Validate the node is a plausible hostname
+      ansible.builtin.assert:
+        that: node is match(node_regex)
+        fail_msg: >-
+          '{{ node }}' is not a plausible Proxmox node name — expected a bare
+          hostname label like 'asusnuc' (alphanumerics/hyphens, no dots/spaces).
+
+    # errors='ignore' → empty string when the file doesn't exist yet; 'or {}'
+    # turns that (and an empty/whitespace file) into an empty mapping to merge into.
+    - name: Load the existing runtime inventory (empty if absent)
+      ansible.builtin.set_fact:
+        runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
+
+    # Idempotent no-op: setting the node that's already recorded exits 0 cleanly.
+    - name: Detect an unchanged (no-op) node
+      ansible.builtin.set_fact:
+        is_noop: "{{ (runtime_data.get('all', {}).get('vars', {}).get('proxmox_node_name') | default(none)) == node }}"
+
+    - name: Report the no-op and finish
+      ansible.builtin.debug:
+        msg: "proxmox_node_name is already '{{ node }}' — nothing to do."
+      when: is_noop | bool
+
+    # Read-modify-write: merge ONLY proxmox_node_name into the whole structure,
+    # recursively, so every CTID assignment, the domain, and the inference-node
+    # roster survive.
+    - name: Merge the node into the runtime structure
+      ansible.builtin.set_fact:
+        merged_inventory: >-
+          {{
+            runtime_data
+            | combine({'all': {'vars': {'proxmox_node_name': node}}}, recursive=True)
+          }}
+      when: not (is_noop | bool)
+
+    - name: Write the runtime inventory
+      ansible.builtin.copy:
+        dest: "{{ runtime_inventory }}"
+        content: "{{ merged_inventory | to_nice_yaml(indent=2) }}"
+        mode: "0644"
+      when: not (is_noop | bool)
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "proxmox_node_name → {{ node }} recorded in {{ runtime_inventory }}."
+      when: not (is_noop | bool)

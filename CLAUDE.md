@@ -53,8 +53,16 @@ out and update the docs.
   git-ignored). Vault password at `/root/.vault_pass` on CT 100 — host root is
   the trust boundary by design.
 - **Non-secret shared vars** go in `ansible/group_vars/all/main.yml` (e.g.
-  `proxmox_node_name`, `ct_rootfs_storage`) — never hardcode the node or storage
-  in playbooks, and don't put non-secrets in the vault.
+  `ct_rootfs_storage`) — never hardcode storage in playbooks, and don't put
+  non-secrets in the vault. These are generic *blueprint* defaults only; no
+  this-cluster identity lives there.
+- **The Proxmox node name is runtime data, not committed.** Like the CTID
+  assignments and `cluster_domain`, `proxmox_node_name` lives in the git-ignored
+  `inventory/local.yml` — `bootstrap.sh` records it from the host's `hostname`
+  (via `set-node.yml`), and `zai-set-node <node>` adjusts it. `provision.yml`
+  targets it as the `node:` of every API call; a stale value makes `pveproxy`
+  proxy each create to a phantom node and time out (HTTP 595). Keeps the
+  committed tree host-agnostic (ADR-0001).
 - **Native services, no Docker on LXC.** Service containers run under systemd
   directly. CTs are unprivileged with `features: [nesting=1]`.
 - **Template:** `debian-13-standard` for all CTs. Template storage `local`,

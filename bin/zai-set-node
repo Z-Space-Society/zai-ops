@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# zai-set-node — thin wrapper over set-node.yml. Record the Proxmox node name:
+#
+#   zai-set-node asusnuc    # proxmox_node_name → asusnuc
+#
+# bootstrap.sh records this automatically from the host it runs on, so you rarely
+# call this by hand — reach for it only when the node name changes (e.g. you
+# renamed the host) or to correct a stale value. Lives in the repo's bin/ (on
+# PATH via /etc/profile.d/zai-ops.sh) and runs in place — the script you run is
+# always the one in git, no installed copy to drift. No logic lives here; the
+# playbook validates and persists the node name.
+set -euo pipefail
+if [[ $# -ne 1 ]]; then
+  echo "usage: zai-set-node <node> [extra ansible args]" >&2
+  exit 64
+fi
+node="$1"; shift
+# cd to the ansible dir (sibling of this bin/) so ansible.cfg loads no matter the
+# caller's CWD — it supplies the inventory (relative: inventory/) and the vault
+# password file. Self-locating off this script's path (not hardcoded) so the same
+# script works from any checkout: /opt/zai-ops on the box, a dev tree elsewhere.
+cd "$(dirname "$(readlink -f "$0")")/../ansible"
+exec ansible-playbook set-node.yml \
+  -e "node=$node" "$@"

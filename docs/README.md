@@ -63,6 +63,9 @@ What it does, in order (each phase prints a numbered banner):
 10. **Mint the Proxmox API token + vault** — create the `ansible@pve` user, the
    `ZaiProvision` role, and a token; write the credentials into an encrypted
    Ansible Vault on CT 100. See [Secrets & trust model](#secrets--trust-model).
+11. **Record the Proxmox node name** — capture the host's `hostname` into CT 100's
+   runtime inventory (`proxmox_node_name`, via `set-node.yml`) so `provision.yml`
+   targets the right node. Nothing about the node is committed.
 
 The script prints a **vault password** on its last line — back it up off-box.
 
@@ -82,7 +85,7 @@ ansible-playbook provision.yml --limit proxy    # create + configure proxy
 ## Architecture
 
 ```
-                    ┌─────────────── Proxmox host (alhambra) ───────────────┐
+                    ┌──────────────── Proxmox host (<node>) ────────────────┐
    LAN (vmbr0) ─────┤                                                        │
         │           │   CT 100  ansible-control   (control node)            │
         │           │      • runs Ansible, holds the vault + SSH key        │
@@ -167,11 +170,12 @@ already uses for the API token.
   constants** every cluster reuses — the `10.1.1.0/24` net and the
   `10.1.1.{ctid}` addressing *convention* (but not the specific numbers).
 - This-cluster specifics — *which inference nodes exist, which CTID each service
-  got, and the cluster's public base domain* — live in
+  got, the cluster's public base domain, and the Proxmox node name* — live in
   `ansible/inventory/local.yml`, written by
   [`enroll-inference-node.yml`](#playbooks) (inference roster),
-  [`assign.yml`](#service-ctid-assignment) (`zai-assign`, service CTIDs), and
+  [`assign.yml`](#service-ctid-assignment) (`zai-assign`, service CTIDs),
   [`set-domain.yml`](#service-ctid-assignment) (`zai-set-domain`, `cluster_domain`),
+  and [`set-node.yml`](#playbooks) (`zai-set-node`, `proxmox_node_name`),
   and never committed. The committed `hosts.yml` carries **no container numbers** at
   all — services are keyed by logical name (`proxy`, `litellm`, …) and their IP
   is *derived* from the assigned CTID, so there's no second field to drift.
@@ -182,9 +186,10 @@ already uses for the API token.
 Because neither the roster nor the CTID assignments live in the repo, a
 control-node rebuild is **repo + restored runtime data** — back up `local.yml`
 alongside the vault. The decision is pinned in
-[ADR-0001](decisions/0001-repo-stays-generic.md). Only `proxmox_node_name` still
-lives in the committed inventory and is slated for the same treatment — see
-[TODO](#todo).
+[ADR-0001](decisions/0001-repo-stays-generic.md). The committed tree now carries
+**no this-cluster identity at all**: `proxmox_node_name` was the last holdout and
+is recorded as runtime data too (`bootstrap.sh` captures it from the host's
+`hostname`; `zai-set-node` adjusts it).
 
 ---
 
@@ -287,6 +292,7 @@ later; the repo bakes in neither.
 | `verify-proxmox.yml`  | CT 100 (local) | Read-only check that the API token authenticates    |
 | `assign.yml`          | CT 100 (local) | Bind a service to a CTID in runtime inventory (the `zai-assign` engine) |
 | `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the `zai-set-domain` engine) |
+| `set-node.yml`        | CT 100 (local) | Record the Proxmox node name in runtime inventory (the `zai-set-node` engine; `bootstrap.sh` calls it automatically) |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
 | `inference.yml`       | CT 100 → SSH   | Configure inference nodes (`nvidia_cuda` + `llama_server`) |
@@ -315,6 +321,7 @@ PATH when the control node is configured. The convention:
 | ------- | ---- | --------- |
 | `zai-assign <service> <ctid>` | Bind a service to a CTID in runtime inventory | [`assign.yml`](#playbooks) |
 | `zai-set-domain <domain>` | Record the cluster's public base domain in runtime inventory | [`set-domain.yml`](#playbooks) |
+| `zai-set-node <node>` | Record the Proxmox node name in runtime inventory (bootstrap sets it automatically) | [`set-node.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
 
@@ -433,6 +440,15 @@ on the remaining service CTs:
   `hostname:` on the start task; a small `retries`/`until` covers the race.
 - **Systemd 257 wants nesting.** Unprivileged CTs warn "you may need to enable
   nesting"; service CTs are created with `features: [nesting=1]`.
+- **HTTP 595 on create = wrong `node:`, not a network problem.** `595 Errors
+  during connection establishment, proxy handshake: Connection timed out` is a
+  Proxmox status: `pveproxy` accepted the request but failed trying to *proxy* it
+  to the node named in the call — because that node isn't this host. The cause is
+  a stale/wrong `proxmox_node_name`. It's recorded as runtime data from the host's
+  `hostname` (`bootstrap.sh` / `zai-set-node`); fix it with
+  `zai-set-node <node>`. With too short an `api_timeout` the same root cause
+  instead surfaces as a misleading `read timeout=5` (proxmoxer gives up before
+  pveproxy returns the 595).
 
 [community.proxmox #98]: https://github.com/ansible-collections/community.proxmox/issues/98
 
@@ -503,12 +519,6 @@ Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
 
 ## TODO
 
-- **Move `proxmox_node_name` into runtime data.** The service-CT numbers and IPs
-  are now runtime ([Service CTID assignment](#service-ctid-assignment)), so the
-  committed tree is number-free — but `proxmox_node_name: alhambra` still pins one
-  this-cluster fact in `group_vars/all/main.yml`. Finish the
-  [ADR-0001](decisions/0001-repo-stays-generic.md) split by sourcing it from
-  runtime data the way the CTID assignments now work.
 - **Off-site backup target.** The [`backup`](#backups) job ships runtime state to
   the on-box object store (CT 105), which guards CT-level loss but not whole-host
   loss. Add a second restic target off the box (SFTP/B2/S3) so a dead host or

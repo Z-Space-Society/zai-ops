@@ -36,6 +36,20 @@
       api_timeout: 120
       timeout: 120
   tasks:
+    - name: Fail fast if the Proxmox node name is unrecorded
+      # proxmox_node_name is runtime data in inventory/local.yml (bootstrap.sh
+      # records it from the host's hostname; zai-set-node sets it). If it's
+      # missing — e.g. a control node that predates the runtime-node change —
+      # every API call below would target an undefined node. Refuse early with an
+      # actionable message instead of a cryptic undefined-variable error or, worse,
+      # a phantom-node HTTP 595 at create time.
+      ansible.builtin.assert:
+        that: proxmox_node_name is defined
+        fail_msg: >-
+          proxmox_node_name is not recorded — run: zai-set-node <node>
+          (or re-run bootstrap.sh, which records it automatically).
+      run_once: true
+
     - name: Fail fast if the service has no CTID assignment
       # ctid is supplied only by the runtime assignment (inventory/local.yml).
       # Without it ansible_host and the netif IP can't resolve, so refuse early

@@ -4,11 +4,15 @@
 # ({{ litellm_env_file }}), referenced below as os.environ/… so they never land in
 # this git-rendered, group-readable file. model_list may be empty: models can also
 # be added at runtime via the admin API/UI and are persisted in Postgres.
+#
+# The always-on floor embedder (loopback, co-located) is prepended when enabled, so
+# the rendered model_list is never empty even with the runtime list left at [].
+{% set _models = (litellm_embedding_model_entry if litellm_embedding_enabled else []) + litellm_model_list %}
 model_list:
-{% if litellm_model_list | length == 0 %}
+{% if _models | length == 0 %}
   []
 {% else %}
-{{ litellm_model_list | to_nice_yaml(indent=2) | indent(2, first=true) }}
+{{ _models | to_nice_yaml(indent=2) | indent(2, first=true) }}
 {% endif %}
 
 general_settings:

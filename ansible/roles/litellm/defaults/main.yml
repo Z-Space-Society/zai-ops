@@ -78,3 +78,56 @@ litellm_model_list: []
 #      model: openai/llama-3.3-70b           # provider/route
 #      api_base: "http://10.1.1.NNN:8080/v1" # an inference node's llama-server
 #      api_key: "none"
+
+# --- Floor embedder ---------------------------------------------------------
+# An always-on, CPU-only `llama-server --embedding` co-located in THIS CT, giving
+# the cluster a baseline embedding model that is up whenever litellm is — independent
+# of the GPU inference nodes (which are intermittent). RAG clients (OpenWebUI) reach
+# embeddings through litellm, so embeddings can never be more available than litellm
+# anyway; co-locating makes the floor's availability == litellm's, with no extra
+# failure domain. Bound to loopback; litellm's config.yaml routes the model_name here.
+litellm_embedding_enabled: true
+litellm_embedding_model_name: nomic-embed-text
+litellm_embedding_port: 8090            # loopback only; MUST differ from litellm_port
+
+# Prebuilt CPU llama.cpp release — a downloaded binary, NOT a source build, so the
+# lean proxy CT never grows a C++ toolchain (the llama_server role builds from source
+# only to autodetect a GPU's CUDA arch, which is irrelevant here). The ubuntu-x64
+# asset is a CPU build; its binary + co-located .so libs extract FLAT under one
+# versioned dir, which we strip to a stable dist/. Releases:
+# https://github.com/ggml-org/llama.cpp/releases
+llama_embed_release: "b9840"
+llama_embed_binary_url: "https://github.com/ggml-org/llama.cpp/releases/download/{{ llama_embed_release }}/llama-{{ llama_embed_release }}-bin-ubuntu-x64.tar.gz"
+llama_embed_binary_sha256: ""           # optional integrity pin (omit when empty)
+
+llama_embed_dir: /opt/llama-embed
+llama_embed_tarball: "{{ llama_embed_dir }}/llama-{{ llama_embed_release }}.tar.gz"
+llama_embed_bin_dir: "{{ llama_embed_dir }}/dist"   # extracted binary + .so libs (flat)
+llama_embed_server_bin: "{{ llama_embed_bin_dir }}/llama-server"
+
+# nomic-embed-text-v1.5 GGUF — jurisdiction-clean (Nomic AI, US). Small enough
+# (~274 MB f16) to fetch at provision time over the host NAT, unlike the multi-GB
+# chat GGUFs staged by hand. Pinned to a commit revision so the URL is reproducible.
+llama_embed_model_dir: "{{ llama_embed_dir }}/models"
+llama_embed_model_repo: nomic-ai/nomic-embed-text-v1.5-GGUF
+llama_embed_model_rev: "0188c9bf409793f810680a5a431e7b899c46104c"
+llama_embed_model_file: nomic-embed-text-v1.5.f16.gguf
+llama_embed_model_url: "https://huggingface.co/{{ llama_embed_model_repo }}/resolve/{{ llama_embed_model_rev }}/{{ llama_embed_model_file }}"
+llama_embed_model_sha256: ""            # optional integrity pin (omit when empty)
+
+# nomic supports 8192 tokens but llama.cpp defaults to 2048 unless rope-scaled
+# (see the unit's yarn flags), so RAG chunks aren't silently truncated.
+llama_embed_ctx: 8192
+
+# The floor entry, prepended to litellm_model_list when rendering config.yaml. It
+# points at 127.0.0.1 (host-agnostic), so it is a legitimate ROLE DEFAULT, not the
+# this-cluster runtime routing that keeps litellm_model_list empty above. model_info
+# mode:embedding marks the route so /v1/embeddings + the admin UI classify it right.
+litellm_embedding_model_entry:
+  - model_name: "{{ litellm_embedding_model_name }}"
+    litellm_params:
+      model: "openai/{{ litellm_embedding_model_name }}"
+      api_base: "http://127.0.0.1:{{ litellm_embedding_port }}/v1"
+      api_key: "none"
+    model_info:
+      mode: embedding

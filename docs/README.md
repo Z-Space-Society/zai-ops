@@ -255,7 +255,10 @@ later proxy routes build on it (e.g. `api.{{ cluster_domain }}`).
 The inference nodes (salmon, orca, …) are **bare-metal Debian 13 machines** with
 NVIDIA GPUs, sitting on the LAN/tailnet *outside* the Proxmox host. They run
 `llama-server` only — no double duty — and are reached for inference by the
-LiteLLM gateway (addressing per the vault's ADR-002).
+LiteLLM gateway (addressing per the vault's ADR-002). They serve the chat (and
+GPU-class) models; the *baseline embedding* model is **not** one of them — it runs
+as an always-on CPU `llama-server` co-located in the `litellm` CT (see
+[`litellm`](roles/litellm.md)), so embeddings survive any inference node being down.
 
 CT 100 configures them over SSH as a dedicated **`ansible` user** (NOPASSWD
 sudo), using its root ed25519 key. Two roles apply: [`nvidia_cuda`](roles/nvidia_cuda.md)
@@ -342,7 +345,7 @@ command. Only control-node operator commands belong in `bin/`.
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
 | [`object_store`](roles/object_store.md)    | `object-store` | Single-node Garage (S3-compatible) — the on-box backup target |
 | [`postgres`](roles/postgres.md)            | `postgres` | PostgreSQL 17 (Debian-native) — the internal database server |
-| [`litellm`](roles/litellm.md)              | `litellm`  | LiteLLM proxy (venv) — OpenAI-compatible gateway, Postgres-backed |
+| [`litellm`](roles/litellm.md)              | `litellm`  | LiteLLM proxy (venv) — OpenAI-compatible gateway, Postgres-backed; + an always-on CPU floor embedder (`nomic-embed-text`) |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
 
 (More roles — open-webui — will be added here as they come online.)
@@ -503,6 +506,20 @@ Hard-won lessons on the bare-metal **inference nodes** (Debian 13 + NVIDIA):
   node never comes up on the network.
 - **CUDA arch is auto-detected** from `nvidia-smi` (`compute_cap`) — no per-host
   build flag to maintain.
+
+Lessons on the **`litellm` CT floor embedder** (the always-on CPU embedding model):
+
+- **The prebuilt `ubuntu-x64` llama.cpp binary runs on Debian 13 via glibc backward
+  compat.** It links an older glibc; the host's newer glibc runs it fine (the failing
+  case is the reverse — a binary needing a *newer* glibc than the host). The
+  `litellm` role's verify step `ldd`-checks for `not found` to catch that early. If a
+  future release ever needs a newer glibc, pin an older release rather than switch to
+  a source build (which would drag the C++ toolchain onto the lean proxy CT).
+- **nomic embeddings need `search_document:` / `search_query:` prefixes, added by the
+  client.** `nomic-embed-text-v1.5` degrades without them; LiteLLM passes input
+  through verbatim, so the *client* (a future OpenWebUI RAG pipeline) must prepend
+  them. Noted so mediocre retrieval isn't re-debugged as a model fault. nomic's full
+  8192 context also needs the unit's yarn rope flags (llama.cpp defaults to 2048).
 
 Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
 

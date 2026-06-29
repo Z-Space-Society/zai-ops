@@ -1,0 +1,37 @@
+# {{ ansible_managed }}
+# CPU-only llama-server serving the floor embedding model on loopback, co-located
+# with litellm so the cluster always has a baseline embedder (availability == litellm's).
+# Started by the litellm role; litellm's config.yaml routes the model named
+# "{{ litellm_embedding_model_name }}" here. No -ngl: this CT has no GPU by design.
+[Unit]
+Description=llama-server floor embedder (CPU, loopback) for LiteLLM
+After=network.target
+
+[Service]
+User={{ litellm_user }}
+Group={{ litellm_group }}
+# The prebuilt binary's .so libs sit next to it in the extracted dist dir.
+Environment=LD_LIBRARY_PATH={{ llama_embed_bin_dir }}
+# --embedding flips the server into embeddings mode (/v1/embeddings). The yarn rope
+# flags lift the context from llama.cpp's 2048 default to nomic's full 8192 so RAG
+# chunks aren't truncated; batch-size matches so a full chunk embeds in one pass.
+ExecStart={{ llama_embed_server_bin }} \
+  --model {{ llama_embed_model_dir }}/{{ llama_embed_model_file }} \
+  --embedding \
+  --host 127.0.0.1 \
+  --port {{ litellm_embedding_port }} \
+  --ctx-size {{ llama_embed_ctx }} \
+  --batch-size {{ llama_embed_ctx }} \
+  --rope-scaling yarn --rope-freq-scale 0.75
+Restart=on-failure
+RestartSec=5
+
+# Hardening mirrors the litellm unit: the embedder reads its binary + model and
+# writes nothing to disk, so / stays read-only and a private /tmp is enough.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

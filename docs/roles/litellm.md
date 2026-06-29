@@ -27,6 +27,22 @@ that database must exist and the DSN must be valid first, which is why this play
 ordered after [`postgres`](postgres.md) (and why a `--limit litellm` run still needs
 postgres already provisioned).
 
+### Floor embedder (co-located)
+
+The role also installs an **always-on CPU embedding server** on this same CT: a
+`llama-server --embedding` bound to `127.0.0.1:{{ litellm_embedding_port }}` serving
+`nomic-embed-text-v1.5`, registered in `config.yaml` as the model
+`{{ litellm_embedding_model_name }}`. This guarantees the cluster *always* has an
+embedding model (which RAG clients like a future OpenWebUI need) **independent of the
+GPU inference nodes**, which are intermittent. The reasoning for co-locating rather
+than a separate CT: embeddings are reached *through* litellm
+(`OpenWebUI → litellm → backend`), so they can never be more available than litellm
+itself — putting the floor in this CT makes its availability *equal* litellm's, with
+no extra failure domain. The binary is a **prebuilt CPU llama.cpp release** (not a
+source build) so the lean proxy CT never grows a C++ toolchain; the GGUF is small
+(~274 MB) so it's fetched at provision time. Disable with
+`litellm_embedding_enabled: false`.
+
 ## Tasks
 
 | Task | Module | Why |
@@ -41,12 +57,18 @@ postgres already provisioned).
 | Generate the Prisma client | `command` → `prisma generate --schema` | Builds the Python client and fetches the query-engine binary into the daemon's cache — the native equivalent of the Docker image's build-time `prisma generate`. No DB needed. |
 | Migrate the schema | `command` → `prisma migrate deploy --schema` (`no_log`) | Applies the migration files `litellm_proxy_extras` ships to the (already-created) `litellm` DB, **at provision time, before the daemon starts** — running `litellm` directly never migrates (only the Docker entrypoint does). Idempotent: a converged DB reports "No pending migrations to apply". `DATABASE_URL` carries the password → `no_log`. Notifies restart. |
 | Chown the home to `litellm` | `ansible.builtin.file` (`recurse`) | pip/generate/migrate ran as root; the daemon reads the interpreter/console script, the generated Prisma client and the engine cache. Runs *after* generate/migrate so the whole tree is covered. |
-| Deploy `config.yaml` | `template` (`0640 root:litellm`) | Non-secret model routing; master key referenced as `os.environ/…`. Notifies restart. |
+| *(floor embedder)* Create dirs | `ansible.builtin.file` | `/opt/llama-embed/{,dist,models}` for the binary, its libs and the GGUF. |
+| *(floor embedder)* Download the prebuilt CPU llama.cpp release | `ansible.builtin.get_url` | Pinned `ubuntu-x64` (CPU) asset; optional `sha256` pin (same idiom as object_store). No source build → no toolchain on this CT. |
+| *(floor embedder)* Extract `llama-server` | `ansible.builtin.unarchive` (`--strip-components=1`, `creates:`) | Binary + `.so` libs unpack flat under one versioned dir; strip it into `dist/`. `creates:` skips re-extraction. |
+| *(floor embedder)* Stage the nomic GGUF | `ansible.builtin.get_url` | `nomic-embed-text-v1.5.f16.gguf` pinned to a HF commit revision; small enough to fetch at provision time. |
+| *(floor embedder)* Install the unit + start/enable | `template` → `/etc/systemd/system/llama-embed.service`, `systemd` | CPU `--embedding` on loopback. Notifies reload + `restart llama-embed`. Started+enabled (the model is fetched by this role, so no "stage by hand first" gap). |
+| Deploy `config.yaml` | `template` (`0640 root:litellm`) | Non-secret model routing; the floor embedder entry is prepended when enabled; master key referenced as `os.environ/…`. Notifies restart. |
 | Render the secret env file | `template` (`0600 root`, `no_log`) | `DATABASE_URL` (with the generated db password), `LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`, `STORE_MODEL_IN_DB`, plus `LITELLM_MODE=PRODUCTION` / `LITELLM_LOG=ERROR`. Read by systemd via `EnvironmentFile`. Notifies restart. |
 | Install the systemd unit | `template` → `/etc/systemd/system/litellm.service` | Hardened (`ProtectSystem=strict`, `ReadWritePaths={{ litellm_home }}` so the daemon can read its pre-fetched Prisma cache, `PRISMA_OFFLINE_MODE=true`, `TimeoutStartSec=120` for startup headroom). Notifies reload + restart. |
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config *before* the smoke test. By now the client is generated and the schema migrated, so startup connects to a ready DB. |
 | Wait for the port + health check | `wait_for` (`127.0.0.1:4000`) + `uri` (`/health/liveliness`) | Liveness proves the app booted and reached the migrated DB — not merely that the port is open. |
+| *(floor embedder)* Wait + embedding smoke test | `wait_for` + `uri` (POST `/v1/embeddings`) | Runs after the flush (so a changed unit is restarted). A returned vector proves the server booted in embeddings mode and the model loaded. |
 
 ### Handlers
 
@@ -54,6 +76,7 @@ postgres already provisioned).
 | ------- | ------ |
 | `reload systemd` | `systemd: daemon_reload=true` |
 | `restart litellm` | `service: name=litellm state=restarted` |
+| `restart llama-embed` | `service: name=llama-embed state=restarted` |
 
 ## Variables
 
@@ -68,6 +91,14 @@ Defined in [`defaults/main.yml`](../../ansible/roles/litellm/defaults/main.yml):
 | `litellm_config_file` / `litellm_env_file` | `/etc/litellm/{config.yaml,litellm.env}` | Non-secret config and the `0600` secret env. |
 | `litellm_db_name` / `litellm_db_user` | `litellm` | The Postgres database + role this role creates. |
 | `litellm_model_list` | `[]` | Model routing rendered into `config.yaml`. Empty by default; models can also be added at runtime (persisted in PG via `STORE_MODEL_IN_DB`). |
+| `litellm_embedding_enabled` | `true` | Master switch for the whole floor-embedder block (tasks + the prepended `config.yaml` entry). |
+| `litellm_embedding_model_name` | `nomic-embed-text` | `model_name` clients request at `:4000`; the loopback route maps to it. |
+| `litellm_embedding_port` | `8090` | Loopback port for the embedding `llama-server`. **Must differ from `litellm_port`.** |
+| `llama_embed_release` | *(pinned, e.g. `b9840`)* | llama.cpp release tag; the `ubuntu-x64` (CPU) asset is fetched from it. |
+| `llama_embed_binary_sha256` / `llama_embed_model_sha256` | `""` | Optional `sha256` integrity pins (`omit` when empty). |
+| `llama_embed_dir` | `/opt/llama-embed` | Holds `dist/` (binary + libs) and `models/` (the GGUF). |
+| `llama_embed_model_repo` / `llama_embed_model_rev` / `llama_embed_model_file` | *(nomic GGUF)* | HF repo, pinned commit revision, and filename of the embedding GGUF. |
+| `llama_embed_ctx` | `8192` | `--ctx-size`/`--batch-size`; nomic's full context (needs the unit's yarn rope flags). |
 
 ### Secrets (auto-generated — no manual step)
 
@@ -109,6 +140,18 @@ The admin UI login is username `admin`, password = that full `sk-…` master key
 ssh root@10.1.1.<ctid> 'systemctl is-active litellm'
 ssh root@10.1.1.<ctid> 'curl -fs http://127.0.0.1:4000/health/liveliness'   # alive
 ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep litellm          # DB present
+
+# Floor embedder: up on loopback, and reachable through litellm (the OpenWebUI path).
+ssh root@10.1.1.<ctid> 'systemctl is-active llama-embed'
+ssh root@10.1.1.<ctid> 'curl -fs http://127.0.0.1:8090/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"nomic-embed-text\",\"input\":\"search_document: hello\"}" | head -c 120'
+ssh root@10.1.1.<ctid> 'curl -fs http://127.0.0.1:4000/v1/embeddings \
+  -H "Authorization: Bearer $(grep MASTER_KEY /etc/litellm/litellm.env | cut -d= -f2)" \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"nomic-embed-text\",\"input\":\"search_query: hello\"}" | head -c 120'
+# Catch the glibc gotcha early — the Ubuntu binary must resolve on Debian 13:
+ssh root@10.1.1.<ctid> 'ldd /opt/llama-embed/dist/llama-server | grep -i "not found" || echo OK'
 ```
 
 ## Notes
@@ -132,6 +175,20 @@ ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep litellm          # DB
   `{{ litellm_home }}` (`ReadWritePaths`) and sets `HOME` there so that cache stays
   readable/writable. If a future LiteLLM version wants to write elsewhere, widen
   `ReadWritePaths` rather than dropping the hardening.
+- **The floor embedder is a CPU prebuilt binary on purpose.** The `ubuntu-x64` asset
+  links against an older glibc; Debian 13's newer glibc runs it via backward
+  compatibility (the verify step's `ldd` check catches the rare reverse case). If a
+  future release ever needs a glibc newer than the host, pin an older release rather
+  than reintroduce a source build (which would drag the C++ toolchain onto this CT).
+- **nomic wants task-instruction prefixes — that's the *client's* job, not this role's.**
+  `nomic-embed-text-v1.5` expects `search_document:` on indexed chunks and
+  `search_query:` on queries; without them retrieval quality drops. LiteLLM passes the
+  input through verbatim, so **OpenWebUI's RAG pipeline must add the prefixes** when it
+  is built. Flagged here so mediocre retrieval isn't re-debugged as a model problem.
+- **nomic's full 8192 context needs rope scaling.** llama.cpp defaults to 2048; the
+  unit passes `--ctx-size 8192 --batch-size 8192 --rope-scaling yarn --rope-freq-scale 0.75`
+  so full-length RAG chunks aren't silently truncated.
+- **`litellm_embedding_port` must differ from `litellm_port`** — they share the CT.
 - For how the CT is assigned a CTID, created and reached, see
   [`provision.yml`](../../ansible/provision.yml) and the
   [main docs](../README.md#service-ctid-assignment).

@@ -7,3 +7,8 @@
   ansible.builtin.service:
     name: litellm
     state: restarted
+
+- name: restart llama-embed
+  ansible.builtin.service:
+    name: llama-embed
+    state: restarted

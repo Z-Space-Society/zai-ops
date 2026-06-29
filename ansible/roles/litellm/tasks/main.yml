@@ -199,6 +199,80 @@
     group: "{{ litellm_group }}"
     recurse: true
 
+# --- Floor embedder (CPU llama-server, co-located) --------------------------
+# An always-on CPU embedding server on loopback, so the cluster always has a baseline
+# embedding model independent of the GPU inference nodes. A PREBUILT llama.cpp binary
+# (not a source build) keeps the C++ toolchain off this lean proxy CT. litellm's
+# config.yaml (rendered below) routes the embedding model_name here. The whole block
+# is gated so the floor can be disabled without touching the rest of the role.
+
+- name: Create the floor embedder directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ litellm_user }}"
+    group: "{{ litellm_group }}"
+    mode: "0755"
+  loop:
+    - "{{ llama_embed_dir }}"
+    - "{{ llama_embed_bin_dir }}"
+    - "{{ llama_embed_model_dir }}"
+  when: litellm_embedding_enabled
+
+- name: Download the prebuilt CPU llama.cpp release
+  # Idempotent on dest; the optional checksum fails a tampered/partial download (same
+  # idiom as the object_store garage binary).
+  ansible.builtin.get_url:
+    url: "{{ llama_embed_binary_url }}"
+    dest: "{{ llama_embed_tarball }}"
+    mode: "0644"
+    checksum: "{{ ('sha256:' + llama_embed_binary_sha256) if llama_embed_binary_sha256 else omit }}"
+  when: litellm_embedding_enabled
+
+- name: Extract llama-server into the dist dir
+  # The asset unpacks the binary + its .so libs flat under one versioned top dir;
+  # --strip-components=1 drops them straight into dist/. `creates` skips re-extraction
+  # once the binary exists, so converged runs are a no-op.
+  ansible.builtin.unarchive:
+    src: "{{ llama_embed_tarball }}"
+    remote_src: true
+    dest: "{{ llama_embed_bin_dir }}"
+    extra_opts: ["--strip-components=1"]
+    creates: "{{ llama_embed_server_bin }}"
+  when: litellm_embedding_enabled
+
+- name: Stage the nomic embedding GGUF
+  # Small enough (~274 MB) to fetch at provision time over the host NAT, unlike the
+  # multi-GB chat GGUFs the llama_server role stages by hand.
+  ansible.builtin.get_url:
+    url: "{{ llama_embed_model_url }}"
+    dest: "{{ llama_embed_model_dir }}/{{ llama_embed_model_file }}"
+    owner: "{{ litellm_user }}"
+    group: "{{ litellm_group }}"
+    mode: "0644"
+    checksum: "{{ ('sha256:' + llama_embed_model_sha256) if llama_embed_model_sha256 else omit }}"
+  when: litellm_embedding_enabled
+
+- name: Install the floor embedder systemd unit
+  ansible.builtin.template:
+    src: llama-embed.service.j2
+    dest: /etc/systemd/system/llama-embed.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart llama-embed
+  when: litellm_embedding_enabled
+
+- name: Ensure the floor embedder is started and enabled
+  ansible.builtin.systemd:
+    name: llama-embed
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: litellm_embedding_enabled
+
 # --- Config + secret env + unit ---------------------------------------------
 
 - name: Deploy the litellm configuration
@@ -265,3 +339,31 @@
   until: litellm_health is succeeded
   retries: 10
   delay: 3
+
+# --- Floor embedder smoke test ----------------------------------------------
+# Runs after the flush above, so a changed llama-embed unit is already restarted.
+# Loading the GGUF on CPU takes a few seconds, hence the wait + retries.
+
+- name: Wait for the floor embedder to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ litellm_embedding_port }}"
+    timeout: 90
+  when: litellm_embedding_enabled
+
+- name: Verify the floor embedder returns an embedding
+  # Proves the server booted in embeddings mode and the model loaded — not merely that
+  # the port is open. This is the path OpenWebUI will use (via litellm) once built.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ litellm_embedding_port }}/v1/embeddings"
+    method: POST
+    body_format: json
+    body:
+      model: "{{ litellm_embedding_model_name }}"
+      input: "search_document: ping"
+    status_code: 200
+  register: llama_embed_health
+  until: llama_embed_health is succeeded
+  retries: 10
+  delay: 3
+  when: litellm_embedding_enabled

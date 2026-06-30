@@ -238,6 +238,16 @@
   when: (happyview_clone is changed) or (not happyview_static_stat.stat.exists)
   notify: restart happyview
 
+- name: Ensure static dir tree is world-readable
+  # `copy` with remote_src doesn't reliably set directory_mode on the top-level
+  # destination directory — it lands as 0644 (no execute bit), so the happyview
+  # process can't enter the directory and every static file request returns 404.
+  # Same root cause as the migrations tree; a+rX is the minimal safe fix.
+  ansible.builtin.command:
+    cmd: chmod -R a+rX "{{ happyview_static_dir }}"
+  changed_when: false
+  when: (happyview_clone is changed) or (not happyview_static_stat.stat.exists)
+
 - name: Replace /__HAPPYVIEW_BP__ sentinel strings in static files
   # The Next.js build embeds /__HAPPYVIEW_BP__ as a relocatable base-path sentinel.
   # Replace with empty string so all asset paths are rooted at / — the same

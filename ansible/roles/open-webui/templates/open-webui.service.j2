@@ -18,18 +18,22 @@ Environment=HOME={{ openwebui_data_dir }}
 ExecStart={{ openwebui_bin }} serve --host {{ openwebui_host }} --port {{ openwebui_port }}
 Restart=on-failure
 RestartSec=5
-# First start runs Alembic migrations + app boot; keep generous headroom.
-TimeoutStartSec=300
+# First start runs Alembic migrations and imports a heavy dependency tree (langchain,
+# torch, transformers, audio libs) on a small CT — that legitimately takes minutes, so
+# keep wide headroom or systemd kills a healthy-but-slow boot.
+TimeoutStartSec=600
 
 # Hardening: all persistent state is in Postgres or DATA_DIR. ProtectSystem=strict
 # makes / read-only; PrivateTmp gives a scratch /tmp; ProtectHome hides /home + /root
-# (the interpreter is under /opt, unaffected). ReadWritePaths re-opens just DATA_DIR
-# (vector db, uploads, caches) — the only tree the daemon writes at runtime.
+# (the interpreter is under /opt, unaffected). ReadWritePaths re-opens the whole role
+# home: besides DATA_DIR (vector db, uploads, caches), OpenWebUI also writes branding
+# into its own package static dir under the venv at startup, so a DATA_DIR-only
+# allowance logs "Read-only file system" errors. The rest of / stays read-only.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths={{ openwebui_data_dir }}
+ReadWritePaths={{ openwebui_home }}
 
 [Install]
 WantedBy=multi-user.target

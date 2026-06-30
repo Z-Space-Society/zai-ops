@@ -242,10 +242,13 @@
   ansible.builtin.meta: flush_handlers
 
 - name: Wait for open-webui to accept connections
+  # First boot imports a heavy tree (langchain/torch/transformers/audio) on a small
+  # CT, so give it the same wide window as the unit's TimeoutStartSec rather than the
+  # default — a healthy boot here can take minutes.
   ansible.builtin.wait_for:
     host: 127.0.0.1
     port: "{{ openwebui_port }}"
-    timeout: 180
+    timeout: 600
 
 - name: Verify the open-webui health endpoint responds
   # /health is OpenWebUI's unauthenticated liveness probe — proves the app booted and

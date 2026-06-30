@@ -9,9 +9,9 @@
 
 # Pinned release. OpenWebUI moves fast and runs DB migrations on startup, so pin it
 # and bump deliberately. Releases: https://github.com/open-webui/open-webui/releases
-openwebui_version: "0.9.6"
+openwebui_version: "0.10.1"
 
-# OpenWebUI 0.9.x requires Python >=3.11,<3.13 — but the Debian 13 CT template ships
+# OpenWebUI 0.10.x requires Python >=3.11,<3.13 — but the Debian 13 CT template ships
 # Python 3.13, which it REFUSES. So unlike the litellm role we can NOT build the venv
 # from the system interpreter (`python3 -m venv`). We use uv to fetch a managed,
 # self-contained CPython of this version instead (see tasks). Bump only within the

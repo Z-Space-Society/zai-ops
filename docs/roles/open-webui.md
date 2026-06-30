@@ -31,7 +31,7 @@ embedder; see [`litellm`](litellm.md)).
 This role is otherwise a near-copy of [`litellm`](litellm.md), but differs where it
 must:
 
-1. **uv-managed Python 3.12, not the system interpreter.** Open WebUI 0.9.x requires
+1. **uv-managed Python 3.12, not the system interpreter.** Open WebUI 0.10.x requires
    Python `>=3.11,<3.13`, but the Debian 13 CT template ships **3.13**, which it
    refuses. So `python3 -m venv` is unusable here. The role installs a pinned,
    checksummed [`uv`](https://docs.astral.sh/uv/) binary and uses it to fetch a

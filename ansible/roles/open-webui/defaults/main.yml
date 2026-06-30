@@ -70,9 +70,16 @@ openwebui_env_file: /etc/open-webui/open-webui.env
 # idiom as litellm). The password is the auto-generated openwebui_db_password from
 # group_vars/all/main.yml; the DSN is built from these + hostvars['postgres'], so the
 # DB IP is derived from its CTID, never hardcoded.
+#
+# ?client_encoding=utf8 is load-bearing, not cosmetic: OpenWebUI's async engine uses
+# the psycopg v3 driver, and with psycopg 3.3 (pinned by 0.10.x) `pg_catalog.version()`
+# comes back as BYTES unless the client encoding is pinned — SQLAlchemy then throws
+# "cannot use a string pattern on a bytes-like object" parsing the server version, and
+# the app crash-loops at startup. Pinning the encoding makes psycopg return str.
+# See https://github.com/sqlalchemy/sqlalchemy/discussions/11373
 openwebui_db_name: openwebui
 openwebui_db_user: openwebui
-openwebui_database_url: "postgresql://{{ openwebui_db_user }}:{{ openwebui_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ openwebui_db_name }}"
+openwebui_database_url: "postgresql://{{ openwebui_db_user }}:{{ openwebui_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ openwebui_db_name }}?client_encoding=utf8"
 
 # OpenAI-compatible backend = the litellm CT. Its IP is derived from its CTID via
 # hostvars; the port is a LOCAL default here rather than reaching into litellm's role

@@ -142,6 +142,13 @@ The **first** user to sign up becomes the admin; there's no seeded account.
   extra. A plain install crash-loops at boot on
   `ModuleNotFoundError: No module named 'psycopg2'` and never binds the port. The
   install task uses `open-webui[postgres]==<version>` so the driver is present.
+- **The DSN must pin `?client_encoding=utf8`.** OpenWebUI's *async* engine uses the
+  psycopg **v3** driver (separate from the sync psycopg2 path), and with psycopg 3.3
+  (pinned by 0.10.x) `pg_catalog.version()` returns **bytes** unless the client
+  encoding is set — SQLAlchemy then throws `cannot use a string pattern on a
+  bytes-like object` parsing the server version and the app crash-loops at startup.
+  `openwebui_database_url` appends `?client_encoding=utf8`
+  ([sqlalchemy#11373](https://github.com/sqlalchemy/sqlalchemy/discussions/11373)).
 - **Migrations run on startup, and a failure is logged but does NOT crash the app** —
   so `/health` can return 200 over a half-migrated DB. Unlike litellm there's no
   provision-time migration gate; on a major version bump, watch

@@ -1,12 +1,12 @@
 ---
 # Install HappyView natively under systemd as an AT Protocol AppView platform.
-# HappyView is a Rust + TypeScript project with no official pre-built Linux binaries
+# HappyView is a Rust + Next.js project with no official pre-built Linux binaries
 # distributed over a plain HTTP URL (Tangled releases use AT Protocol blob storage).
-# The role therefore builds from source: installs the Rust toolchain + Bun, clones
-# the pinned tag, runs `cargo build --release` (which invokes any build.rs frontend
-# steps), copies the resulting binary to /opt/happyview/bin, and cleans the build
-# tree to reclaim the ~6 GB of Cargo deps. Runtime memory is light; the 2 GB CT
-# sizing is for compilation headroom.
+# The role builds from source: installs the Rust toolchain + Node.js 22, clones the
+# pinned tag, runs `cargo build --release` for the binary AND `npm run build` (with
+# NEXT_PUBLIC_BASE_PATH=/__HAPPYVIEW_BP__) for the static frontend, then cleans both
+# build trees to reclaim ~6 GB. Runtime memory is light; the 2 GB CT sizing is for
+# compilation headroom.
 
 # --- Provision the happyview role + database on the postgres CT --------------------
 # Same idiom as litellm/open-webui: the postgres superuser is peer-only, so all psql
@@ -114,21 +114,19 @@
     state: present
     update_cache: true
 
-# Bun is the JS runtime used by HappyView's frontend build pipeline (bun.lock present
-# in the repo). Install the official binary via the install script to /usr/local/bin.
-- name: Check whether bun is installed
-  ansible.builtin.command: bun --version
-  register: happyview_bun_installed
-  changed_when: false
-  failed_when: false
-
-- name: Install bun via the official installer
+# Node.js 22 for the Next.js frontend build (web/ uses npm, matching the Dockerfile's
+# node:22-alpine stage). NodeSource provides the only reliable Node 22 package for
+# Debian — the distro ships an older version that Next.js 15 won't accept.
+- name: Set up NodeSource Node.js 22 repository
   ansible.builtin.shell:
-    cmd: curl -fsSL https://bun.sh/install | bash
-    creates: /root/.bun/bin/bun
-  environment:
-    BUN_INSTALL: /usr/local
-  when: happyview_bun_installed.rc != 0
+    cmd: curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    creates: /etc/apt/sources.list.d/nodesource.list
+
+- name: Install Node.js 22
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: true
 
 # Rust toolchain via rustup — minimal profile to keep install lean (no rust-docs,
 # rust-src, etc.). Installed system-wide under /usr/local so the root build can find it.
@@ -196,6 +194,65 @@
     mode: "0755"
   when: (happyview_clone is changed) or (not happyview_bin_stat.stat.exists)
   notify: restart happyview
+
+# --- Frontend build ---------------------------------------------------------------
+# The Next.js frontend (web/) is NOT embedded in the Rust binary — there is no
+# build.rs. It must be built separately: `npm ci && npm run build` with
+# NEXT_PUBLIC_BASE_PATH=/__HAPPYVIEW_BP__ (the sentinel entrypoint.sh replaces at
+# first start). The Dockerfile uses a dedicated node:22-alpine stage for this;
+# we replicate it here using the Node.js 22 we installed above.
+
+- name: Check whether the frontend static dir is populated
+  ansible.builtin.stat:
+    path: "{{ happyview_static_dir }}"
+  register: happyview_static_stat
+
+- name: Install frontend npm dependencies
+  ansible.builtin.command:
+    cmd: npm ci
+    chdir: "{{ happyview_src }}/web"
+  environment:
+    PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
+    HOME: /root
+  when: (happyview_clone is changed) or (not happyview_static_stat.stat.exists)
+
+- name: Build the Next.js frontend
+  ansible.builtin.command:
+    cmd: npm run build
+    chdir: "{{ happyview_src }}/web"
+  environment:
+    PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
+    HOME: /root
+    NEXT_PUBLIC_BASE_PATH: "/__HAPPYVIEW_BP__"
+  when: (happyview_clone is changed) or (not happyview_static_stat.stat.exists)
+
+- name: Deploy frontend static files to {{ happyview_static_dir }}
+  ansible.builtin.copy:
+    src: "{{ happyview_src }}/web/out/"
+    dest: "{{ happyview_static_dir }}/"
+    remote_src: true
+    owner: root
+    group: "{{ happyview_group }}"
+    mode: "0644"
+    directory_mode: "0755"
+  when: (happyview_clone is changed) or (not happyview_static_stat.stat.exists)
+  notify: restart happyview
+
+- name: Replace /__HAPPYVIEW_BP__ sentinel strings in static files
+  # The Next.js build embeds /__HAPPYVIEW_BP__ as a relocatable base-path sentinel.
+  # Replace with empty string so all asset paths are rooted at / — the same
+  # transformation the Dockerfile's entrypoint.sh applies at container start.
+  ansible.builtin.shell:
+    cmd: >-
+      find "{{ happyview_static_dir }}" -type f
+      \( -name '*.html' -o -name '*.js' -o -name '*.css' -o -name '*.txt' \)
+      -exec sed -i 's|/__HAPPYVIEW_BP__||g' {} +
+  when: (happyview_clone is changed) or (not happyview_static_stat.stat.exists)
+
+- name: Remove frontend node_modules to reclaim disk space
+  ansible.builtin.file:
+    path: "{{ happyview_src }}/web/node_modules"
+    state: absent
 
 - name: Copy migrations to {{ happyview_home }}/migrations
   # HappyView resolves migrations via a relative path ("./migrations/postgres") from

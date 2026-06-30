@@ -20,10 +20,14 @@ CT holds no unreproducible runtime state.
 
 **Build-from-source note.** HappyView's project releases are hosted on
 [Tangled](https://tangled.org/) as AT Protocol blobs (not plain HTTP URLs), so the
-role builds from source using the Rust toolchain + Bun (the JS runtime for the
-frontend build pipeline). First provision takes ~15–30 min on a cold CT; the Cargo
-build tree is cleaned afterwards to reclaim ~6 GB. The CT is therefore sized at 2 GB
-RAM / 16 GB disk for build headroom — the runtime footprint is much lighter.
+role builds from source using the Rust toolchain (for the binary) and Node.js 22
+(for the Next.js frontend). The Rust binary and the Next.js static files are
+**separate artifacts** — there is no `build.rs`; the frontend is built with
+`npm ci && NEXT_PUBLIC_BASE_PATH=/__HAPPYVIEW_BP__ npm run build` and the output
+(`web/out/`) is deployed to `STATIC_DIR` with sentinel strings replaced in place.
+First provision takes ~15–30 min on a cold CT; build trees are cleaned afterwards to
+reclaim ~6 GB. The CT is therefore sized at 2 GB RAM / 16 GB disk for build headroom
+— the runtime footprint is much lighter.
 
 ## Tasks
 
@@ -34,14 +38,18 @@ RAM / 16 GB disk for build headroom — the runtime footprint is much lighter.
 | Create `happyview` group + user | `group`, `user` | Run the daemon unprivileged, no login shell. |
 | Create home + config dirs | `ansible.builtin.file` | `/opt/happyview` + `/opt/happyview/bin` (root-owned), `/etc/happyview` (root-owned, `0750`). |
 | Install build dependencies | `apt` | `build-essential`, `ca-certificates`, `curl`, `git`, `libssl-dev`, `pkg-config`, `unzip`. |
-| Install Bun | `shell` (official installer) | HappyView's frontend build uses Bun (a `bun.lock` is in the repo). Skipped if already present. |
+| Set up NodeSource repo + install Node.js 22 | `shell` (NodeSource setup_22.x) + `apt` | The Next.js frontend (`web/`) requires Node 22; the distro ships an older version. NodeSource provides the only reliable Debian 13 package. |
 | Install Rust toolchain | `shell` (rustup) | `cargo build --release` requires Rust stable. Skipped if already present. |
 | Check checked-out version | `command` → `git describe` | Detect version drift; re-clone only when the pinned tag differs. |
 | Clone source at pinned tag | `ansible.builtin.git` | `--depth 1` keeps the clone lean; `force: true` handles a dirty tree on re-pin. |
-| Build (`cargo build --release`) | `command` → `cargo build --release` | Compiles the Rust backend + triggers any `build.rs` frontend steps (Bun). `creates:` guard skips if the binary already exists at the matching version. Notifies restart. |
+| Build (`cargo build --release`) | `command` → `cargo build --release` | Compiles the Rust backend. Runs only when the clone changed or the binary is missing. Notifies restart. |
 | Install binary to `/opt/happyview/bin` | `copy` (remote_src) | Copies from `target/release/happyview` to the stable install path. |
+| Build Next.js frontend (`npm ci` + `npm run build`) | `command` in `happyview_src/web` | The frontend is **not** embedded in the Rust binary — it must be built separately with `NEXT_PUBLIC_BASE_PATH=/__HAPPYVIEW_BP__`. Runs only when the clone changed or the static dir is missing. |
+| Deploy static files to `happyview_static_dir` | `copy` (remote_src) | Copies `web/out/` → `/opt/happyview/static/`. |
+| Replace `/__HAPPYVIEW_BP__` sentinels | `shell` → `find … -exec sed -i` | Replaces the Next.js base-path sentinel with empty string so all assets are rooted at `/`. This is the same transformation HappyView's own `entrypoint.sh` performs in the Dockerfile. |
+| Remove `web/node_modules` | `file: state=absent` | Reclaims disk after the frontend build — `node_modules` is ~500 MB and only needed at build time. |
 | Remove the Cargo build tree | `file: state=absent` | `target/` holds ~5+ GB of objects + deps that are no longer needed after install. |
-| Render the secret env file | `template` (`0600 root`, `no_log`) | `DATABASE_URL`, `PUBLIC_URL`, `SESSION_SECRET`, `TOKEN_ENCRYPTION_KEY`, `HOST`/`PORT`. Notifies restart. |
+| Render the secret env file | `template` (`0600 root`, `no_log`) | `DATABASE_URL`, `PUBLIC_URL`, `SESSION_SECRET`, `TOKEN_ENCRYPTION_KEY`, `HOST`/`PORT`, `STATIC_DIR`. Notifies restart. |
 | Install the systemd unit | `template` → `/etc/systemd/system/happyview.service` | Hardened (`ProtectSystem=strict`, `ReadWritePaths=/opt/happyview`). Notifies reload + restart. |
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config before the smoke test. |
@@ -67,6 +75,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/happyview/defaults/main.yml
 | `happyview_db_name` / `happyview_db_user` | `happyview` | Postgres database + role this role creates. |
 | `happyview_public_url` | `https://view.{{ cluster_domain }}` | External URL for AT Protocol OAuth callbacks. Must match the Caddy route domain. |
 | `happyview_repo_url` | Tangled repo URL | Source cloned at build time. |
+| `happyview_static_dir` | `/opt/happyview/static` | Where `web/out/` is deployed. Passed to HappyView as `STATIC_DIR`; HappyView serves these files directly. |
 | `happyview_rust_channel` | `stable` | Rustup toolchain channel. |
 
 ### Secrets (auto-generated — no manual step)

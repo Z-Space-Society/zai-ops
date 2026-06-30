@@ -25,5 +25,11 @@ happyview_public_url: "https://view.{{ cluster_domain }}"
 # Source repository cloned at build time (the live project on Tangled).
 happyview_repo_url: "https://tangled.org/gamesgamesgamesgames.games/happyview"
 
+# Directory where the built Next.js static files are served from (STATIC_DIR env var).
+# Set at build time; HappyView serves these directly from the binary — no separate
+# web server needed. Must match the WorkingDirectory-relative path if STATIC_DIR is
+# relative, but we use an absolute path to be explicit.
+happyview_static_dir: /opt/happyview/static
+
 # Rust toolchain channel installed via rustup.
 happyview_rust_channel: stable

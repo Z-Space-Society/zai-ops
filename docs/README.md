@@ -146,7 +146,7 @@ and the gaps leave room to grow a tier without renumbering:
 | ----------- | ------------ | ------------------------------------------ |
 | `100`–`109` | Core infra   | control (100), object-store (101), postgres (102) |
 | `110`–`119` | Platform     | proxy/edge (110), auth (111), gateway (112) |
-| `120`–`129` | Applications | open-webui (120), … other user-facing apps |
+| `120`–`129` | Applications | open-webui (120), happyview (121), … other user-facing apps |
 
 The dependency arrows point **downward** (apps → platform → core), and the line
 between core and platform doubles as a trust line: the data foundations stay off
@@ -347,6 +347,7 @@ command. Only control-node operator commands belong in `bin/`.
 | [`postgres`](roles/postgres.md)            | `postgres` | PostgreSQL 17 (Debian-native) — the internal database server |
 | [`litellm`](roles/litellm.md)              | `litellm`  | LiteLLM proxy (venv) — OpenAI-compatible gateway, Postgres-backed; + an always-on CPU floor embedder (`nomic-embed-text`) |
 | [`open-webui`](roles/open-webui.md)        | `open-webui` | OpenWebUI chat UI (uv-managed Python 3.12 venv) — Postgres-backed, fronted by Caddy, talks to litellm for chat + RAG embeddings |
+| [`happyview`](roles/happyview.md)          | `happyview` | HappyView AT Protocol AppView platform (Rust binary, built from source) — Postgres-backed, fronted by Caddy |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
 
 ---

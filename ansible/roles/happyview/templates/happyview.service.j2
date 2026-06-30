@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+[Unit]
+Description=HappyView AT Protocol AppView
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ happyview_user }}
+Group={{ happyview_group }}
+EnvironmentFile={{ happyview_env_file }}
+ExecStart={{ happyview_bin }}
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# State is entirely in Postgres; the only writable path the binary needs is its home
+# dir for any runtime scratch (logs, temp files). Narrow this if HappyView proves
+# it needs nothing under /opt/happyview at runtime.
+ReadWritePaths={{ happyview_home }}
+
+[Install]
+WantedBy=multi-user.target

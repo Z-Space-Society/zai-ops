@@ -1,0 +1,249 @@
+---
+# Install HappyView natively under systemd as an AT Protocol AppView platform.
+# HappyView is a Rust + TypeScript project with no official pre-built Linux binaries
+# distributed over a plain HTTP URL (Tangled releases use AT Protocol blob storage).
+# The role therefore builds from source: installs the Rust toolchain + Bun, clones
+# the pinned tag, runs `cargo build --release` (which invokes any build.rs frontend
+# steps), copies the resulting binary to /opt/happyview/bin, and cleans the build
+# tree to reclaim the ~6 GB of Cargo deps. Runtime memory is light; the 2 GB CT
+# sizing is for compilation headroom.
+
+# --- Provision the happyview role + database on the postgres CT --------------------
+# Same idiom as litellm/open-webui: the postgres superuser is peer-only, so all psql
+# calls are delegated to the postgres CT. Probe first (psql has no IF NOT EXISTS for
+# ROLE or DATABASE), then branch on the result. Password passed via env ($VAR) so
+# it never appears in the shell history or process list; no_log keeps it out of the
+# Ansible log.
+
+- name: Check whether the happyview Postgres role exists
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname = '{{ happyview_db_user }}'\""
+  delegate_to: postgres
+  register: happyview_role_check
+  changed_when: false
+
+- name: Create the happyview Postgres role with a generated password
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1
+      -c \"CREATE ROLE {{ happyview_db_user }} LOGIN PASSWORD '\$HAPPYVIEW_DB_PW'\""
+  environment:
+    HAPPYVIEW_DB_PW: "{{ happyview_db_password }}"
+  delegate_to: postgres
+  when: happyview_role_check.stdout | trim != "1"
+  no_log: true
+
+- name: Ensure the happyview role password matches the generated secret
+  # ALTER ROLE always succeeds and only re-hashes — mark unchanged to keep runs quiet.
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1
+      -c \"ALTER ROLE {{ happyview_db_user }} LOGIN PASSWORD '\$HAPPYVIEW_DB_PW'\""
+  environment:
+    HAPPYVIEW_DB_PW: "{{ happyview_db_password }}"
+  delegate_to: postgres
+  when: happyview_role_check.stdout | trim == "1"
+  no_log: true
+  changed_when: false
+
+- name: Check whether the happyview database exists
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '{{ happyview_db_name }}'\""
+  delegate_to: postgres
+  register: happyview_db_check
+  changed_when: false
+
+- name: Create the happyview database owned by the happyview role
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -v ON_ERROR_STOP=1 -c \"CREATE DATABASE {{ happyview_db_name }}
+      OWNER {{ happyview_db_user }}\""
+  delegate_to: postgres
+  when: happyview_db_check.stdout | trim != "1"
+
+# --- Service account + directories ------------------------------------------------
+
+- name: Create the happyview system group
+  ansible.builtin.group:
+    name: "{{ happyview_group }}"
+    system: true
+
+- name: Create the happyview system user
+  ansible.builtin.user:
+    name: "{{ happyview_user }}"
+    group: "{{ happyview_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ happyview_home }}"
+    create_home: false
+
+- name: Create the happyview home and config directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ happyview_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    # home/bin: holds the installed binary (root-owned, world-readable).
+    # home/src: build tree, root-owned; removed after build to reclaim disk.
+    # config dir: root-owned, holds the 0600 secret env the daemon reads via EnvironmentFile.
+    - { path: "{{ happyview_home }}", owner: root, mode: "0755" }
+    - { path: "{{ happyview_home }}/bin", owner: root, mode: "0755" }
+    - { path: "{{ happyview_config_dir }}", owner: root, mode: "0750" }
+
+# --- Build dependencies -----------------------------------------------------------
+
+- name: Install system build dependencies
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - ca-certificates
+      - curl
+      - git
+      - libssl-dev
+      - pkg-config
+      - unzip
+    state: present
+    update_cache: true
+
+# Bun is the JS runtime used by HappyView's frontend build pipeline (bun.lock present
+# in the repo). Install the official binary via the install script to /usr/local/bin.
+- name: Check whether bun is installed
+  ansible.builtin.command: bun --version
+  register: happyview_bun_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install bun via the official installer
+  ansible.builtin.shell:
+    cmd: curl -fsSL https://bun.sh/install | bash
+    creates: /root/.bun/bin/bun
+  environment:
+    BUN_INSTALL: /usr/local
+  when: happyview_bun_installed.rc != 0
+
+# Rust toolchain via rustup — minimal profile to keep install lean (no rust-docs,
+# rust-src, etc.). Installed system-wide under /usr/local so the root build can find it.
+- name: Check whether the Rust toolchain is installed
+  ansible.builtin.command: rustc --version
+  register: happyview_rust_installed
+  changed_when: false
+  failed_when: false
+  environment:
+    PATH: "/root/.cargo/bin:{{ ansible_env.PATH }}"
+
+- name: Install the Rust toolchain via rustup
+  ansible.builtin.shell:
+    cmd: >-
+      curl -fsSL https://sh.rustup.rs |
+      sh -s -- -y --profile minimal --default-toolchain {{ happyview_rust_channel }}
+    creates: /root/.cargo/bin/rustc
+  when: happyview_rust_installed.rc != 0
+
+# --- Clone + build ----------------------------------------------------------------
+
+- name: Check the checked-out HappyView version
+  ansible.builtin.command: git -C "{{ happyview_src }}" describe --tags --exact-match
+  register: happyview_src_version
+  changed_when: false
+  failed_when: false
+
+# Clone on first run or when the pinned version doesn't match what's checked out.
+# --depth 1 keeps the clone lean (no full history needed for a build).
+- name: Clone HappyView source at the pinned tag
+  ansible.builtin.git:
+    repo: "{{ happyview_repo_url }}"
+    dest: "{{ happyview_src }}"
+    version: "v{{ happyview_version }}"
+    depth: 1
+    force: true
+  when: happyview_src_version.stdout | trim != "v" ~ happyview_version
+
+- name: Build HappyView from source (cargo build --release)
+  # This is the slow task: first run downloads all Cargo deps (~hundreds of crates)
+  # and compiles the full Rust tree + triggers any build.rs frontend steps (Bun).
+  # Subsequent runs are fast if Cargo's incremental cache is warm. The `creates:`
+  # guard skips the build when the binary already exists AND the version matched above.
+  ansible.builtin.command:
+    cmd: /root/.cargo/bin/cargo build --release
+    chdir: "{{ happyview_src }}"
+    creates: "{{ happyview_src }}/target/release/happyview"
+  environment:
+    PATH: "/usr/local/bin:/root/.cargo/bin:{{ ansible_env.PATH }}"
+    HOME: /root
+  register: happyview_build
+  notify: restart happyview
+
+- name: Install the built binary to {{ happyview_home }}/bin
+  ansible.builtin.copy:
+    src: "{{ happyview_src }}/target/release/happyview"
+    dest: "{{ happyview_bin }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  notify: restart happyview
+
+- name: Remove the Cargo build tree to reclaim disk space
+  # target/ holds all intermediate objects + deps (~5+ GB). The binary is already
+  # installed; keeping this would just waste most of the CT's 16 GB rootfs. The src
+  # tree (without target/) is kept for reference and for `git describe` above.
+  ansible.builtin.file:
+    path: "{{ happyview_src }}/target"
+    state: absent
+
+# --- Secret env + unit ------------------------------------------------------------
+
+- name: Render the happyview secret environment file
+  ansible.builtin.template:
+    src: happyview.env.j2
+    dest: "{{ happyview_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart happyview
+
+- name: Install the happyview systemd unit
+  ansible.builtin.template:
+    src: happyview.service.j2
+    dest: /etc/systemd/system/happyview.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart happyview
+
+- name: Ensure happyview is started and enabled
+  ansible.builtin.systemd:
+    name: happyview
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply pending happyview restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for happyview to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ happyview_port }}"
+    timeout: 60
+
+- name: Verify the happyview root endpoint responds
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ happyview_port }}/"
+    status_code: [200, 302]
+  register: happyview_health
+  until: happyview_health is succeeded
+  retries: 10
+  delay: 3

@@ -1,0 +1,9 @@
+---
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart happyview
+  ansible.builtin.service:
+    name: happyview
+    state: restarted

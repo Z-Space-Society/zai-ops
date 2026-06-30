@@ -153,3 +153,14 @@
   gather_facts: true
   roles:
     - open-webui
+
+# happyview runs AFTER postgres: its role creates the happyview role + database ON
+# the postgres CT (delegate_to: postgres). A --limit happyview run still needs
+# postgres already provisioned (its host facts + SSH reachability are required for
+# the delegated DB tasks). Note: first run takes ~15–30 min on a cold CT because
+# cargo build --release downloads and compiles the full Rust dependency graph.
+- name: Configure HappyView
+  hosts: happyview
+  gather_facts: true
+  roles:
+    - happyview

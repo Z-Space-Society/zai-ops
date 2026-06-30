@@ -24,3 +24,4 @@ caddy_tls_enabled: "{{ cloudflare_origin_cert is defined }}"
 caddy_proxy_hosts:
   - { domain: "api.{{ cluster_domain }}", service: litellm, port: 4000 }
   - { domain: "chat.{{ cluster_domain }}", service: open-webui, port: 8080 }
+  - { domain: "view.{{ cluster_domain }}", service: happyview, port: 3000 }

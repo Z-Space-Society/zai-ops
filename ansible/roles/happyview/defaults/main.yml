@@ -1,0 +1,29 @@
+---
+# HappyView version to build from source. Bump here to upgrade; the role will
+# re-clone and rebuild when this changes.
+happyview_version: "2.10.0"
+
+happyview_port: 3000
+happyview_host: "0.0.0.0"       # Caddy reaches this CT from the proxy CT over vmbr1
+
+happyview_user: happyview
+happyview_group: happyview
+happyview_home: /opt/happyview
+happyview_bin: /opt/happyview/bin/happyview
+happyview_src: /opt/happyview/src
+happyview_config_dir: /etc/happyview
+happyview_env_file: /etc/happyview/happyview.env
+
+happyview_db_name: happyview
+happyview_db_user: happyview
+happyview_database_url: "postgresql://{{ happyview_db_user }}:{{ happyview_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ happyview_db_name }}"
+
+# External-facing URL for AT Protocol OAuth callbacks. Must match the Caddy route
+# domain set in the proxy role's caddy_proxy_hosts.
+happyview_public_url: "https://view.{{ cluster_domain }}"
+
+# Source repository cloned at build time (the live project on Tangled).
+happyview_repo_url: "https://tangled.org/gamesgamesgamesgames.games/happyview"
+
+# Rust toolchain channel installed via rustup.
+happyview_rust_channel: stable

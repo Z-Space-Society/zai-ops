@@ -80,3 +80,14 @@ litellm_salt_key: "sk-{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '
 # would regenerate). Hex chars keep db_password clear of percent-encoding in DATABASE_URL.
 openwebui_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/openwebui_db_password chars=digits,abcdef length=48') }}"
 openwebui_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/openwebui_secret_key chars=digits,abcdef length=64') }}"
+
+# HappyView secrets, same posture as the litellm/openwebui pairs above. db_password
+# is the password for the `happyview` Postgres role; session_secret signs session
+# cookies (64+ chars, must be stable across rebuilds — changing it invalidates all
+# active sessions). token_encryption_key is a base64-encoded 32-byte key for
+# encrypting OAuth tokens at rest; it CANNOT change once tokens are stored (no
+# migration path — all connected accounts would need to re-authenticate). The
+# `pipe` lookup generates it once via openssl and caches it in the secrets dir.
+happyview_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/happyview_db_password chars=digits,abcdef length=48') }}"
+happyview_session_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/happyview_session_secret chars=ascii_letters,digits length=64') }}"
+happyview_token_encryption_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/happyview_token_key && cat ' ~ _zai_secrets_dir ~ '/happyview_token_key || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/happyview_token_key)') }}"

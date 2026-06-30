@@ -165,21 +165,25 @@
     version: "v{{ happyview_version }}"
     depth: 1
     force: true
+  register: happyview_clone
   when: happyview_src_version.stdout | trim != "v" ~ happyview_version
 
+- name: Check whether the installed binary exists
+  ansible.builtin.stat:
+    path: "{{ happyview_bin }}"
+  register: happyview_bin_stat
+
 - name: Build HappyView from source (cargo build --release)
-  # This is the slow task: first run downloads all Cargo deps (~hundreds of crates)
-  # and compiles the full Rust tree + triggers any build.rs frontend steps (Bun).
-  # Subsequent runs are fast if Cargo's incremental cache is warm. The `creates:`
-  # guard skips the build when the binary already exists AND the version matched above.
+  # Build when: the clone just updated to a new version, OR the binary isn't installed
+  # yet (first run). Skipped otherwise — no creates: guard so the deleted target/ dir
+  # doesn't trick it into rebuilding on every idempotent re-run.
   ansible.builtin.command:
     cmd: /root/.cargo/bin/cargo build --release
     chdir: "{{ happyview_src }}"
-    creates: "{{ happyview_src }}/target/release/happyview"
   environment:
     PATH: "/usr/local/bin:/root/.cargo/bin:{{ ansible_env.PATH }}"
     HOME: /root
-  register: happyview_build
+  when: (happyview_clone is changed) or (not happyview_bin_stat.stat.exists)
   notify: restart happyview
 
 - name: Install the built binary to {{ happyview_home }}/bin
@@ -190,6 +194,7 @@
     owner: root
     group: root
     mode: "0755"
+  when: (happyview_clone is changed) or (not happyview_bin_stat.stat.exists)
   notify: restart happyview
 
 - name: Copy migrations to {{ happyview_home }}/migrations

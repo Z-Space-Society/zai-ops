@@ -115,7 +115,8 @@ fresh CT would regenerate.
 
 ```bash
 ssh root@10.1.1.<ctid> 'systemctl is-active open-webui'
-ssh root@10.1.1.<ctid> 'curl -fs http://127.0.0.1:8080/health'          # alive
+ssh root@10.1.1.<ctid> 'ss -ltnp | grep 8080'                            # listening?
+curl -fs http://10.1.1.<ctid>:8080/health                                # alive (from CT 100; curl isn't on the CT, but it binds 0.0.0.0)
 ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep openwebui     # DB present
 # end-to-end: browse https://chat.<domain>, create the first (admin) user,
 # confirm litellm's models appear, and upload a doc to exercise RAG.

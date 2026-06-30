@@ -28,6 +28,13 @@ openwebui_uv_url: "https://github.com/astral-sh/uv/releases/download/{{ openwebu
 openwebui_uv_install_dir: /usr/local/bin
 openwebui_uv_bin: "{{ openwebui_uv_install_dir }}/uv"
 
+# Per-request HTTP timeout (seconds) for uv's downloads. uv defaults to 30s, which a
+# large wheel (torch, a hard OpenWebUI dep, is hundreds of MB) routinely blows past on
+# the host's NAT'd link — the install then fails mid-download. Raise it generously so
+# a fresh CT doesn't time out. uv caches wheels under /root/.cache/uv, so a re-run
+# after a partial download resumes rather than refetching.
+openwebui_uv_http_timeout: 900
+
 # Listen socket. Bind 0.0.0.0 — the Caddy edge reaches this service from a DIFFERENT
 # CT (the proxy) over vmbr1, so a loopback bind would refuse the proxy's connection
 # (it would provision green but 502 at the edge). The security boundary is the

@@ -174,12 +174,16 @@
 
 # pip install runs inside the venv (PEP 668 doesn't apply). uv resolves + installs
 # OpenWebUI and its (large) dependency set over the host NAT. uv prints "Audited …"
-# when everything is already satisfied — the only no-change signal.
+# when everything is already satisfied — the only no-change signal. UV_HTTP_TIMEOUT
+# lifts uv's stingy 30s per-request default so a big wheel (torch) doesn't time out
+# mid-download on the NAT'd link (the task itself has no runtime cap — the synchronous
+# SSH command can legitimately run for many minutes on a cold cache).
 - name: Install open-webui into the venv
   ansible.builtin.command:
     cmd: "{{ openwebui_uv_bin }} pip install --python {{ openwebui_venv }}/bin/python open-webui=={{ openwebui_version }}"
   environment:
     UV_PYTHON_INSTALL_DIR: "{{ openwebui_python_install_dir }}"
+    UV_HTTP_TIMEOUT: "{{ openwebui_uv_http_timeout }}"
   register: openwebui_pip
   changed_when: "'Audited' not in openwebui_pip.stderr"
   notify: restart open-webui

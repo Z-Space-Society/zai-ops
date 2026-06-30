@@ -205,6 +205,16 @@
     mode: "0644"
     directory_mode: "0755"
 
+- name: Ensure migrations tree is world-readable
+  # `copy` with remote_src doesn't reliably set mode on nested subdirectories (the
+  # postgres/ subdir can end up root:root 0700 from the git checkout). The happyview
+  # user runs with ProtectSystem=strict and needs at least r+x on every directory
+  # and r on every file. a+rX (capital X = execute only if already executable) is the
+  # minimal safe fix without over-opening anything.
+  ansible.builtin.command:
+    cmd: chmod -R a+rX "{{ happyview_home }}/migrations"
+  changed_when: false
+
 - name: Remove the Cargo build tree to reclaim disk space
   # target/ holds all intermediate objects + deps (~5+ GB). The binary is already
   # installed; keeping this would just waste most of the CT's 16 GB rootfs. The src

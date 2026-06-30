@@ -270,7 +270,8 @@
 - name: Verify the happyview root endpoint responds
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ happyview_port }}/"
-    status_code: [200, 302]
+    follow_redirects: none
+    status_code: [200, 302, 303]
   register: happyview_health
   until: happyview_health is succeeded
   retries: 10

@@ -8,6 +8,7 @@ Wants=network-online.target
 User={{ happyview_user }}
 Group={{ happyview_group }}
 EnvironmentFile={{ happyview_env_file }}
+WorkingDirectory={{ happyview_home }}
 ExecStart={{ happyview_bin }}
 Restart=on-failure
 RestartSec=5

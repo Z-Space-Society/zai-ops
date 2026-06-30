@@ -192,6 +192,19 @@
     mode: "0755"
   notify: restart happyview
 
+- name: Copy migrations to {{ happyview_home }}/migrations
+  # HappyView resolves migrations via a relative path ("./migrations/postgres") from
+  # its working directory. The unit sets WorkingDirectory={{ happyview_home }}, so
+  # the migrations must live there — not in the source tree or next to the binary.
+  ansible.builtin.copy:
+    src: "{{ happyview_src }}/migrations/"
+    dest: "{{ happyview_home }}/migrations/"
+    remote_src: true
+    owner: root
+    group: "{{ happyview_group }}"
+    mode: "0644"
+    directory_mode: "0755"
+
 - name: Remove the Cargo build tree to reclaim disk space
   # target/ holds all intermediate objects + deps (~5+ GB). The binary is already
   # installed; keeping this would just waste most of the CT's 16 GB rootfs. The src

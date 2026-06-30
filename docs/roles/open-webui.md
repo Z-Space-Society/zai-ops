@@ -135,6 +135,12 @@ The **first** user to sign up becomes the admin; there's no seeded account.
   library cache (`HF_HOME`/`SENTENCE_TRANSFORMERS_HOME` point inside it) lands
   writable. If a future Open WebUI version needs to write elsewhere, widen
   `ReadWritePaths` rather than dropping the hardening.
+- **Install the `[postgres]` extra, not plain `open-webui`.** SQLAlchemy maps the
+  `postgresql://` DSN to its default driver, **psycopg2**, but the base package ships
+  only psycopg **v3** (`psycopg[binary]`) — psycopg2-binary is behind the `[postgres]`
+  extra. A plain install crash-loops at boot on
+  `ModuleNotFoundError: No module named 'psycopg2'` and never binds the port. The
+  install task uses `open-webui[postgres]==<version>` so the driver is present.
 - **Migrations run on startup, and a failure is logged but does NOT crash the app** —
   so `/health` can return 200 over a half-migrated DB. Unlike litellm there's no
   provision-time migration gate; on a major version bump, watch

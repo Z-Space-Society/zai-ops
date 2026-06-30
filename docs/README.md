@@ -346,9 +346,8 @@ command. Only control-node operator commands belong in `bin/`.
 | [`object_store`](roles/object_store.md)    | `object-store` | Single-node Garage (S3-compatible) — the on-box backup target |
 | [`postgres`](roles/postgres.md)            | `postgres` | PostgreSQL 17 (Debian-native) — the internal database server |
 | [`litellm`](roles/litellm.md)              | `litellm`  | LiteLLM proxy (venv) — OpenAI-compatible gateway, Postgres-backed; + an always-on CPU floor embedder (`nomic-embed-text`) |
+| [`open-webui`](roles/open-webui.md)        | `open-webui` | OpenWebUI chat UI (uv-managed Python 3.12 venv) — Postgres-backed, fronted by Caddy, talks to litellm for chat + RAG embeddings |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
-
-(More roles — open-webui — will be added here as they come online.)
 
 ---
 

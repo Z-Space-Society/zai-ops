@@ -23,4 +23,4 @@ caddy_tls_enabled: "{{ cloudflare_origin_cert is defined }}"
 # The :80 health/redirect site keeps the Caddyfile valid even with no routes.
 caddy_proxy_hosts:
   - { domain: "api.{{ cluster_domain }}", service: litellm, port: 4000 }
-#  - { domain: "chat.{{ cluster_domain }}", service: open-webui, port: 8080 }
+  - { domain: "chat.{{ cluster_domain }}", service: open-webui, port: 8080 }

@@ -1,0 +1,35 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Open WebUI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ openwebui_user }}
+Group={{ openwebui_group }}
+EnvironmentFile={{ openwebui_env_file }}
+# HOME points at DATA_DIR so any library that writes under $HOME (a stray ~/.cache)
+# lands in the one writable path rather than failing under ProtectSystem=strict.
+Environment=HOME={{ openwebui_data_dir }}
+# Run the venv's console script directly (absolute path — no PATH reliance under
+# systemd). HOST/PORT come from the EnvironmentFile but are passed explicitly too so
+# the bind is unambiguous. The venv's interpreter lives under {{ openwebui_home }}
+# (uv UV_PYTHON_INSTALL_DIR), so it stays readable with ProtectHome=true below.
+ExecStart={{ openwebui_bin }} serve --host {{ openwebui_host }} --port {{ openwebui_port }}
+Restart=on-failure
+RestartSec=5
+# First start runs Alembic migrations + app boot; keep generous headroom.
+TimeoutStartSec=300
+
+# Hardening: all persistent state is in Postgres or DATA_DIR. ProtectSystem=strict
+# makes / read-only; PrivateTmp gives a scratch /tmp; ProtectHome hides /home + /root
+# (the interpreter is under /opt, unaffected). ReadWritePaths re-opens just DATA_DIR
+# (vector db, uploads, caches) — the only tree the daemon writes at runtime.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ openwebui_data_dir }}
+
+[Install]
+WantedBy=multi-user.target

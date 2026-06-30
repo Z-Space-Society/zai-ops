@@ -70,13 +70,16 @@ itself from this repo.
    zai-assign postgres 102       # core infra: the internal database
    zai-assign proxy 110          # platform: the LAN-facing reverse proxy
    zai-assign litellm 112        # platform: the AI gateway
+   zai-assign open-webui 120     # applications: the chat UI
 
    # 2. provision each — create over the API, configure over SSH.
    #    object store first: it's the restic backend the backup job writes to.
+   #    postgres before litellm/open-webui (both create their DB on it).
    ansible-playbook provision.yml --limit object-store
    ansible-playbook provision.yml --limit postgres
    ansible-playbook provision.yml --limit proxy
    ansible-playbook provision.yml --limit litellm
+   ansible-playbook provision.yml --limit open-webui
    ```
 
    (`zai-assign`, `zai-backup`, … are operator commands in the repo's

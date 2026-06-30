@@ -71,3 +71,12 @@ litellm_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '
 # dropping the encrypted rows). A dedicated, stable salt key keeps the two concerns
 # independent. Generated and pinned like master_key so it never silently changes.
 litellm_salt_key: "sk-{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/litellm_salt_key chars=digits,abcdef length=48') }}"
+
+# OpenWebUI secrets, same posture/pattern as the litellm pair above (resolved on the
+# control node, persisted under /root/.zai-secrets, stable across rebuilds). db_password
+# is the password for the `openwebui` Postgres role the open-webui role creates on the
+# postgres CT; secret_key signs OpenWebUI's session JWTs — set explicitly so logins
+# survive a rebuild (unset, OpenWebUI writes a random one into DATA_DIR that a fresh CT
+# would regenerate). Hex chars keep db_password clear of percent-encoding in DATABASE_URL.
+openwebui_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/openwebui_db_password chars=digits,abcdef length=48') }}"
+openwebui_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/openwebui_secret_key chars=digits,abcdef length=64') }}"

@@ -1,0 +1,87 @@
+---
+# OpenWebUI — the cluster's user-facing chat UI. A Python app (FastAPI + a built
+# Svelte frontend) run natively from a dedicated venv under systemd; no Docker
+# (per the prime directive). Internal-only on vmbr1; the LAN reaches it through the
+# Caddy edge (chat.{{ cluster_domain }} → open-webui:8080). It talks to the litellm
+# CT as its OpenAI-compatible backend for BOTH chat and RAG embeddings, and keeps
+# its state (users, chats, settings) in Postgres so the CT holds nothing
+# unreproducible.
+
+# Pinned release. OpenWebUI moves fast and runs DB migrations on startup, so pin it
+# and bump deliberately. Releases: https://github.com/open-webui/open-webui/releases
+openwebui_version: "0.9.6"
+
+# OpenWebUI 0.9.x requires Python >=3.11,<3.13 — but the Debian 13 CT template ships
+# Python 3.13, which it REFUSES. So unlike the litellm role we can NOT build the venv
+# from the system interpreter (`python3 -m venv`). We use uv to fetch a managed,
+# self-contained CPython of this version instead (see tasks). Bump only within the
+# version window OpenWebUI supports.
+openwebui_python_version: "3.12"
+
+# uv — the tool that provisions the managed CPython and installs into the venv.
+# Installed reproducibly from a pinned, checksummed release tarball (NOT `curl | sh`
+# of a moving target). Bump the version + sha256 together; the sha is published at
+# <url>.sha256 on the release. Releases: https://github.com/astral-sh/uv/releases
+openwebui_uv_version: "0.11.25"
+openwebui_uv_sha256: "1db18b5e76fa645a7f3865773139bdec8e2d46adbdbb35e7410b34fa8015ccd2"
+openwebui_uv_url: "https://github.com/astral-sh/uv/releases/download/{{ openwebui_uv_version }}/uv-x86_64-unknown-linux-gnu.tar.gz"
+openwebui_uv_install_dir: /usr/local/bin
+openwebui_uv_bin: "{{ openwebui_uv_install_dir }}/uv"
+
+# Listen socket. Bind 0.0.0.0 — the Caddy edge reaches this service from a DIFFERENT
+# CT (the proxy) over vmbr1, so a loopback bind would refuse the proxy's connection
+# (it would provision green but 502 at the edge). The security boundary is the
+# vmbr1-only NAT network with no LAN route, not a loopback bind — same posture as
+# litellm, which also binds 0.0.0.0 and is fronted by Caddy.
+openwebui_port: 8080
+openwebui_host: "0.0.0.0"
+
+# Dedicated unprivileged service account (nologin) the daemon runs as.
+openwebui_user: open-webui
+openwebui_group: open-webui
+
+# On-disk layout, all under /opt so nothing touches the system interpreter. The
+# uv-managed CPython is deliberately placed UNDER openwebui_home (not uv's default
+# ~/.local/share/uv/python) so that: (a) the recursive chown below owns it, and
+# (b) ProtectHome=true in the unit — which hides /root — never hides the interpreter
+# the daemon must exec. data_dir holds OpenWebUI's runtime state (vector db, uploads,
+# any HF cache); it is the unit's one ReadWritePaths.
+openwebui_home: /opt/open-webui
+openwebui_venv: /opt/open-webui/venv
+openwebui_bin: /opt/open-webui/venv/bin/open-webui
+openwebui_python_install_dir: /opt/open-webui/python
+openwebui_data_dir: /opt/open-webui/data
+openwebui_hf_home: /opt/open-webui/data/hf-cache
+
+# Secret env (0600) under /etc. OpenWebUI is configured entirely by environment, not
+# a config file, and most of its config here is secret (DB DSN, backend key, session
+# key) — so there is a single root-only env file, read by systemd via EnvironmentFile.
+openwebui_config_dir: /etc/open-webui
+openwebui_env_file: /etc/open-webui/open-webui.env
+
+# Postgres role + database this role provisions on the postgres CT (same delegated
+# idiom as litellm). The password is the auto-generated openwebui_db_password from
+# group_vars/all/main.yml; the DSN is built from these + hostvars['postgres'], so the
+# DB IP is derived from its CTID, never hardcoded.
+openwebui_db_name: openwebui
+openwebui_db_user: openwebui
+openwebui_database_url: "postgresql://{{ openwebui_db_user }}:{{ openwebui_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ openwebui_db_name }}"
+
+# OpenAI-compatible backend = the litellm CT. Its IP is derived from its CTID via
+# hostvars; the port is a LOCAL default here rather than reaching into litellm's role
+# defaults via hostvars (a role default isn't a reliable host fact from this play).
+# Keep openwebui_litellm_port in sync with litellm_port if that's ever changed.
+openwebui_litellm_port: 4000
+openwebui_openai_base_url: "http://{{ hostvars['litellm'].ansible_host }}:{{ openwebui_litellm_port }}/v1"
+openwebui_openai_api_key: "{{ litellm_master_key }}"
+
+# RAG embeddings are routed through litellm too (engine=openai), not OpenWebUI's
+# built-in local sentence-transformers model — so there's no multi-GB model download
+# and embeddings track litellm's availability. litellm serves an always-on CPU floor
+# embedder; keep this name in sync with litellm's litellm_embedding_model_name.
+openwebui_rag_embedding_engine: openai
+openwebui_rag_embedding_model: "nomic-embed-text"
+
+# Public URL, derived from cluster_domain — used for OAuth/share links. The matching
+# Caddy route (proxy role's caddy_proxy_hosts) sends chat.{{ cluster_domain }} here.
+openwebui_url: "https://chat.{{ cluster_domain }}"

@@ -141,3 +141,15 @@
   gather_facts: true
   roles:
     - litellm
+
+# open-webui runs AFTER postgres (its role creates the openwebui role + database ON
+# the postgres CT, delegate_to: postgres) and conceptually after litellm (it talks to
+# the litellm CT as its OpenAI-compatible chat + embedding backend). A full
+# provision.yml run satisfies this; a --limit open-webui run still needs postgres
+# provisioned (its host facts + SSH reachability are required for the delegated DB
+# tasks) and litellm reachable for chat/embeddings to work at runtime.
+- name: Configure Open WebUI
+  hosts: open-webui
+  gather_facts: true
+  roles:
+    - open-webui

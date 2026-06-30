@@ -1,0 +1,9 @@
+---
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart open-webui
+  ansible.builtin.service:
+    name: open-webui
+    state: restarted

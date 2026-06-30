@@ -1,0 +1,252 @@
+---
+# Install OpenWebUI natively under systemd as the cluster's chat UI. It diverges from
+# the litellm role in three load-bearing ways:
+#   1. uv-managed CPython 3.12 — Debian 13 ships Python 3.13, which OpenWebUI 0.9.x
+#      REFUSES (requires <3.13), so `python3 -m venv` is unusable here.
+#   2. No manual DB-migration step — OpenWebUI runs its own Alembic migrations on
+#      startup, so we only need the DB to exist + a valid DATABASE_URL (litellm, by
+#      contrast, needs an explicit provision-time `prisma migrate deploy`).
+#   3. Binds 0.0.0.0 (not loopback) so the Caddy edge on the proxy CT can reach it.
+#
+# Like litellm it is Postgres-backed and fronted by Caddy; it talks to the litellm CT
+# as its OpenAI-compatible backend for both chat and RAG embeddings.
+
+# --- Provision the openwebui role + database on the postgres CT --------------------
+# Identical idiom to the litellm role: the postgres CT is a BARE server whose
+# superuser is reachable only via local peer auth (`su - postgres -c psql`) ON that
+# CT, so we delegate these psql calls there. psql has no CREATE ROLE/DATABASE IF NOT
+# EXISTS, so probe first then branch. The password is pure hex, so it's safe to inline
+# into the single-quoted SQL literal; it reaches the delegate as $OPENWEBUI_DB_PW
+# (\$ keeps the OUTER shell from expanding it) and is no_log'd.
+
+- name: Check whether the openwebui Postgres role exists
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname = '{{ openwebui_db_user }}'\""
+  delegate_to: postgres
+  register: openwebui_role_check
+  changed_when: false
+
+- name: Create the openwebui Postgres role with a generated password
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1
+      -c \"CREATE ROLE {{ openwebui_db_user }} LOGIN PASSWORD '\$OPENWEBUI_DB_PW'\""
+  environment:
+    OPENWEBUI_DB_PW: "{{ openwebui_db_password }}"
+  delegate_to: postgres
+  when: openwebui_role_check.stdout | trim != "1"
+  no_log: true
+
+- name: Ensure the openwebui role password matches the generated secret
+  # ALTER ROLE always succeeds and only re-hashes, so it carries no useful changed
+  # signal — mark it unchanged to keep runs quiet (covers a rotated secret).
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1
+      -c \"ALTER ROLE {{ openwebui_db_user }} LOGIN PASSWORD '\$OPENWEBUI_DB_PW'\""
+  environment:
+    OPENWEBUI_DB_PW: "{{ openwebui_db_password }}"
+  delegate_to: postgres
+  when: openwebui_role_check.stdout | trim == "1"
+  no_log: true
+  changed_when: false
+
+- name: Check whether the openwebui database exists
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '{{ openwebui_db_name }}'\""
+  delegate_to: postgres
+  register: openwebui_db_check
+  changed_when: false
+
+- name: Create the openwebui database owned by the openwebui role
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -v ON_ERROR_STOP=1 -c \"CREATE DATABASE {{ openwebui_db_name }}
+      OWNER {{ openwebui_db_user }}\""
+  delegate_to: postgres
+  when: openwebui_db_check.stdout | trim != "1"
+
+# --- Service account + directories ------------------------------------------------
+
+- name: Create the open-webui system group
+  ansible.builtin.group:
+    name: "{{ openwebui_group }}"
+    system: true
+
+- name: Create the open-webui system user
+  ansible.builtin.user:
+    name: "{{ openwebui_user }}"
+    group: "{{ openwebui_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ openwebui_home }}"
+    create_home: false
+
+- name: Create the open-webui home, data and config directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ openwebui_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    # home: holds the venv + the uv-managed interpreter (daemon-owned).
+    # data_dir + hf_home: daemon's writable runtime state (vector db, uploads, caches).
+    # config dir: root-owned, holds the 0600 secret env the daemon never reads itself.
+    - { path: "{{ openwebui_home }}", owner: "{{ openwebui_user }}", mode: "0755" }
+    - { path: "{{ openwebui_data_dir }}", owner: "{{ openwebui_user }}", mode: "0750" }
+    - { path: "{{ openwebui_hf_home }}", owner: "{{ openwebui_user }}", mode: "0750" }
+    - { path: "{{ openwebui_config_dir }}", owner: root, mode: "0750" }
+
+# --- uv + a managed CPython 3.12 (the divergence from litellm's system venv) -------
+
+- name: Ensure CA certificates are present for the uv + package downloads
+  ansible.builtin.apt:
+    name: ca-certificates
+    state: present
+    update_cache: true
+
+- name: Check the installed uv version
+  ansible.builtin.command: "{{ openwebui_uv_bin }} --version"
+  register: openwebui_uv_installed
+  changed_when: false
+  failed_when: false
+
+# Install uv reproducibly from the pinned, checksummed release tarball — NOT a
+# `curl | sh` of a moving installer. The gnu tarball extracts to a single
+# uv-x86_64-unknown-linux-gnu/ dir containing the `uv` and `uvx` binaries.
+- name: Install the pinned uv binary
+  when: openwebui_uv_version not in (openwebui_uv_installed.stdout | default(''))
+  block:
+    - name: Download the pinned uv release tarball
+      ansible.builtin.get_url:
+        url: "{{ openwebui_uv_url }}"
+        dest: /tmp/uv-{{ openwebui_uv_version }}.tar.gz
+        checksum: "sha256:{{ openwebui_uv_sha256 }}"
+        mode: "0644"
+
+    - name: Extract the uv tarball
+      ansible.builtin.unarchive:
+        src: /tmp/uv-{{ openwebui_uv_version }}.tar.gz
+        dest: /tmp
+        remote_src: true
+
+    - name: Install uv and uvx into the install dir
+      ansible.builtin.copy:
+        src: "/tmp/uv-x86_64-unknown-linux-gnu/{{ item }}"
+        dest: "{{ openwebui_uv_install_dir }}/{{ item }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - uv
+        - uvx
+
+# uv creates the venv AND fetches a managed CPython of the requested version if one
+# isn't present. UV_PYTHON_INSTALL_DIR forces that interpreter UNDER openwebui_home
+# (not uv's default /root/.local/share/uv/python) so the recursive chown below owns it
+# and ProtectHome=true in the unit doesn't hide it from the daemon.
+- name: Create the venv with a managed Python {{ openwebui_python_version }}
+  ansible.builtin.command:
+    cmd: "{{ openwebui_uv_bin }} venv --python {{ openwebui_python_version }} {{ openwebui_venv }}"
+    creates: "{{ openwebui_venv }}/bin/python"
+  environment:
+    UV_PYTHON_INSTALL_DIR: "{{ openwebui_python_install_dir }}"
+
+- name: Confirm the venv's base interpreter resolves under the role tree
+  # Guards the load-bearing fix above: if the managed interpreter ever lands outside
+  # openwebui_home, the daemon would fail to exec it under ProtectHome=true. Fail loud
+  # at provision time instead of with a cryptic unit start failure.
+  ansible.builtin.command:
+    cmd: >-
+      {{ openwebui_venv }}/bin/python -c "import sys; print(sys._base_executable)"
+  register: openwebui_base_py
+  changed_when: false
+  failed_when: not (openwebui_base_py.stdout | trim).startswith(openwebui_home)
+
+# pip install runs inside the venv (PEP 668 doesn't apply). uv resolves + installs
+# OpenWebUI and its (large) dependency set over the host NAT. uv prints "Audited …"
+# when everything is already satisfied — the only no-change signal.
+- name: Install open-webui into the venv
+  ansible.builtin.command:
+    cmd: "{{ openwebui_uv_bin }} pip install --python {{ openwebui_venv }}/bin/python open-webui=={{ openwebui_version }}"
+  environment:
+    UV_PYTHON_INSTALL_DIR: "{{ openwebui_python_install_dir }}"
+  register: openwebui_pip
+  changed_when: "'Audited' not in openwebui_pip.stderr"
+  notify: restart open-webui
+
+- name: Give the open-webui user ownership of its home (venv + managed interpreter)
+  # pip/venv ran as root; the daemon runs as open-webui and must read the interpreter,
+  # the venv and the `open-webui` console script. Runs AFTER install so the whole tree
+  # (including the uv-managed CPython under openwebui_home) is covered.
+  ansible.builtin.file:
+    path: "{{ openwebui_home }}"
+    state: directory
+    owner: "{{ openwebui_user }}"
+    group: "{{ openwebui_group }}"
+    recurse: true
+
+# --- Secret env + unit ------------------------------------------------------------
+
+- name: Render the open-webui secret environment file
+  # DATABASE_URL, WEBUI_SECRET_KEY, the litellm backend key + all runtime config.
+  # 0600 root — only systemd reads it via EnvironmentFile, before it drops to the
+  # open-webui user. no_log keeps the rendered secrets out of the Ansible log.
+  ansible.builtin.template:
+    src: open-webui.env.j2
+    dest: "{{ openwebui_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart open-webui
+
+- name: Install the open-webui systemd unit
+  ansible.builtin.template:
+    src: open-webui.service.j2
+    dest: /etc/systemd/system/open-webui.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart open-webui
+
+- name: Ensure open-webui is started and enabled
+  ansible.builtin.systemd:
+    name: open-webui
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# Flush now so the daemon comes up with final config before the smoke test. OpenWebUI
+# applies its Alembic migrations on this first start against the ready DB.
+- name: Apply pending open-webui restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for open-webui to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ openwebui_port }}"
+    timeout: 180
+
+- name: Verify the open-webui health endpoint responds
+  # /health is OpenWebUI's unauthenticated liveness probe — proves the app booted and
+  # reached the (migrated) DB, not merely that the port is open. Generous retries: the
+  # first boot runs migrations and pulls the frontend into memory.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ openwebui_port }}/health"
+    status_code: 200
+  register: openwebui_health
+  until: openwebui_health is succeeded
+  retries: 20
+  delay: 5

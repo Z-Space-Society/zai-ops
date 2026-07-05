@@ -40,11 +40,16 @@ fi
 
 # --- Fix Proxmox apt repos (disable enterprise, add no-subscription) ---
 step "Configuring Proxmox apt repositories"
-# Append silently (>> rather than `tee -a`, which also echoed to the console).
-# NOTE: this still appends on every run — see security review Issue 1 for the
-# deb822-safe idempotency fix (tracked separately).
-echo 'Enabled: false' >> /etc/apt/sources.list.d/pve-enterprise.sources
-echo 'Enabled: false' >> /etc/apt/sources.list.d/ceph.sources
+# Idempotent + deb822-safe: a bare `>> Enabled: false` would (a) duplicate on
+# every re-run and (b) silently do nothing if the file has a trailing blank
+# line, since deb822 fields only apply within a contiguous stanza — see Known
+# gotchas. Insert inside the stanza instead, guarded so re-runs are no-ops.
+for name in pve-enterprise ceph; do
+  src="/etc/apt/sources.list.d/${name}.sources"
+  if [ -f "$src" ] && ! grep -q '^Enabled: false' "$src"; then
+    sed -i '0,/^Types:/s//Enabled: false\n&/' "$src"
+  fi
+done
 if [ ! -f /etc/apt/sources.list.d/proxmox.sources ]; then
   cat > /etc/apt/sources.list.d/proxmox.sources <<'EOF'
 Types: deb
@@ -170,8 +175,24 @@ pct set "$CTID" -net1 name=eth1,bridge=vmbr1,ip=10.1.1.100/24
 done_ok "eth1 = 10.1.1.100 on vmbr1"
 
 # --- Wait for the container network to come up ---
-info "waiting for container network…"
-sleep 5
+# DHCP lease + DNS readiness on a fresh CT is variable; a fixed sleep either
+# wastes time or (on a busy LAN/slow DHCP) aborts the whole script under
+# set -e when apt-get update follows too soon. Poll instead: `getent hosts`
+# proves interface up -> DHCP lease -> resolv.conf -> DNS in one check, which
+# is exactly what apt needs next. Bounded at 60s so a genuinely broken
+# network fails loudly instead of hanging.
+step "Waiting for CT $CTID network"
+for i in $(seq 1 30); do
+  if pct exec "$CTID" -- getent hosts deb.debian.org &>/dev/null; then
+    done_ok "network ready"
+    break
+  fi
+  sleep 2
+  if [ "$i" -eq 30 ]; then
+    printf '%sFAILED — CT %s has no working DNS after 60s.%s\n' "$RED" "$CTID" "$RESET" >&2
+    exit 1
+  fi
+done
 
 # --- Provision the control node: locale, Ansible, and the repo ---
 # The locale MUST be fixed here, before Ansible is ever run. On a fresh
@@ -246,14 +267,29 @@ if ! pct exec "$CTID" -- test -f /opt/zai-ops/ansible/group_vars/all/vault.yml; 
   pveum user token remove "$TOKEN_USER" "$TOKEN_ID" 2>/dev/null || true
 
   # privsep 0: the token inherits the user's privileges (the role above).
+  # jq, not sed: a reformatted pveum JSON payload would make a regex silently
+  # yield an empty secret that gets vaulted, surfacing as a confusing 401 much
+  # later. jq -re exits non-zero on null/missing; the -z check below also
+  # catches the (jq-exit-0) empty-string edge case.
+  command -v jq >/dev/null 2>&1 || $APT install jq
   TOKEN_OUT=$(pveum user token add "$TOKEN_USER" "$TOKEN_ID" --privsep 0 --output-format json)
-  TOKEN_SECRET=$(printf '%s' "$TOKEN_OUT" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')
+  TOKEN_SECRET=$(printf '%s' "$TOKEN_OUT" | jq -re '.value')
+  if [ -z "$TOKEN_SECRET" ]; then
+    printf '%sFailed to extract token secret from pveum output:%s\n' "$RED" "$RESET" >&2
+    printf '%s\n' "$TOKEN_OUT" >&2
+    exit 1
+  fi
 
   # Generate the vault password; stored on the CT so Ansible auto-decrypts.
   VAULT_PASS=$(openssl rand -base64 24)
 
-  pct exec "$CTID" -- bash -c "umask 077; printf '%s\n' '$VAULT_PASS' > /root/.vault_pass"
-  pct exec "$CTID" -- bash -c "
+  # Secrets travel over stdin, never argv — command-line arguments are
+  # world-readable on the host via /proc/<pid>/cmdline for the life of the
+  # process. Both remote scripts are single-quoted (no host-side
+  # interpolation) so nothing ends up in the pct exec argv.
+  printf '%s\n' "$VAULT_PASS" | \
+    pct exec "$CTID" -- bash -c 'umask 077; cat > /root/.vault_pass'
+  pct exec "$CTID" -- bash -c '
     set -e
     umask 077
     cd /opt/zai-ops/ansible
@@ -262,16 +298,16 @@ if ! pct exec "$CTID" -- test -f /opt/zai-ops/ansible/group_vars/all/vault.yml; 
     # --output, so vault.yml only exists if encryption succeeded (a half-done
     # plaintext file would otherwise poison the guard above on re-run).
     # No --vault-password-file here: ansible.cfg already sets vault_password_file,
-    # and passing it again creates two 'default' vault-ids that ambiguate encrypt.
-    cat > /tmp/zai-vault.yml <<EOF
+    # and passing it again creates two '"'"'default'"'"' vault-ids that ambiguate encrypt.
+    cat > /tmp/zai-vault.yml
+    ansible-vault encrypt /tmp/zai-vault.yml --output group_vars/all/vault.yml
+    rm -f /tmp/zai-vault.yml
+  ' <<EOF
 proxmox_api_host: $HOST_IP
 proxmox_api_user: $TOKEN_USER
 proxmox_api_token_id: $TOKEN_ID
 proxmox_api_token_secret: $TOKEN_SECRET
 EOF
-    ansible-vault encrypt /tmp/zai-vault.yml --output group_vars/all/vault.yml
-    rm -f /tmp/zai-vault.yml
-  "
   PROVISIONED=1
   done_ok "token minted and vault encrypted"
 else

@@ -468,6 +468,15 @@ On the **control node** itself:
 
 On the **Proxmox host** itself:
 
+- **Appending to a deb822 `.sources` file can silently do nothing.** The
+  `pve-enterprise.sources` / `ceph.sources` files are stanza-based: a field
+  only applies if it's contiguous with the rest of the stanza, with no
+  intervening blank line. Proxmox ships these files with a trailing blank
+  line, so a naive `echo 'Enabled: false' >> file` lands *after* that blank
+  line — outside the stanza — and is silently ignored; the repo stays enabled
+  and `apt-get update` keeps throwing 401s with no error pointing at the
+  cause. `bootstrap.sh` instead inserts the field inside the stanza (before
+  `Types:`) with a guarded `sed`, which is also idempotent across re-runs.
 - **The "No valid subscription" nag comes back after every upgrade.** The popup
   is a client-side check in `proxmox-widget-toolkit`; a one-shot `sed` on
   `proxmoxlib.js` is undone the moment `apt full-upgrade` ships a fresh copy of

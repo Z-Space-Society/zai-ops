@@ -139,6 +139,10 @@ can reach the internet for package installs without being exposed on the LAN.
 
 ## Secrets
 
+See [SECURITY.md](SECURITY.md) for the full trust model (why the vault
+password lives on the same box as the vault, and the upgrade path for
+stricter deployments).
+
 The Proxmox API token lives in `ansible/group_vars/all/vault.yml`, encrypted
 with Ansible Vault and git-ignored (it's host-specific and never committed).
 Ansible decrypts it automatically via `/root/.vault_pass`. To view or edit:

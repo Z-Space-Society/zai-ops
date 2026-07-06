@@ -354,6 +354,10 @@ command. Only control-node operator commands belong in `bin/`.
 
 ## Secrets & trust model
 
+See [SECURITY.md](../SECURITY.md) for the full operator-facing statement of
+this model, and [ADR-0004](decisions/0004-vault-trust-boundary.md) for the
+decision record.
+
 - The Proxmox API token lives in `ansible/group_vars/all/vault.yml`, encrypted
   with Ansible Vault and git-ignored.
 - The vault password sits at `/root/.vault_pass` on CT 100 so Ansible

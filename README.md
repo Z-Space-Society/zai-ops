@@ -21,9 +21,12 @@ itself from this repo.
 
    ```bash
    bash -c "$(curl -fsSL https://raw.githubusercontent.com/Z-Space-Society/zai-ops/main/bootstrap.sh)"
+   ```
 
-   # to override the CT ID (default 100), pass it as an argument:
-   # bash -c "$(curl -fsSL https://raw.githubusercontent.com/Z-Space-Society/zai-ops/main/bootstrap.sh)" _ 199
+   to override the CT ID (default 100), pass it as an argument:
+
+   ```bash
+   bash -c "$(curl -fsSL https://raw.githubusercontent.com/Z-Space-Society/zai-ops/main/bootstrap.sh)" _ 199
    ```
 
    The script prints a **vault password** on its last line. Back it up
@@ -71,6 +74,7 @@ itself from this repo.
    zai-assign proxy 110          # platform: the LAN-facing reverse proxy
    zai-assign litellm 112        # platform: the AI gateway
    zai-assign open-webui 120     # applications: the chat UI
+   zai-assign happyview 121      # happy view
 
    # 2. provision each — create over the API, configure over SSH.
    #    object store first: it's the restic backend the backup job writes to.

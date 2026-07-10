@@ -94,6 +94,9 @@
         *:/opt/zai-ops/bin:*) ;;
         *) export PATH="/opt/zai-ops/bin:$PATH" ;;
       esac
+      # Land in the repo on a fresh login/pct-enter, without moving a shell
+      # that has already navigated elsewhere.
+      [ "$PWD" = "$HOME" ] && [ -d /opt/zai-ops ] && cd /opt/zai-ops
 
 # `pct enter` gives an interactive *non-login* shell, which skips /etc/profile.d
 # entirely — so the snippet above never loads there. Interactive non-login bash

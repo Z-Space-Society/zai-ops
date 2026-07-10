@@ -235,7 +235,10 @@ pct exec "$CTID" -- bash -c "
     'case \":\$PATH:\" in' \
     '  *:/opt/zai-ops/bin:*) ;;' \
     '  *) export PATH=\"/opt/zai-ops/bin:\$PATH\" ;;' \
-    'esac' > /etc/profile.d/zai-ops.sh
+    'esac' \
+    '# Land in the repo on a fresh login/pct-enter, without moving a shell' \
+    '# that has already navigated elsewhere.' \
+    '[ \"\$PWD\" = \"\$HOME\" ] && [ -d /opt/zai-ops ] && cd /opt/zai-ops' > /etc/profile.d/zai-ops.sh
   grep -q '/etc/profile.d/zai-ops.sh' /etc/bash.bashrc || \
     printf '%s\n' '[ -r /etc/profile.d/zai-ops.sh ] && . /etc/profile.d/zai-ops.sh' >> /etc/bash.bashrc
 "

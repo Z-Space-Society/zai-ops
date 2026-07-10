@@ -25,7 +25,7 @@ collections, and prepares the SSH key used to reach service containers.
 | Install operator diagnostic CLI tools | `ansible.builtin.apt` (`curl`, `jq`) | `debian-13-standard` is minimal; give the operator `curl`/`jq` to probe a service CT's HTTP health endpoint by hand (playbooks themselves use `ansible.builtin.uri`). |
 | Ensure root has an ed25519 SSH keypair | `ansible.builtin.user` (`generate_ssh_key`) | The public key is injected into each service CT at create time (the proxmox module's `pubkey`) so Ansible can SSH in afterward. Idempotent — only generates if absent. |
 | Assert the vault password file is root-only | `ansible.builtin.file` (`mode: 0600`) | Defense-in-depth: catches permission drift on `/root/.vault_pass`. The bootstrap already writes it with `umask 077`. |
-| Put the repo's `bin/` on PATH | `ansible.builtin.copy` (`/etc/profile.d/zai-ops.sh`) | Make the operator commands (`zai-assign`, `zai-backup`, …) discoverable as `zai-*` for interactive shells. They run in place from git — nothing is copied to `/usr/local/bin`, so `git pull` is enough to update them. |
+| Put the repo's `bin/` on PATH + land in the repo | `ansible.builtin.copy` (`/etc/profile.d/zai-ops.sh`) | Make the operator commands (`zai-assign`, `zai-backup`, …) discoverable as `zai-*` for interactive shells. They run in place from git — nothing is copied to `/usr/local/bin`, so `git pull` is enough to update them. The same snippet also `cd`s a fresh login/`pct enter` into `/opt/zai-ops`, guarded on `$PWD = $HOME` so it doesn't relocate a shell that's already navigated elsewhere. |
 
 ## Variables
 

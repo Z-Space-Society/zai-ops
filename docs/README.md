@@ -470,6 +470,9 @@ On the **control node** itself:
   Debian's interactive *non-login* bash does read. Both the bootstrap seed and the
   `control_node` role install both hooks; the snippet case-guards `$PATH` so nested
   shells don't keep prepending. (Check which you're in: `shopt -q login_shell`.)
+  The same snippet also `cd`s a fresh login/`pct enter` into `/opt/zai-ops` (guarded
+  on `$PWD = $HOME`, so a shell that's already navigated elsewhere is left alone) —
+  no more manual `cd /opt/zai-ops` on every session.
 
 On the **Proxmox host** itself:
 

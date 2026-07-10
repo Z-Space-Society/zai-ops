@@ -69,6 +69,11 @@ zai_auth_database_url: "postgresql://{{ zai_auth_db_user }}:{{ zai_auth_db_passw
 zai_auth_url: "https://account.{{ cluster_domain }}"
 zai_auth_allowed_hosts:
   - "account.{{ cluster_domain }}"
+  # 127.0.0.1: the role's own provision-time smoke test hits the app over
+  # loopback (Verify the zai-auth OIDC discovery document responds), and
+  # Django's ALLOWED_HOSTS check 400s any Host header not on this list —
+  # without this, the health check fails even though gunicorn is up fine.
+  - "127.0.0.1"
 
 # The one OIDC relying party today: Open WebUI. client_id is a LOCAL default
 # here (not reached into the open-webui role's vars) — mirror it in

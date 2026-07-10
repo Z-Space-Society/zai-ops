@@ -136,3 +136,14 @@ SESSION_COOKIE_HTTPONLY = True
 # Secure cookies are enforced whenever we're not in DEBUG (i.e. behind TLS).
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+
+# Caddy terminates TLS and forwards plain HTTP internally (vmbr1); without this,
+# Django sees every request as http and request.is_secure() is always False,
+# breaking the SESSION_COOKIE_SECURE/CSRF_COOKIE_SECURE enforcement above.
+# Caddy sets/overwrites X-Forwarded-Proto itself (not client-controllable
+# through the proxy), so trusting it here doesn't reopen that spoofing hole.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# 0 (off) by default so local dev/tunnels are unaffected; set a real value
+# (e.g. 31536000) once TLS is confirmed stable in production (Fable review F7).
+SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=0)

@@ -111,6 +111,65 @@ class ResolutionTests(TestCase):
         self.assertIn("token_endpoint", meta)
 
 
+class EmailSourcingTests(TestCase):
+    """fetch_session_email must never raise — email is best-effort data."""
+
+    @patch("atproto_oauth.client.requests.get")
+    def test_fetch_session_email_success(self, mock_get):
+        mock_get.return_value = FakeResp(
+            json_data={"email": "alice@example.com", "emailConfirmed": True}
+        )
+        email, confirmed = client.fetch_session_email(
+            "https://pds.example.com", "AT", dpop_key=dpop.generate_key()
+        )
+        self.assertEqual(email, "alice@example.com")
+        self.assertTrue(confirmed)
+
+    @patch("atproto_oauth.client.requests.get")
+    def test_fetch_session_email_missing_fields(self, mock_get):
+        mock_get.return_value = FakeResp(json_data={})
+        email, confirmed = client.fetch_session_email(
+            "https://pds.example.com", "AT", dpop_key=dpop.generate_key()
+        )
+        self.assertEqual(email, "")
+        self.assertFalse(confirmed)
+
+    @patch("atproto_oauth.client.requests.get")
+    def test_fetch_session_email_pds_error_does_not_raise(self, mock_get):
+        mock_get.return_value = FakeResp(status=500, text="boom")
+        email, confirmed = client.fetch_session_email(
+            "https://pds.example.com", "AT", dpop_key=dpop.generate_key()
+        )
+        self.assertEqual(email, "")
+        self.assertFalse(confirmed)
+
+    @patch("atproto_oauth.client.requests.get")
+    def test_fetch_session_email_network_error_does_not_raise(self, mock_get):
+        mock_get.side_effect = requests.ConnectionError("no route")
+        email, confirmed = client.fetch_session_email(
+            "https://pds.example.com", "AT", dpop_key=dpop.generate_key()
+        )
+        self.assertEqual(email, "")
+        self.assertFalse(confirmed)
+
+    @patch("atproto_oauth.client.requests.get")
+    def test_fetch_session_email_dpop_nonce_retry(self, mock_get):
+        mock_get.side_effect = [
+            FakeResp(
+                status=401,
+                json_data={"error": "use_dpop_nonce"},
+                headers={"DPoP-Nonce": "server-nonce"},
+            ),
+            FakeResp(json_data={"email": "alice@example.com", "emailConfirmed": False}),
+        ]
+        email, confirmed = client.fetch_session_email(
+            "https://pds.example.com", "AT", dpop_key=dpop.generate_key()
+        )
+        self.assertEqual(email, "alice@example.com")
+        self.assertFalse(confirmed)
+        self.assertEqual(mock_get.call_count, 2)
+
+
 class PkceDpopTests(TestCase):
     def test_pkce_pair_is_valid_s256(self):
         verifier, challenge = client.pkce_pair()

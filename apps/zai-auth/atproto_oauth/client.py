@@ -17,7 +17,7 @@ from . import config, dpop
 from zai_auth import signing
 
 CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
-SCOPE = "atproto transition:generic"
+SCOPE = "atproto transition:generic transition:email"
 TIMEOUT = 10
 
 
@@ -157,6 +157,55 @@ def _post_with_dpop(url, data, dpop_key, nonce=None):
             resp = _send(server_nonce)
             return resp, resp.headers.get("DPoP-Nonce", server_nonce)
     return resp, resp.headers.get("DPoP-Nonce", nonce)
+
+
+def _get_with_dpop(url, access_token, dpop_key, nonce=None):
+    """GET a DPoP-bound resource (e.g. the PDS's `getSession`) with one-shot
+    nonce retry, mirroring `_post_with_dpop`."""
+
+    def _send(use_nonce):
+        proof = dpop.make_proof(
+            dpop_key, "GET", url, nonce=use_nonce, access_token=access_token
+        )
+        return requests.get(
+            url,
+            headers={"DPoP": proof, "Authorization": f"DPoP {access_token}"},
+            timeout=TIMEOUT,
+        )
+
+    resp = _send(nonce)
+    if resp.status_code in (400, 401):
+        server_nonce = resp.headers.get("DPoP-Nonce")
+        err = None
+        try:
+            err = resp.json().get("error")
+        except ValueError:
+            pass
+        if server_nonce and err == "use_dpop_nonce":
+            resp = _send(server_nonce)
+            return resp, resp.headers.get("DPoP-Nonce", server_nonce)
+    return resp, resp.headers.get("DPoP-Nonce", nonce)
+
+
+# --- Email sourcing (transition:email) -------------------------------------
+
+def fetch_session_email(pds_url, access_token, *, dpop_key, nonce=None):
+    """Read `email`/`emailConfirmed` from the member's PDS via `getSession`.
+
+    Email is optional data — the member may have declined the scope, or the
+    PDS may not expose it. This never raises; a failure or missing field
+    simply yields `("", False)` so login isn't blocked on it (mirrors AIP's
+    `fetch_email_from_pds`, adapted to zai-auth's own DPoP client).
+    """
+    url = f"{pds_url}/xrpc/com.atproto.server.getSession"
+    try:
+        resp, _ = _get_with_dpop(url, access_token, dpop_key, nonce=nonce)
+        if not resp.ok:
+            return "", False
+        data = resp.json()
+    except (requests.RequestException, ValueError):
+        return "", False
+    return data.get("email") or "", bool(data.get("emailConfirmed"))
 
 
 # --- PAR + token exchange -------------------------------------------------

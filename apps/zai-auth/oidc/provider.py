@@ -2,8 +2,9 @@
 
 The `id_token` is RS256 (spec choice; broad OIDC-client compatibility), signed
 with the OIDC key from `zai_auth.signing` and verifiable via the JWKS endpoint.
-Claims are deliberately minimal — `sub` = DID plus the handle — per spec Open
-Question #2 (no `email`; verify Open WebUI accepts that).
+Claims: `sub` = DID, `handle`, and `email`/`email_verified` when the member's
+PDS supplied one (see `atproto_oauth.client.fetch_session_email` — spec Open
+Question #2, resolved).
 """
 
 import secrets
@@ -36,7 +37,7 @@ def discovery_document() -> dict:
         "grant_types_supported": ["authorization_code"],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["RS256"],
-        "scopes_supported": ["openid", "profile"],
+        "scopes_supported": ["openid", "profile", "email"],
         "token_endpoint_auth_methods_supported": [
             "client_secret_post",
             "client_secret_basic",
@@ -45,6 +46,8 @@ def discovery_document() -> dict:
             "sub",
             "handle",
             "preferred_username",
+            "email",
+            "email_verified",
             "iss",
             "aud",
             "exp",
@@ -80,6 +83,11 @@ def mint_id_token(user, *, client_id, nonce="") -> str:
         "handle": user.username,
         "preferred_username": user.username,
     }
+    # Best-effort claim: only present when the member's PDS supplied an email
+    # (fetch_session_email at login). Absent, not empty-string, when unknown.
+    if user.email:
+        payload["email"] = user.email
+        payload["email_verified"] = user.email_confirmed
     if nonce:
         payload["nonce"] = nonce  # OIDC requires echoing the RP's nonce
     return signing.sign_rs256(payload)

@@ -86,6 +86,8 @@ class OidcProviderTests(TestCase):
         self.assertEqual(doc["id_token_signing_alg_values_supported"], ["RS256"])
         self.assertIn("sub", doc["claims_supported"])
         self.assertIn("handle", doc["claims_supported"])
+        self.assertIn("email", doc["claims_supported"])
+        self.assertIn("email", doc["scopes_supported"])
 
     # --- id_token mint + verify against JWKS ------------------------------
 
@@ -104,6 +106,35 @@ class OidcProviderTests(TestCase):
         self.assertEqual(claims["nonce"], "n0")
         self.assertEqual(claims["aud"], CLIENT_ID)
         self.assertIn("exp", claims)
+
+    def test_id_token_omits_email_when_none_on_file(self):
+        token = provider.mint_id_token(self.user, client_id=CLIENT_ID)
+        jwks = signing.jwks()
+        rsa_jwk = next(k for k in jwks["keys"] if k["kty"] == "RSA")
+        claims = jwt.decode(
+            token,
+            key=jwt.PyJWK.from_dict(rsa_jwk).key,
+            algorithms=["RS256"],
+            audience=CLIENT_ID,
+        )
+        self.assertNotIn("email", claims)
+        self.assertNotIn("email_verified", claims)
+
+    def test_id_token_carries_email_when_pds_supplied_one(self):
+        self.user.email = "alice@example.com"
+        self.user.email_confirmed = True
+        self.user.save(update_fields=["email", "email_confirmed"])
+        token = provider.mint_id_token(self.user, client_id=CLIENT_ID)
+        jwks = signing.jwks()
+        rsa_jwk = next(k for k in jwks["keys"] if k["kty"] == "RSA")
+        claims = jwt.decode(
+            token,
+            key=jwt.PyJWK.from_dict(rsa_jwk).key,
+            algorithms=["RS256"],
+            audience=CLIENT_ID,
+        )
+        self.assertEqual(claims["email"], "alice@example.com")
+        self.assertTrue(claims["email_verified"])
 
     def test_id_token_header_advertises_kid(self):
         token = provider.mint_id_token(self.user, client_id=CLIENT_ID)

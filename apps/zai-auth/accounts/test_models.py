@@ -47,3 +47,19 @@ class UserModelTests(TestCase):
     def test_str_prefers_handle_then_did(self):
         user = User.objects.create_user(username="alice.bsky.social", did=DID)
         self.assertEqual(str(user), "alice.bsky.social")
+
+    def test_email_confirmed_defaults_false(self):
+        """Email is best-effort PDS data; unconfirmed until the PDS says so."""
+        user = User.objects.create_user(username="alice.bsky.social", did=DID)
+        self.assertEqual(user.email, "")
+        self.assertFalse(user.email_confirmed)
+
+    def test_email_and_confirmation_can_be_set(self):
+        user = User.objects.create_user(
+            username="alice.bsky.social",
+            did=DID,
+            email="alice@example.com",
+            email_confirmed=True,
+        )
+        self.assertEqual(user.email, "alice@example.com")
+        self.assertTrue(user.email_confirmed)

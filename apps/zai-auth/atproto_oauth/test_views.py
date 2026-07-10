@@ -47,12 +47,16 @@ class CallbackViewTests(TestCase):
         resp = self.client.get(reverse("atproto_oauth:callback"), {"code": "x"})
         self.assertEqual(resp.status_code, 400)
 
+    @patch("atproto_oauth.views.client.fetch_session_email")
     @patch("atproto_oauth.views.client.exchange_code")
-    def test_successful_callback_creates_member_and_session(self, mock_exchange):
+    def test_successful_callback_creates_member_and_session(
+        self, mock_exchange, mock_email
+    ):
         mock_exchange.return_value = (
             {"sub": DID, "access_token": "AT", "refresh_token": "RT"},
             "n2",
         )
+        mock_email.return_value = ("", False)
         _seed_pending(self.client, "state1")
         resp = self.client.get(
             reverse("atproto_oauth:callback"), {"state": "state1", "code": "code", "iss": "https://auth.example"}
@@ -71,13 +75,32 @@ class CallbackViewTests(TestCase):
         self.assertEqual(token.refresh_token, "RT")
         self.assertTrue(token.dpop_private_pem)
 
+    @patch("atproto_oauth.views.client.fetch_session_email")
     @patch("atproto_oauth.views.client.exchange_code")
-    def test_existing_member_handle_is_refreshed(self, mock_exchange):
+    def test_callback_persists_email_from_pds(self, mock_exchange, mock_email):
+        mock_exchange.return_value = (
+            {"sub": DID, "access_token": "AT", "refresh_token": "RT"},
+            "n2",
+        )
+        mock_email.return_value = ("alice@example.com", True)
+        _seed_pending(self.client, "state_email")
+        self.client.get(
+            reverse("atproto_oauth:callback"),
+            {"state": "state_email", "code": "code", "iss": "https://auth.example"},
+        )
+        user = User.objects.get(did=DID)
+        self.assertEqual(user.email, "alice@example.com")
+        self.assertTrue(user.email_confirmed)
+
+    @patch("atproto_oauth.views.client.fetch_session_email")
+    @patch("atproto_oauth.views.client.exchange_code")
+    def test_existing_member_handle_is_refreshed(self, mock_exchange, mock_email):
         User.objects.create_user(username="old.handle", did=DID)
         mock_exchange.return_value = (
             {"sub": DID, "access_token": "AT", "refresh_token": "RT"},
             "n2",
         )
+        mock_email.return_value = ("", False)
         _seed_pending(self.client, "state2", handle="new.handle")
         self.client.get(
             reverse("atproto_oauth:callback"), {"state": "state2", "code": "code", "iss": "https://auth.example"}

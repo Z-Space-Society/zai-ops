@@ -123,8 +123,21 @@ def callback(request):
     if not did or did != pending["did"]:
         return HttpResponseBadRequest("DID mismatch in token response.")
 
+    # Best-effort: read email straight from the member's PDS (requires the
+    # transition:email grant). Never blocks login — see fetch_session_email.
+    email, email_confirmed = client.fetch_session_email(
+        pending["pds_url"],
+        token.get("access_token", ""),
+        dpop_key=dpop_key,
+        nonce=nonce,
+    )
+
     user = _upsert_member(
-        did=did, handle=pending["handle"], pds_url=pending["pds_url"]
+        did=did,
+        handle=pending["handle"],
+        pds_url=pending["pds_url"],
+        email=email,
+        email_confirmed=email_confirmed,
     )
     _store_tokens(user, token, dpop_key, nonce, pending)
 
@@ -146,15 +159,26 @@ def landing(request):
     return render(request, "atproto_oauth/landing.html")
 
 
-def _upsert_member(*, did, handle, pds_url):
-    """Create the member on first login; refresh handle/pds_url thereafter."""
+def _upsert_member(*, did, handle, pds_url, email="", email_confirmed=False):
+    """Create the member on first login; refresh their PDS-sourced fields
+    (handle, pds_url, email) on every login thereafter."""
     user, created = User.objects.get_or_create(
-        did=did, defaults={"username": handle, "pds_url": pds_url}
+        did=did,
+        defaults={
+            "username": handle,
+            "pds_url": pds_url,
+            "email": email,
+            "email_confirmed": email_confirmed,
+        },
     )
     if not created:
         user.username = handle
         user.pds_url = pds_url
-        user.save(update_fields=["username", "pds_url"])
+        user.email = email
+        user.email_confirmed = email_confirmed
+        user.save(
+            update_fields=["username", "pds_url", "email", "email_confirmed"]
+        )
     return user
 
 

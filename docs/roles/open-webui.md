@@ -57,7 +57,7 @@ must:
 | Confirm the base interpreter is under the role tree | `command` → `sys._base_executable` (`failed_when`) | Guards the load-bearing placement above — fail loud at provision time if the managed interpreter ever lands outside `/opt/open-webui`. |
 | Install `open-webui` into the venv | `command` → `uv pip install` | pip runs *inside* the venv → PEP 668 doesn't apply. Pinned version. Notifies `restart open-webui`. |
 | Chown the home to `open-webui` | `ansible.builtin.file` (`recurse`) | venv/install ran as root; the daemon reads the interpreter, venv and `open-webui` console script. Runs *after* install so the whole tree (incl. the managed CPython) is covered. |
-| Render the secret env file | `template` (`0600 root`, `no_log`) | `DATABASE_URL`, `WEBUI_SECRET_KEY`, the litellm backend `OPENAI_API_*` + `RAG_*`, `DATA_DIR`/`HF_HOME`, `HOST`/`PORT`, `WEBUI_URL`. Read by systemd via `EnvironmentFile`. Open WebUI has no config file — it's env-configured. Notifies restart. |
+| Render the secret env file | `template` (`0600 root`, `no_log`) | `DATABASE_URL`, `WEBUI_SECRET_KEY`, the litellm backend `OPENAI_API_*` + `RAG_*`, the zai-auth OIDC block (`OAUTH_*`/`OPENID_PROVIDER_URL`, see below), `DATA_DIR`/`HF_HOME`, `HOST`/`PORT`, `WEBUI_URL`. Read by systemd via `EnvironmentFile`. Open WebUI has no config file — it's env-configured. Notifies restart. |
 | Install the systemd unit | `template` → `/etc/systemd/system/open-webui.service` | Hardened (`ProtectSystem=strict`, `ReadWritePaths={{ openwebui_data_dir }}`, `HOME` → DATA_DIR, `TimeoutStartSec=300`). Notifies reload + restart. |
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config (it migrates the DB on this first start) *before* the smoke test. |
@@ -86,6 +86,40 @@ Defined in [`defaults/main.yml`](../../ansible/roles/open-webui/defaults/main.ym
 | `openwebui_db_name` / `openwebui_db_user` | `openwebui` | The Postgres database + role this role creates. |
 | `openwebui_litellm_port` | `4000` | litellm's port — a local default (not read from litellm's role defaults); keep in sync with `litellm_port`. |
 | `openwebui_rag_embedding_model` | `nomic-embed-text` | The embedding model litellm serves; keep in sync with `litellm_embedding_model_name`. |
+| `openwebui_oidc_client_id` | `open-webui` | Local default (not read from the `zai-auth` role's vars); keep in sync with `zai_auth_oidc_client_id`. |
+| `openwebui_oidc_provider_url` | `https://account.{{ cluster_domain }}/.well-known/openid-configuration` | zai-auth's OIDC discovery document. |
+
+### OIDC login: zai-auth is the only way in
+
+[`zai-auth`](zai-auth.md) is the cluster's sole identity provider — see
+[ADR-0005](../decisions/0005-zai-auth-over-aip.md). `open-webui.env.j2` sets
+`ENABLE_OAUTH_SIGNUP=true`, `ENABLE_SIGNUP=false`, `ENABLE_LOGIN_FORM=false`,
+and the `OAUTH_*`/`OPENID_PROVIDER_URL` block pointing at zai-auth.
+
+**`ENABLE_PERSISTENT_CONFIG=false` is load-bearing, not decorative.**
+`ENABLE_LOGIN_FORM`, `ENABLE_SIGNUP` and several other auth settings are
+Open WebUI "PersistentConfig" values: read from the environment only on the
+app's *very first* boot, then written to its own database and read from
+**there** on every restart after — silently ignoring this env file on every
+subsequent `provision.yml` run. Setting `ENABLE_PERSISTENT_CONFIG=false`
+makes Open WebUI always trust the environment instead, which is also just the
+*correct* model here: this repo's whole premise is that config lives in git,
+not a mutable runtime database (same reasoning as the proxy role's
+git-tracked Caddyfile). See the [Known
+gotchas](../README.md#known-gotchas) entry — this one first surfaced as a
+non-obvious bug (`ENABLE_LOGIN_FORM=false` deployed cleanly but the local
+email/password form kept showing) precisely because open-webui had already
+booted once before this setting existed.
+
+**No native "skip the login page" option.** Open WebUI has no built-in way to
+auto-redirect straight to the sole configured OAuth provider
+([open-webui/open-webui#24325](https://github.com/open-webui/open-webui/issues/24325)
+is the open feature request) — visiting `chat.{{ cluster_domain }}` always
+lands on `/auth` first, showing a "Continue with ZAI" button to click even
+with the local form gone. The [`proxy`](proxy.md) role's `redirects` field on
+this route (`/auth*` → `/oauth/oidc/login`) closes that gap at the edge
+instead, matching a redirect pattern the Open WebUI community already uses
+with nginx.
 
 ### Secrets (auto-generated — no manual step)
 

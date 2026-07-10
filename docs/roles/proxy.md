@@ -56,7 +56,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 | `caddy_cert_path` | `/etc/caddy/cloudflare-origin.pem` | Where the Origin CA cert lands; the `tls` directive points here. |
 | `caddy_key_path` | `/etc/caddy/cloudflare-origin.key` | Where the Origin CA private key lands (`0600`, owned by `caddy`). |
 | `caddy_tls_enabled` | `{{ cloudflare_origin_cert is defined }}` | Auto: serve HTTPS when the Origin CA cert is in the vault, else HTTP-only. Override to force either way. |
-| `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. |
+| `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). |
 
 The committed default carries one live route, with the **domain derived from
 `cluster_domain`** (set per cluster with `zai-set-domain`) so the route holds no
@@ -99,5 +99,12 @@ curl -kH 'Host: chat.example.com' https://10.1.1.<ctid>/
 - **The edge sits at tier 110.** Per the [CTID tier
   convention](../README.md#networking) the proxy is the first platform-tier CT —
   one step out from the core data foundations, the only box on the LAN.
+- **Per-route `redirects` use `handle` blocks, not a bare `redir` directive.**
+  A site block mixing a top-level `redir`/`reverse_proxy` with `handle` blocks
+  is order-ambiguous (Caddy sorts un-wrapped directives by an internal
+  priority, not source order); wrapping *everything* in mutually-exclusive
+  `handle` blocks — redirects first, a catch-all `handle { reverse_proxy … }`
+  last — is unambiguous and matches the `:80` site's own health-check/redirect
+  pattern above it in the same file.
 - For how the CT is assigned a CTID, created and reached, see the
   [main docs](../README.md#networking) and [`provision.yml`](../../ansible/provision.yml).

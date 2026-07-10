@@ -42,11 +42,23 @@
 {% if caddy_tls_enabled | bool %}
 {{ h.domain }} {
     import origin_tls
-    reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
-}
 {% else %}
 http://{{ h.domain }} {
-    reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
-}
 {% endif %}
+{% if h.redirects is defined and h.redirects %}
+    # handle blocks are mutually exclusive and evaluated in order (same idiom
+    # as the :80 catch-all above) — each redirect is checked before falling
+    # through to the catch-all reverse_proxy.
+{% for r in h.redirects %}
+    handle {{ r.from }} {
+        redir {{ r.to }} {{ r.code | default(302) }}
+    }
+{% endfor %}
+    handle {
+        reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
+    }
+{% else %}
+    reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
+{% endif %}
+}
 {% endfor %}

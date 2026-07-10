@@ -21,8 +21,19 @@ caddy_tls_enabled: "{{ cloudflare_origin_cert is defined }}"
 # the inventory uses. The domain derives from cluster_domain (set per cluster with
 # `zai-set-domain`), so the committed route carries no this-cluster facts either.
 # The :80 health/redirect site keeps the Caddyfile valid even with no routes.
+#
+# Optional `redirects: [{ from, to, code }]` per entry — edge-level 302s
+# (Caddy `handle <from> { redir <to> <code> }`, evaluated before the catch-all
+# reverse_proxy) for cases the upstream app can't do itself. open-webui's is
+# the motivating case: it has no native "skip straight to the only OAuth
+# provider" option (open-webui/open-webui#24325), so /auth* is redirected
+# straight to the OIDC login route instead of showing an intermediate page.
 caddy_proxy_hosts:
   - { domain: "api.{{ cluster_domain }}", service: litellm, port: 4000 }
-  - { domain: "chat.{{ cluster_domain }}", service: open-webui, port: 8080 }
+  - domain: "chat.{{ cluster_domain }}"
+    service: open-webui
+    port: 8080
+    redirects:
+      - { from: "/auth*", to: "/oauth/oidc/login", code: 302 }
   - { domain: "view.{{ cluster_domain }}", service: happyview, port: 3000 }
   - { domain: "account.{{ cluster_domain }}", service: zai-auth, port: 8000 }

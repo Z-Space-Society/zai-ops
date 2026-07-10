@@ -538,6 +538,29 @@ Lessons on the **`litellm` CT floor embedder** (the always-on CPU embedding mode
   them. Noted so mediocre retrieval isn't re-debugged as a model fault. nomic's full
   8192 context also needs the unit's yarn rope flags (llama.cpp defaults to 2048).
 
+Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
+`ENABLE_SIGNUP`, and others):
+
+- **Env var changes silently stop applying after the first boot.** Open WebUI reads
+  `PersistentConfig`-wrapped settings from the environment only on its *very first*
+  start, then writes them to its own database and reads from **there** on every
+  restart after — a changed env value in `open-webui.env.j2` deploys cleanly
+  (`provision.yml` shows no error) but has zero effect. This bit deploying zai-auth
+  as the sole login provider: `ENABLE_LOGIN_FORM=false` was set correctly from the
+  start, but open-webui had already booted once (with the setting unset, i.e. true)
+  before that env line existed, so the local email/password form kept showing.
+  Fix: `ENABLE_PERSISTENT_CONFIG=false` makes Open WebUI always trust the
+  environment over its DB-cached copy — the correct default for this repo anyway,
+  since config is meant to live in git, not a mutable runtime database. See
+  [`open-webui`](roles/open-webui.md#oidc-login-zai-auth-is-the-only-way-in).
+- **No native way to skip the login page when OAuth is the only option.** Visiting
+  `chat.{{ cluster_domain }}` always lands on `/auth` first, showing a "Continue
+  with ZAI" button rather than redirecting straight into the OIDC flow
+  ([open-webui/open-webui#24325](https://github.com/open-webui/open-webui/issues/24325)
+  is the open feature request). Closed at the edge instead: the [`proxy`](roles/proxy.md)
+  role's `caddy_proxy_hosts` supports a per-route `redirects` list, used here to
+  302 `/auth*` straight to `/oauth/oidc/login`.
+
 Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
 
 - **Forced first-login password change needs a real temp password.** Over SSH

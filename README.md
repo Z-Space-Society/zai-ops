@@ -72,16 +72,18 @@ itself from this repo.
    zai-assign object-store 101   # core infra: the restic backend
    zai-assign postgres 102       # core infra: the internal database
    zai-assign proxy 110          # platform: the LAN-facing reverse proxy
+   zai-assign zai-auth 111       # platform: the ATProto->OIDC login bridge
    zai-assign litellm 112        # platform: the AI gateway
    zai-assign open-webui 120     # applications: the chat UI
    zai-assign happyview 121      # happy view
 
    # 2. provision each — create over the API, configure over SSH.
    #    object store first: it's the restic backend the backup job writes to.
-   #    postgres before litellm/open-webui (both create their DB on it).
+   #    postgres before zai-auth/litellm/open-webui (all three create their DB on it).
    ansible-playbook provision.yml --limit object-store
    ansible-playbook provision.yml --limit postgres
    ansible-playbook provision.yml --limit proxy
+   ansible-playbook provision.yml --limit zai-auth
    ansible-playbook provision.yml --limit litellm
    ansible-playbook provision.yml --limit open-webui
    ```

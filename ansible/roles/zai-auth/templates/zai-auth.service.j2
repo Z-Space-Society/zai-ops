@@ -1,0 +1,33 @@
+# {{ ansible_managed }}
+[Unit]
+Description=ZAI Auth (ATProto -> OIDC login bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ zai_auth_user }}
+Group={{ zai_auth_group }}
+EnvironmentFile={{ zai_auth_env_file }}
+Environment=HOME={{ zai_auth_home }}
+# Run gunicorn from the venv directly (absolute path — no PATH reliance under
+# systemd), against the synced app source. HOST/PORT are pinned here rather
+# than read from the env file so the bind is unambiguous.
+WorkingDirectory={{ zai_auth_src }}
+ExecStart={{ zai_auth_venv }}/bin/gunicorn zai_auth.wsgi:application --bind {{ zai_auth_host }}:{{ zai_auth_port }} --workers {{ zai_auth_gunicorn_workers }}
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+
+# Hardening: persistent state lives in Postgres, not on this CT. ProtectSystem=
+# strict makes / read-only (the signing keys under /etc/zai-auth/keys and the
+# env file stay READABLE — strict only blocks writes); PrivateTmp gives a
+# scratch /tmp; ProtectHome hides /home + /root (unaffected — everything is
+# under /opt and /etc). ReadWritePaths re-opens just the daemon's own home.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ zai_auth_home }}
+
+[Install]
+WantedBy=multi-user.target

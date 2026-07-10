@@ -1,0 +1,304 @@
+---
+# zai-auth — the cluster's ATProto→OIDC login bridge. A Django app run natively
+# under systemd (gunicorn), Postgres-backed, fronted by Caddy — same shape as
+# litellm/open-webui. The one real divergence: there is no published package to
+# install. The app IS this repo (apps/zai-auth/), so the role syncs the source
+# from the control node's own checkout rather than pinning a release version —
+# "git pull on CT 100" is the update story, matching the repo's bin/ convention.
+
+# --- Provision the zai_auth role + database on the postgres CT ---------------
+# Identical delegated `su - postgres -c psql` idiom to litellm/open-webui/
+# happyview — the postgres CT's superuser is reachable only via local peer auth
+# on that CT, never over TCP. Probe-then-branch (psql has no CREATE ... IF NOT
+# EXISTS); no_log on the password-bearing tasks.
+
+- name: Check whether the zai_auth Postgres role exists
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname = '{{ zai_auth_db_user }}'\""
+  delegate_to: postgres
+  register: zai_auth_role_check
+  changed_when: false
+
+- name: Create the zai_auth Postgres role with a generated password
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1
+      -c \"CREATE ROLE {{ zai_auth_db_user }} LOGIN PASSWORD '\$ZAI_AUTH_DB_PW'\""
+  environment:
+    ZAI_AUTH_DB_PW: "{{ zai_auth_db_password }}"
+  delegate_to: postgres
+  when: zai_auth_role_check.stdout | trim != "1"
+  no_log: true
+
+- name: Ensure the zai_auth role password matches the generated secret
+  # ALTER ROLE always succeeds and only re-hashes, so it carries no useful
+  # changed signal — mark it unchanged to keep runs quiet (covers a rotated secret).
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1
+      -c \"ALTER ROLE {{ zai_auth_db_user }} LOGIN PASSWORD '\$ZAI_AUTH_DB_PW'\""
+  environment:
+    ZAI_AUTH_DB_PW: "{{ zai_auth_db_password }}"
+  delegate_to: postgres
+  when: zai_auth_role_check.stdout | trim == "1"
+  no_log: true
+  changed_when: false
+
+- name: Check whether the zai_auth database exists
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '{{ zai_auth_db_name }}'\""
+  delegate_to: postgres
+  register: zai_auth_db_check
+  changed_when: false
+
+- name: Create the zai_auth database owned by the zai_auth role
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -v ON_ERROR_STOP=1 -c \"CREATE DATABASE {{ zai_auth_db_name }}
+      OWNER {{ zai_auth_db_user }}\""
+  delegate_to: postgres
+  when: zai_auth_db_check.stdout | trim != "1"
+
+# --- Service account + directories ------------------------------------------
+
+- name: Create the zai-auth system group
+  ansible.builtin.group:
+    name: "{{ zai_auth_group }}"
+    system: true
+
+- name: Create the zai-auth system user
+  ansible.builtin.user:
+    name: "{{ zai_auth_user }}"
+    group: "{{ zai_auth_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ zai_auth_home }}"
+    create_home: false
+
+- name: Create the zai-auth home, src and config directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ zai_auth_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    # home: owned by the daemon (venv + synced source live here).
+    # config dir: root-owned, group-readable so the daemon reads the env file's
+    # sibling keys/ dir directly (the env file itself stays root:root — see below).
+    - { path: "{{ zai_auth_home }}", owner: "{{ zai_auth_user }}", mode: "0755" }
+    - { path: "{{ zai_auth_src }}", owner: "{{ zai_auth_user }}", mode: "0755" }
+    - { path: "{{ zai_auth_config_dir }}", owner: root, mode: "0750" }
+    - { path: "{{ zai_auth_keys_dir }}", owner: root, mode: "0750" }
+
+# --- Sync the app source from the control node's own checkout ----------------
+# No published package exists for this app — it IS the repo. rsync mirrors
+# apps/zai-auth/ from CT 100 (where the operator's `ansible-playbook` runs, so
+# "local" here is the control node) onto this CT, excluding local dev/test
+# artifacts the .gitignore also excludes (a stray .venv, __pycache__, keys/,
+# .env) so they never leak into the deployed tree. delete=true keeps the CT's
+# copy an exact mirror — a file removed from the repo disappears here too.
+
+- name: Ensure rsync is present on the control node (source side)
+  ansible.builtin.apt:
+    name: rsync
+    state: present
+  delegate_to: localhost
+
+- name: Ensure rsync is present on this CT (destination side)
+  ansible.builtin.apt:
+    name: rsync
+    state: present
+    update_cache: true
+
+- name: Sync the zai-auth app source from the control node checkout
+  ansible.posix.synchronize:
+    src: "{{ zai_auth_repo_dir }}/apps/zai-auth/"
+    dest: "{{ zai_auth_src }}/"
+    delete: true
+    rsync_opts:
+      - "--exclude=.venv"
+      - "--exclude=__pycache__"
+      - "--exclude=*.pyc"
+      - "--exclude=keys"
+      - "--exclude=.env"
+      - "--exclude=.git"
+      - "--exclude=db.sqlite3"
+      - "--exclude=staticfiles"
+  notify: restart zai-auth
+
+# --- uv + the system Python 3.13 (Debian 13's default — no managed-interpreter
+# fetch needed, unlike open-webui, which needs a version Debian doesn't ship) ---
+
+- name: Ensure CA certificates are present for the uv + package downloads
+  ansible.builtin.apt:
+    name: ca-certificates
+    state: present
+    update_cache: true
+
+- name: Check the installed uv version
+  ansible.builtin.command: "{{ zai_auth_uv_bin }} --version"
+  register: zai_auth_uv_installed
+  changed_when: false
+  failed_when: false
+
+# Install uv reproducibly from the pinned, checksummed release tarball — NOT a
+# `curl | sh` of a moving installer. Same idiom as the open-webui role.
+- name: Install the pinned uv binary
+  when: zai_auth_uv_version not in (zai_auth_uv_installed.stdout | default(''))
+  block:
+    - name: Download the pinned uv release tarball
+      ansible.builtin.get_url:
+        url: "{{ zai_auth_uv_url }}"
+        dest: /tmp/uv-{{ zai_auth_uv_version }}.tar.gz
+        checksum: "sha256:{{ zai_auth_uv_sha256 }}"
+        mode: "0644"
+
+    - name: Extract the uv tarball
+      ansible.builtin.unarchive:
+        src: /tmp/uv-{{ zai_auth_uv_version }}.tar.gz
+        dest: /tmp
+        remote_src: true
+
+    - name: Install uv and uvx into the install dir
+      ansible.builtin.copy:
+        src: "/tmp/uv-x86_64-unknown-linux-gnu/{{ item }}"
+        dest: "{{ zai_auth_uv_install_dir }}/{{ item }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - uv
+        - uvx
+
+# `uv venv` builds the venv itself (no python3-venv apt package needed) against
+# the SYSTEM python3 — Debian 13 already ships 3.13, which Django 5.2 fully
+# supports, so there's no managed-interpreter fetch/placement to get right here
+# (contrast open-webui, which needs a version Debian doesn't ship).
+- name: Create the venv against the system Python
+  ansible.builtin.command:
+    cmd: "{{ zai_auth_uv_bin }} venv --python python3 {{ zai_auth_venv }}"
+    creates: "{{ zai_auth_venv }}/bin/python"
+
+# `requirements:` reads straight from the synced source's requirements.txt —
+# the repo's own pin is the version pin, no role-level version var to drift
+# out of sync with what's actually committed.
+- name: Install zai-auth's dependencies into the venv
+  ansible.builtin.command:
+    cmd: "{{ zai_auth_uv_bin }} pip install --python {{ zai_auth_venv }}/bin/python -r {{ zai_auth_src }}/requirements.txt"
+  register: zai_auth_pip
+  changed_when: "'Audited' not in zai_auth_pip.stderr"
+  notify: restart zai-auth
+  notify: restart zai-auth
+
+# --- Secrets: signing keys + env file -----------------------------------------
+
+- name: Render the atproto EC (ES256) signing key
+  # Generated once on the control node (group_vars/all/main.yml, cached under
+  # /root/.zai-secrets) and templated here — DR-critical, covered by the
+  # existing Tier-1 control-node backup. Group-readable: the Django process
+  # (not systemd) reads this path directly via ATPROTO_EC_PRIVATE_KEY_PATH.
+  ansible.builtin.copy:
+    content: "{{ zai_auth_atproto_ec_key }}"
+    dest: "{{ zai_auth_atproto_ec_key_path }}"
+    owner: root
+    group: "{{ zai_auth_group }}"
+    mode: "0640"
+  no_log: true
+  notify: restart zai-auth
+
+- name: Render the OIDC RSA (RS256) signing key
+  ansible.builtin.copy:
+    content: "{{ zai_auth_oidc_rsa_key }}"
+    dest: "{{ zai_auth_oidc_rsa_key_path }}"
+    owner: root
+    group: "{{ zai_auth_group }}"
+    mode: "0640"
+  no_log: true
+  notify: restart zai-auth
+
+- name: Render the zai-auth secret environment file
+  # DATABASE_URL, SECRET_KEY, key paths, OIDC client secret. 0600 root — only
+  # systemd reads it via EnvironmentFile, before it drops to the zai-auth user.
+  ansible.builtin.template:
+    src: zai-auth.env.j2
+    dest: "{{ zai_auth_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart zai-auth
+
+# --- Database migration (provision-time, before the daemon ever starts) ------
+
+- name: Apply zai-auth database migrations
+  ansible.builtin.command:
+    cmd: "{{ zai_auth_venv }}/bin/python manage.py migrate --noinput"
+  args:
+    chdir: "{{ zai_auth_src }}"
+  environment:
+    DATABASE_URL: "{{ zai_auth_database_url }}"
+    SECRET_KEY: "{{ zai_auth_secret_key }}"
+  register: zai_auth_migrate
+  changed_when: "'No migrations to apply' not in zai_auth_migrate.stdout"
+  no_log: true
+  notify: restart zai-auth
+
+- name: Give the zai-auth user ownership of its home (venv + synced source)
+  # rsync/pip/migrate ran as root; the daemon runs as zai-auth and needs to
+  # read the interpreter, the venv and the app source. Runs AFTER all of that.
+  ansible.builtin.file:
+    path: "{{ zai_auth_home }}"
+    state: directory
+    owner: "{{ zai_auth_user }}"
+    group: "{{ zai_auth_group }}"
+    recurse: true
+
+# --- Unit + smoke test --------------------------------------------------------
+
+- name: Install the zai-auth systemd unit
+  ansible.builtin.template:
+    src: zai-auth.service.j2
+    dest: /etc/systemd/system/zai-auth.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart zai-auth
+
+- name: Ensure zai-auth is started and enabled
+  ansible.builtin.systemd:
+    name: zai-auth
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply pending zai-auth restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for zai-auth to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ zai_auth_port }}"
+    timeout: 90
+
+- name: Verify the zai-auth OIDC discovery document responds
+  # Proves the app booted, reached the (migrated) DB, and the signing keys
+  # loaded — not merely that the port is open (signing.py fails closed on a
+  # missing/misconfigured key, which would 500 here).
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ zai_auth_port }}/.well-known/openid-configuration"
+    status_code: 200
+  register: zai_auth_health
+  until: zai_auth_health is succeeded
+  retries: 10
+  delay: 3

@@ -145,7 +145,7 @@ and the gaps leave room to grow a tier without renumbering:
 | Range       | Tier         | Examples                                   |
 | ----------- | ------------ | ------------------------------------------ |
 | `100`–`109` | Core infra   | control (100), object-store (101), postgres (102) |
-| `110`–`119` | Platform     | proxy/edge (110), auth (111), gateway (112) |
+| `110`–`119` | Platform     | proxy/edge (110), auth (111, the [`zai-auth`](roles/zai-auth.md) role), gateway (112) |
 | `120`–`129` | Applications | open-webui (120), happyview (121), … other user-facing apps |
 
 The dependency arrows point **downward** (apps → platform → core), and the line
@@ -345,6 +345,7 @@ command. Only control-node operator commands belong in `bin/`.
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
 | [`object_store`](roles/object_store.md)    | `object-store` | Single-node Garage (S3-compatible) — the on-box backup target |
 | [`postgres`](roles/postgres.md)            | `postgres` | PostgreSQL 17 (Debian-native) — the internal database server |
+| [`zai-auth`](roles/zai-auth.md)            | `zai-auth` | ATProto→OIDC login bridge (Django, venv) — Postgres-backed, fronted by Caddy; the sole identity provider for Open WebUI |
 | [`litellm`](roles/litellm.md)              | `litellm`  | LiteLLM proxy (venv) — OpenAI-compatible gateway, Postgres-backed; + an always-on CPU floor embedder (`nomic-embed-text`) |
 | [`open-webui`](roles/open-webui.md)        | `open-webui` | OpenWebUI chat UI (uv-managed Python 3.12 venv) — Postgres-backed, fronted by Caddy, talks to litellm for chat + RAG embeddings |
 | [`happyview`](roles/happyview.md)          | `happyview` | HappyView AT Protocol AppView platform (Rust binary, built from source) — Postgres-backed, fronted by Caddy |

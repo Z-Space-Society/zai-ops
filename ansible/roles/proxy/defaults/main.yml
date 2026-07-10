@@ -25,3 +25,4 @@ caddy_proxy_hosts:
   - { domain: "api.{{ cluster_domain }}", service: litellm, port: 4000 }
   - { domain: "chat.{{ cluster_domain }}", service: open-webui, port: 8080 }
   - { domain: "view.{{ cluster_domain }}", service: happyview, port: 3000 }
+  - { domain: "account.{{ cluster_domain }}", service: zai-auth, port: 8000 }

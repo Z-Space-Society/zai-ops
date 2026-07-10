@@ -130,6 +130,16 @@
   roles:
     - postgres
 
+# zai-auth runs AFTER postgres: its role creates the zai_auth role + database ON
+# the postgres CT (delegate_to: postgres), and syncs the app source from this
+# repo's own checkout on the control node (no published package to install). A
+# --limit zai-auth run still needs postgres already provisioned.
+- name: Configure ZAI Auth (ATProto -> OIDC login bridge)
+  hosts: zai-auth
+  gather_facts: true
+  roles:
+    - zai-auth
+
 # litellm runs AFTER postgres: its role creates the litellm role + database ON the
 # postgres CT (delegate_to: postgres) and the server must already be up with
 # scram-sha-256 in effect so the role password hashes correctly. A full

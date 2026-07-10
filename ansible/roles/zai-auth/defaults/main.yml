@@ -1,0 +1,79 @@
+---
+# zai-auth — the cluster's ATProto→OIDC login bridge (Django, apps/zai-auth/ in
+# this repo). Unlike every other role, it has no published package to install:
+# the app source IS this repo, so the role syncs it from the control node's own
+# checkout rather than pip-installing a pinned release (see tasks). Internal-only
+# on vmbr1; reached from the LAN only through the Caddy edge, fronted like
+# litellm/open-webui/happyview.
+
+# Where this repo lives on the control node (CT 100) — the same hardcoded path
+# the backup role and control_node role already assume. The app source is
+# synced FROM here, so "git pull on CT 100" is the whole update story for the
+# app too, matching the repo's bin/ convention (CLAUDE.md: pull = live).
+zai_auth_repo_dir: /opt/zai-ops
+
+# Port gunicorn binds. 8000 matches the app's own local-dev convention
+# (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
+# loopback) — same posture as litellm/open-webui — the Caddy edge reaches this
+# CT over vmbr1, and the security boundary is the network, not the bind address.
+zai_auth_port: 8000
+zai_auth_host: "0.0.0.0"
+zai_auth_gunicorn_workers: 2
+
+# Dedicated unprivileged service account (nologin) the daemon runs as.
+zai_auth_user: zai-auth
+zai_auth_group: zai-auth
+
+# On-disk layout, all under /opt like every other native service. src/ is the
+# synced app source (rsync'd fresh each run, so it always matches this repo's
+# apps/zai-auth/); venv/ is layered on top of it.
+zai_auth_home: /opt/zai-auth
+zai_auth_src: "{{ zai_auth_home }}/src"
+zai_auth_venv: "{{ zai_auth_home }}/venv"
+
+# uv — builds the venv and installs requirements.txt into it. Installed
+# reproducibly from a pinned, checksummed release tarball (NOT `curl | sh` of
+# a moving installer), same idiom and same pin as the open-webui role. Unlike
+# open-webui, zai-auth doesn't need uv's managed-CPython fetch: Debian 13
+# already ships Python 3.13, which Django 5.2 fully supports, so `uv venv`
+# just wraps the system interpreter. Releases:
+# https://github.com/astral-sh/uv/releases
+zai_auth_uv_version: "0.11.25"
+zai_auth_uv_sha256: "1db18b5e76fa645a7f3865773139bdec8e2d46adbdbb35e7410b34fa8015ccd2"
+zai_auth_uv_url: "https://github.com/astral-sh/uv/releases/download/{{ zai_auth_uv_version }}/uv-x86_64-unknown-linux-gnu.tar.gz"
+zai_auth_uv_install_dir: /usr/local/bin
+zai_auth_uv_bin: "{{ zai_auth_uv_install_dir }}/uv"
+
+# Config + secrets live under /etc, like every other role. The env file (0600,
+# root-only) carries DATABASE_URL/SECRET_KEY/etc; the keys/ dir holds the two
+# PEM signing keys, group-readable so the daemon (not just systemd) can read
+# them directly — Django loads them itself via ATPROTO_EC_PRIVATE_KEY_PATH /
+# OIDC_RSA_PRIVATE_KEY_PATH, unlike the env file which only systemd reads.
+zai_auth_config_dir: /etc/zai-auth
+zai_auth_env_file: "{{ zai_auth_config_dir }}/zai-auth.env"
+zai_auth_keys_dir: "{{ zai_auth_config_dir }}/keys"
+zai_auth_atproto_ec_key_path: "{{ zai_auth_keys_dir }}/atproto_ec.pem"
+zai_auth_oidc_rsa_key_path: "{{ zai_auth_keys_dir }}/oidc_rsa.pem"
+
+# Postgres role + database this role provisions on the postgres CT (same
+# delegated idiom as litellm/open-webui/happyview). Password is the
+# auto-generated zai_auth_db_password from group_vars/all/main.yml.
+zai_auth_db_name: zai_auth
+zai_auth_db_user: zai_auth
+zai_auth_database_url: "postgresql://{{ zai_auth_db_user }}:{{ zai_auth_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ zai_auth_db_name }}"
+
+# Public URL, derived from cluster_domain. `account.` is the hostname the
+# identity research already settled on for this exact login bridge (independent
+# of zai-auth vs AIP — see docs/decisions/0005-zai-auth-over-aip.md). Anchors
+# PUBLIC_BASE_URL, the atproto OAuth client_id, and the OIDC issuer.
+zai_auth_url: "https://account.{{ cluster_domain }}"
+zai_auth_allowed_hosts:
+  - "account.{{ cluster_domain }}"
+
+# The one OIDC relying party today: Open WebUI. client_id is a LOCAL default
+# here (not reached into the open-webui role's vars) — mirror it in
+# open-webui's own defaults (openwebui_oidc_client_id) and keep both in sync,
+# same convention as openwebui_litellm_port/litellm_port.
+zai_auth_oidc_client_id: open-webui
+zai_auth_oidc_redirect_uris:
+  - "https://chat.{{ cluster_domain }}/oauth/oidc/callback"

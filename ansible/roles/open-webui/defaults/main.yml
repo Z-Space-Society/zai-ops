@@ -99,3 +99,20 @@ openwebui_rag_embedding_model: "nomic-embed-text"
 # Public URL, derived from cluster_domain — used for OAuth/share links. The matching
 # Caddy route (proxy role's caddy_proxy_hosts) sends chat.{{ cluster_domain }} here.
 openwebui_url: "https://chat.{{ cluster_domain }}"
+
+# --- OIDC login: zai-auth is the ONLY way in ---------------------------------
+# zai-auth (this cluster's ATProto->OIDC bridge — see docs/decisions/0005-
+# zai-auth-over-aip.md) is the sole identity provider: local email/password
+# signup and the login form are both disabled, so every member authenticates
+# with their ATProto handle. client_id is a LOCAL default here (not reached
+# into the zai-auth role's vars — a role default isn't a reliable host fact
+# from this play, same reasoning as openwebui_litellm_port below) and must be
+# kept in sync with zai-auth's own zai_auth_oidc_client_id default. The shared
+# secret is the single group_vars value both roles read
+# (zai_auth_oidc_client_secret), so they always agree.
+openwebui_oidc_client_id: open-webui
+openwebui_oidc_provider_url: "https://account.{{ cluster_domain }}/.well-known/openid-configuration"
+# Wraps the shared group_vars secret in a role-local name, same idiom as
+# openwebui_openai_api_key wrapping litellm_master_key just above.
+openwebui_oidc_client_secret: "{{ zai_auth_oidc_client_secret }}"
+

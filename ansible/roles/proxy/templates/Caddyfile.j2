@@ -51,7 +51,14 @@ http://{{ h.domain }} {
     # through to the catch-all reverse_proxy.
 {% for r in h.redirects %}
     handle {{ r.from }} {
-        redir {{ r.to }} {{ r.code | default(302) }}
+        # redir's Caddyfile grammar is `redir [<matcher>] <to> [<code>]` — with
+        # exactly two bare args Caddy reads them as <matcher> <to>, not <to>
+        # <code> (confirmed via `caddy adapt`: a 2-arg redir here silently
+        # became a matcher on r.to and a Location header literally "302").
+        # The `*` forces an unambiguous 3-arg parse; real scoping already
+        # comes from the enclosing handle block, so `*` (match everything
+        # that reaches here) is correct, not redundant.
+        redir * {{ r.to }} {{ r.code | default(302) }}
     }
 {% endfor %}
     handle {

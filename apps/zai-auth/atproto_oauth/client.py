@@ -17,7 +17,6 @@ from . import config, dpop
 from zai_auth import signing
 
 CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
-SCOPE = "atproto transition:generic transition:email"
 TIMEOUT = 10
 
 
@@ -218,7 +217,7 @@ def pushed_authorization_request(
         "client_id": config.client_id(),
         "response_type": "code",
         "redirect_uri": config.redirect_uri(),
-        "scope": SCOPE,
+        "scope": config.SCOPE,
         "state": state,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",

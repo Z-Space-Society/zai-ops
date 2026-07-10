@@ -1,5 +1,7 @@
 from django.test import TestCase, override_settings
 
+from . import config
+
 
 @override_settings(PUBLIC_BASE_URL="https://auth.example.test")
 class ClientMetadataTests(TestCase):
@@ -23,3 +25,18 @@ class ClientMetadataTests(TestCase):
         )
         self.assertIn("atproto", m["scope"])
         self.assertIn("authorization_code", m["grant_types"])
+
+    def test_declared_scope_matches_requested_scope(self):
+        # Regression guard: the PDS authorization server checks a PAR
+        # request's scope against what the client declares here. These two
+        # drifting apart (transition:email requested but not declared) is
+        # exactly what broke login in production — see git history.
+        resp = self.client.get("/client-metadata.json")
+        self.assertEqual(resp.json()["scope"], config.SCOPE)
+
+    def test_transition_email_is_declared(self):
+        # Without this, PAR fails closed with invalid_scope and login never
+        # gets far enough to call fetch_session_email.
+        resp = self.client.get("/client-metadata.json")
+        self.assertIn("transition:email", resp.json()["scope"].split())
+        self.assertIn("transition:email", config.SCOPE.split())

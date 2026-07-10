@@ -8,6 +8,14 @@ document (an atproto requirement), and must be public HTTPS in production.
 from django.conf import settings
 from django.urls import reverse
 
+# Single source of truth for the scope: requested at PAR time (client.py) and
+# declared in client_metadata() below. The PDS authorization server checks a
+# PAR request's scope against what the client publicly declares at its
+# client_id URL — request a scope here that isn't ALSO listed in
+# client_metadata()'s "scope" and PAR fails with invalid_scope, even though
+# nothing here raises. transition:email is what unlocks fetch_session_email.
+SCOPE = "atproto transition:generic transition:email"
+
 
 def base_url() -> str:
     return settings.PUBLIC_BASE_URL.rstrip("/")
@@ -41,7 +49,7 @@ def client_metadata() -> dict:
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
         "redirect_uris": [redirect_uri()],
-        "scope": "atproto transition:generic",
+        "scope": SCOPE,
         "token_endpoint_auth_method": "private_key_jwt",
         "token_endpoint_auth_signing_alg": "ES256",
         "jwks_uri": jwks_uri(),

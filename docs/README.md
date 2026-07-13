@@ -566,6 +566,21 @@ Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
   is the open feature request). Closed at the edge instead: the [`proxy`](roles/proxy.md)
   role's `caddy_proxy_hosts` supports a per-route `redirects` list, used here to
   302 `/auth*` straight to `/oauth/oidc/login`.
+- **A blind `/auth*` redirect breaks its own OIDC login and manifests as an
+  infinite redirect loop that looks like an OIDC failure but isn't.**
+  open-webui's OIDC callback always finishes a successful login by
+  redirecting the browser *back* to `/auth` (its frontend reads the just-set
+  `token` session cookie there and completes login client-side) — an edge
+  redirect on `/auth*` with no exception also catches that completion
+  request and bounces it into another OIDC round-trip, forever. The browser
+  loops entirely on `chat.{{ cluster_domain }}/auth`, never visibly reaching
+  zai-auth again, while `journalctl -u open-webui` shows a *successful*
+  token exchange on every single cycle — easy to chase as an OIDC config bug
+  when the login is actually succeeding every time and the edge redirect is
+  what's discarding it. Fix: the `redirects` entry's `skip_if_cookie: token`
+  field only fires the redirect when open-webui's session cookie is absent;
+  a request already carrying it falls through to the real app. See
+  [`proxy`](roles/proxy.md#notes).
 
 Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
 

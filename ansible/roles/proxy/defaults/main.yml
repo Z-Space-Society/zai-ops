@@ -22,18 +22,32 @@ caddy_tls_enabled: "{{ cloudflare_origin_cert is defined }}"
 # `zai-set-domain`), so the committed route carries no this-cluster facts either.
 # The :80 health/redirect site keeps the Caddyfile valid even with no routes.
 #
-# Optional `redirects: [{ from, to, code }]` per entry — edge-level 302s
-# (Caddy `handle <from> { redir <to> <code> }`, evaluated before the catch-all
-# reverse_proxy) for cases the upstream app can't do itself. open-webui's is
-# the motivating case: it has no native "skip straight to the only OAuth
-# provider" option (open-webui/open-webui#24325), so /auth* is redirected
-# straight to the OIDC login route instead of showing an intermediate page.
+# Optional `redirects: [{ from, to, code, skip_if_cookie }]` per entry —
+# edge-level 302s (Caddy `handle <from> { redir <to> <code> }`, evaluated
+# before the catch-all reverse_proxy) for cases the upstream app can't do
+# itself. open-webui's is the motivating case: it has no native "skip
+# straight to the only OAuth provider" option (open-webui/open-webui#24325),
+# so /auth* is redirected straight to the OIDC login route instead of
+# showing an intermediate page.
+#
+# `skip_if_cookie: token` is load-bearing, not optional polish: open-webui's
+# OIDC callback always finishes by redirecting the browser BACK to this same
+# /auth path (its frontend reads the just-set `token` session cookie there
+# and completes login client-side) — a blind /auth* redirect also catches
+# that completion request and bounces it into a fresh OIDC round-trip
+# forever (the app-side log shows a successful token exchange on every
+# cycle, the browser just never lands). Only shortcut to the provider when
+# that cookie is genuinely absent (a first-time visitor); let a request that
+# already carries it fall through to the real app instead.
 caddy_proxy_hosts:
   - { domain: "api.{{ cluster_domain }}", service: litellm, port: 4000 }
   - domain: "chat.{{ cluster_domain }}"
     service: open-webui
     port: 8080
     redirects:
-      - { from: "/auth*", to: "/oauth/oidc/login", code: 302 }
+      - from: "/auth*"
+        to: "/oauth/oidc/login"
+        code: 302
+        skip_if_cookie: token
   - { domain: "view.{{ cluster_domain }}", service: happyview, port: 3000 }
   - { domain: "account.{{ cluster_domain }}", service: zai-auth, port: 8000 }

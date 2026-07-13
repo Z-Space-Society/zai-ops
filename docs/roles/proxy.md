@@ -56,7 +56,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 | `caddy_cert_path` | `/etc/caddy/cloudflare-origin.pem` | Where the Origin CA cert lands; the `tls` directive points here. |
 | `caddy_key_path` | `/etc/caddy/cloudflare-origin.key` | Where the Origin CA private key lands (`0600`, owned by `caddy`). |
 | `caddy_tls_enabled` | `{{ cloudflare_origin_cert is defined }}` | Auto: serve HTTPS when the Origin CA cert is in the vault, else HTTP-only. Override to force either way. |
-| `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). |
+| `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code, skip_if_cookie }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). `skip_if_cookie` names a cookie whose presence lets the request fall through to the real app instead of redirecting — see [Notes](#notes) below, it's load-bearing for open-webui, not optional. |
 
 The committed default carries one live route, with the **domain derived from
 `cluster_domain`** (set per cluster with `zai-set-domain`) so the route holds no
@@ -105,6 +105,26 @@ curl -kH 'Host: chat.example.com' https://10.1.1.<ctid>/
   priority, not source order); wrapping *everything* in mutually-exclusive
   `handle` blocks — redirects first, a catch-all `handle { reverse_proxy … }`
   last — is unambiguous and matches the `:80` site's own health-check/redirect
-  pattern above it in the same file.
+  pattern above it in the same file. Same rule applies one level deeper for
+  `skip_if_cookie`: the cookie check and the redirect are both wrapped in
+  their own `handle` blocks (not a `handle` plus a bare sibling `redir`) —
+  a directive that isn't itself a `handle` block doesn't share in that
+  mutual-exclusion guarantee, so it would fire unconditionally alongside
+  whichever `handle` block matched.
+- **A blind `/auth*` redirect breaks open-webui's own OIDC login completion —
+  `skip_if_cookie: token` is required, not decorative.** open-webui's OIDC
+  callback always finishes by redirecting the browser *back* to `/auth` (its
+  frontend reads the just-set `token` session cookie there and completes
+  login client-side) — an edge redirect that intercepts every `/auth*`
+  request unconditionally also catches that completion request and bounces
+  it into a fresh OIDC round-trip, forever. The symptom is a browser redirect
+  loop entirely on the app's own domain (never reaching the identity
+  provider) while the app's own log shows a successful token exchange on
+  every single cycle — easy to misdiagnose as an OIDC config problem when
+  it's actually the edge redirect fighting the app's own completion
+  mechanism. Caddy has no dedicated `cookie` matcher; `skip_if_cookie` is
+  implemented as a `header_regexp` check against the raw `Cookie` header,
+  anchored on a header boundary (`(^|;\s*)<name>=`) so it can't false-match a
+  differently-named cookie that merely contains the same substring.
 - For how the CT is assigned a CTID, created and reached, see the
   [main docs](../README.md#networking) and [`provision.yml`](../../ansible/provision.yml).

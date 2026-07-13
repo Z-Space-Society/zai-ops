@@ -121,6 +121,23 @@ this route (`/auth*` → `/oauth/oidc/login`) closes that gap at the edge
 instead, matching a redirect pattern the Open WebUI community already uses
 with nginx.
 
+**That redirect must exempt the OIDC callback's own completion request, or
+login never terminates.** Open WebUI's own `handle_callback` (`utils/oauth.py`)
+always finishes a successful login by redirecting the browser back to this
+same `/auth` path — that's how its frontend picks up the just-set `token`
+session cookie and finishes logging in client-side, then navigates to `/`.
+A `/auth*` redirect with no exception catches that completion request too
+and bounces it straight into another OIDC round-trip — forever. Symptom:
+the browser loops entirely on `chat.{{ cluster_domain }}/auth` (never
+visibly reaching zai-auth again), while `journalctl -u open-webui` shows a
+*successful* token exchange (`POST /oidc/token 200`, "Stored OAuth session
+server-side") on every single cycle — the login is actually succeeding each
+time, the browser just never gets to keep it. Fixed with the `redirects`
+entry's `skip_if_cookie: token` field: the edge redirect only fires when
+open-webui's session cookie is genuinely absent (a first-time visitor); a
+request that already carries it falls through to the real app instead. See
+[`proxy`](proxy.md#notes).
+
 ### Secrets (auto-generated — no manual step)
 
 `openwebui_db_password` and `openwebui_secret_key` are **generated on first run** by

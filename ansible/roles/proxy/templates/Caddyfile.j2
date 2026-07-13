@@ -51,6 +51,34 @@ http://{{ h.domain }} {
     # through to the catch-all reverse_proxy.
 {% for r in h.redirects %}
     handle {{ r.from }} {
+{% if r.skip_if_cookie is defined %}
+        # open-webui's own OIDC callback always finishes by redirecting the
+        # browser back to this exact path (its frontend reads the just-set
+        # session cookie there and completes login client-side) — a blind
+        # redirect here catches that completion request too and bounces it
+        # into a fresh OIDC round-trip forever (confirmed: the app-side log
+        # shows a successful token exchange on every cycle, never landing).
+        # No dedicated Caddy `cookie` matcher exists, so check the raw Cookie
+        # header via regex, anchored on a header boundary so it can't false-
+        # match a differently-named cookie that merely contains this substring.
+        # Nested handle blocks (not a handle + a bare sibling directive) are
+        # required for mutual exclusion here — same guarantee the outer
+        # handle/handle catch-all pair below already relies on.
+        @{{ r.skip_if_cookie }}_present header_regexp Cookie (^|;\s*){{ r.skip_if_cookie }}=
+        handle @{{ r.skip_if_cookie }}_present {
+            reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
+        }
+        handle {
+            # redir's Caddyfile grammar is `redir [<matcher>] <to> [<code>]` —
+            # with exactly two bare args Caddy reads them as <matcher> <to>,
+            # not <to> <code> (confirmed via `caddy adapt`: a 2-arg redir here
+            # silently became a matcher on r.to and a Location header literally
+            # "302"). The `*` forces an unambiguous 3-arg parse; real scoping
+            # already comes from the enclosing handle blocks, so `*` (match
+            # everything that reaches here) is correct, not redundant.
+            redir * {{ r.to }} {{ r.code | default(302) }}
+        }
+{% else %}
         # redir's Caddyfile grammar is `redir [<matcher>] <to> [<code>]` — with
         # exactly two bare args Caddy reads them as <matcher> <to>, not <to>
         # <code> (confirmed via `caddy adapt`: a 2-arg redir here silently
@@ -59,6 +87,7 @@ http://{{ h.domain }} {
         # comes from the enclosing handle block, so `*` (match everything
         # that reaches here) is correct, not redundant.
         redir * {{ r.to }} {{ r.code | default(302) }}
+{% endif %}
     }
 {% endfor %}
     handle {

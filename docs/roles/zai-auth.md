@@ -141,6 +141,14 @@ ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep zai_auth        # DB 
   rights — one account, admin from first login. This account never gets a
   password (`set_unusable_password()`); it only ever authenticates via
   ATProto OAuth, unlike the break-glass `admin` account above.
+- **`/logout` ends this device's zai-auth session only — it's not wired into
+  anything yet.** No logout button, no discovery-doc `end_session_endpoint`,
+  no relying-party integration (a member logging out of Open WebUI doesn't
+  end their zai-auth session — that gap is what motivated adding this route
+  at all: OIDC relying parties ending their own local session leaves zai-auth's
+  session alive, so re-authenticating silently re-issues a token with no
+  prompt). For now it's a plain GET a member (or operator, for testing) hits
+  directly; RP-initiated logout is follow-up work.
 - **The app has no `email` field to add — it's already on `AbstractUser`.**
   Sourcing it (via `transition:email` + `com.atproto.server.getSession`
   against the member's own PDS — DPoP tokens can't be proxied) was the

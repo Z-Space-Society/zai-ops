@@ -5,12 +5,19 @@
 - `callback` (Task 3): validate `state` → DPoP-bound token exchange → upsert the
   member, store tokens server-side, establish the Django session.
 - `landing`: the authenticated page a member lands on.
+- `logout`: ends this device's zai-auth Django session. Local-session-only for
+  now (no upstream ATProto/OIDC RP-initiated logout) — a relying party like
+  Open WebUI ending its own session doesn't end this one, so a member who
+  wants a real logout has to hit this too. Not yet wired into anything (no
+  discovery-doc end_session_endpoint, no logout button) — that's follow-up UI
+  work; this just makes ending the session possible.
 """
 
 import secrets
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth import login as auth_login
+from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseBadRequest
 from django.shortcuts import redirect, render
@@ -157,6 +164,13 @@ def callback(request):
 @login_required
 def landing(request):
     return render(request, "atproto_oauth/landing.html")
+
+
+def logout(request):
+    """End this device's zai-auth Django session. GET-friendly (no CSRF risk
+    beyond forcing a re-login) since it's meant to be hit directly for now."""
+    auth_logout(request)
+    return redirect("atproto_oauth:login")
 
 
 def _upsert_member(*, did, handle, pds_url, email="", email_confirmed=False):

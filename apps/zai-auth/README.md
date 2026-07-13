@@ -47,6 +47,18 @@ createdb zai_auth               # or point DATABASE_URL at an existing DB
 
 All configuration is env-driven; see [`.env.example`](.env.example) for the full
 list. `.env` is git-ignored — **never commit secrets or private keys**.
+`CHAT_URL` (Open WebUI's public origin) drives the nav's "Chat" link — leave it
+blank locally if you have no Open WebUI to point at.
+
+### UI / static assets
+
+The login and account pages share `templates/base.html` (nav + footer chrome)
+and `static/css/base.css` (design tokens, ported from
+[`docs/design_handoff_auth_page/`](../../docs/design_handoff_auth_page/)).
+Fonts (Inter, IBM Plex Mono) are vendored under `static/fonts/` — no
+`fonts.googleapis.com` call at runtime. Run `manage.py collectstatic` before
+serving in production (whitenoise serves the collected output; see
+`ansible/roles/zai-auth`'s task for the deployment step).
 
 ### Tests
 

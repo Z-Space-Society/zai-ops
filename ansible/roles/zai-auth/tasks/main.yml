@@ -197,6 +197,20 @@
   register: zai_auth_pip
   changed_when: "'Audited' not in zai_auth_pip.stderr"
   notify: restart zai-auth
+
+# Static assets (base.css, vendored fonts) are collected into STATIC_ROOT here;
+# whitenoise (installed above) serves them straight out of gunicorn — no
+# separate nginx-for-statics box needed. No DB/secrets required for this
+# command, just a loadable settings module.
+- name: Collect zai-auth's static assets
+  ansible.builtin.command:
+    cmd: "{{ zai_auth_venv }}/bin/python manage.py collectstatic --noinput"
+  args:
+    chdir: "{{ zai_auth_src }}"
+  environment:
+    SECRET_KEY: "{{ zai_auth_secret_key }}"
+  register: zai_auth_collectstatic
+  changed_when: "'0 static files copied' not in zai_auth_collectstatic.stdout"
   notify: restart zai-auth
 
 # --- Secrets: signing keys + env file -----------------------------------------

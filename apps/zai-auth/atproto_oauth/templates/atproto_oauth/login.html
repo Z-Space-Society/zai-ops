@@ -1,22 +1,39 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sign in — ZAI</title>
-</head>
-<body>
-  <main>
-    <h1>Sign in to ZAI</h1>
-    <p>Use your ATProto handle (e.g. <code>alice.bsky.social</code>).</p>
-    {% if error %}<p role="alert">{{ error }}</p>{% endif %}
-    <form method="post" action="{% url 'atproto_oauth:login' %}">
-      {% csrf_token %}
-      <label for="handle">Handle</label>
-      <input id="handle" name="handle" type="text" autocomplete="username"
-             placeholder="alice.bsky.social" required>
-      <button type="submit">Continue</button>
-    </form>
-  </main>
-</body>
-</html>
+{% extends "base.html" %}
+
+{% block title %}Sign in — ZAI{% endblock %}
+
+{% block content %}
+<div class="login-view">
+  <div class="login-box">
+
+    <div class="login-header">
+      <h1>Sign in to the cluster</h1>
+      <p>Authenticate with AtProto to access your account.</p>
+    </div>
+
+    <div class="card">
+      {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+
+      <form method="post" action="{% url 'atproto_oauth:login' %}">
+        {% csrf_token %}
+
+        <div class="field-label-row">
+          <label for="handle">AtProto handle</label>
+          <span class="info-dot" title="Sign in with your Bluesky / AtProto handle, e.g. you.bsky.social">?</span>
+        </div>
+
+        <div class="input-row">
+          <span class="input-row__prefix">@</span>
+          <input id="handle" name="handle" type="text" autocomplete="username"
+                 placeholder="you.bsky.social" required>
+        </div>
+
+        <button type="submit" class="btn-primary">Sign in with AtProto</button>
+      </form>
+
+      <p class="hint-text">Don't have an AtProto account? <a href="https://bsky.app" target="_blank" rel="noopener">Create one on Bluesky</a></p>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

@@ -1,19 +1,19 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Signed in — ZAI</title>
-</head>
-<body>
-  <main>
-    <h1>You're signed in</h1>
-    <p>Welcome, <strong>{{ user.username }}</strong>.</p>
-    <dl>
-      <dt>DID</dt><dd><code>{{ user.did }}</code></dd>
-      <dt>PDS</dt><dd><code>{{ user.pds_url }}</code></dd>
-      <dt>Last seen</dt><dd>{{ user.last_seen }}</dd>
-    </dl>
-  </main>
-</body>
-</html>
+{% extends "base.html" %}
+
+{% block title %}Account — ZAI{% endblock %}
+
+{% block content %}
+<div class="account-view">
+  <h1>Account</h1>
+
+  <div class="account-card">
+    <div class="avatar"></div>
+    <div>
+      <div class="account-meta__handle">{{ user.username }}</div>
+      <div class="account-meta__did">{{ user.did }}</div>
+    </div>
+  </div>
+
+  <a class="btn-outline-danger" href="{% url 'atproto_oauth:logout' %}">Sign out</a>
+</div>
+{% endblock %}

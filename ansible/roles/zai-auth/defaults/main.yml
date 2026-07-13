@@ -82,3 +82,7 @@ zai_auth_allowed_hosts:
 zai_auth_oidc_client_id: open-webui
 zai_auth_oidc_redirect_uris:
   - "https://chat.{{ cluster_domain }}/oauth/oidc/callback"
+
+# Drives the login/account pages' nav "Chat" link — same cluster_domain
+# derivation as zai_auth_url above, just a different subdomain.
+zai_auth_chat_url: "https://chat.{{ cluster_domain }}"

@@ -55,6 +55,11 @@ OIDC_CLIENT_ID = env("OIDC_CLIENT_ID", default="open-webui")
 OIDC_CLIENT_SECRET = env("OIDC_CLIENT_SECRET", default="")
 OIDC_REDIRECT_URIS = env.list("OIDC_REDIRECT_URIS", default=[])
 
+# --- UI ---------------------------------------------------------------------
+# Public origin of the cluster's chat app (Open WebUI). Blank hides the nav's
+# "Chat" link entirely — e.g. local dev with no Open WebUI configured.
+CHAT_URL = env("CHAT_URL", default="")
+
 # --- Applications ---------------------------------------------------------
 
 INSTALLED_APPS = [
@@ -71,6 +76,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -84,13 +90,14 @@ ROOT_URLCONF = "zai_auth.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "zai_auth.context_processors.ui",
             ],
         },
     },
@@ -127,6 +134,16 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+# Source assets (base.css, vendored fonts) live in-repo; STATIC_ROOT is the
+# collectstatic output whitenoise serves from — gitignored, built at deploy
+# time (see ansible/roles/zai-auth's collectstatic task).
+STATICFILES_DIRS = [BASE_DIR / "static"]
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

@@ -45,6 +45,7 @@ entire update story, matching the repo's `bin/` convention (`CLAUDE.md`: pull
 | Probe + install pinned `uv` | `command`, then `get_url`/`unarchive`/`copy` | Install uv reproducibly from the **pinned, checksummed** release tarball (not `curl \| sh`), same idiom as `open-webui`. Skipped when the installed `uv --version` already matches. |
 | Create the venv against the system Python | `command` → `uv venv --python python3` (`creates`) | Debian 13 ships Python 3.13 natively — Django 5.2's ceiling — so unlike `open-webui` there's no managed-interpreter fetch/placement to get right; `uv venv` just wraps the system interpreter. |
 | Install dependencies into the venv | `command` → `uv pip install --python {{ zai_auth_venv }}/bin/python -r {{ zai_auth_src }}/requirements.txt` | The synced `requirements.txt` **is** the version pin — no separate role-level version var to drift. Notifies restart. |
+| Collect static assets | `command` → `manage.py collectstatic --noinput` | Populates `STATIC_ROOT` (whitenoise, installed above, serves it straight out of gunicorn — no separate nginx-for-statics box) with the login/account pages' `base.css` + vendored fonts. No DB/secrets needed, just a loadable settings module. Notifies restart. |
 | Render the two signing keys | `copy` (`content:`, `0640` root:zai-auth, `no_log`) | EC P-256 (atproto DPoP/ES256) + RSA (OIDC id_token/RS256) PEMs from the cached `group_vars` secrets — see Secrets. Group-readable: Django reads these paths itself. Notifies restart. |
 | Render the secret env file | `template` (`0600` root, `no_log`) | `DATABASE_URL`, `SECRET_KEY`, key paths, `PUBLIC_BASE_URL`, `OIDC_CLIENT_ID/SECRET`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`. Read by systemd via `EnvironmentFile`. Notifies restart. |
 | Apply database migrations | `command` → `manage.py migrate --noinput` (`no_log`) | Provision-time, before the daemon ever starts — same principle as litellm's `prisma migrate deploy`. Idempotent (`changed_when` on "No migrations to apply"). Notifies restart. |
@@ -77,6 +78,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/zai-auth/defaults/main.yml)
 | `zai_auth_url` | `https://account.{{ cluster_domain }}` | `PUBLIC_BASE_URL` — anchors the atproto `client_id`, OIDC issuer, and redirect/JWKS URLs. |
 | `zai_auth_oidc_client_id` | `open-webui` | Local default — keep in sync with `open-webui`'s own `openwebui_oidc_client_id`. |
 | `zai_auth_oidc_redirect_uris` | `[https://chat.{{ cluster_domain }}/oauth/oidc/callback]` | Open WebUI's OIDC callback, registered on this side. |
+| `zai_auth_chat_url` | `https://chat.{{ cluster_domain }}` | Drives the login/account pages' nav "Chat" link — same `cluster_domain` derivation as `zai_auth_url`, different subdomain. |
 
 ### Secrets
 
@@ -141,14 +143,14 @@ ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep zai_auth        # DB 
   rights — one account, admin from first login. This account never gets a
   password (`set_unusable_password()`); it only ever authenticates via
   ATProto OAuth, unlike the break-glass `admin` account above.
-- **`/logout` ends this device's zai-auth session only — it's not wired into
-  anything yet.** No logout button, no discovery-doc `end_session_endpoint`,
-  no relying-party integration (a member logging out of Open WebUI doesn't
-  end their zai-auth session — that gap is what motivated adding this route
-  at all: OIDC relying parties ending their own local session leaves zai-auth's
+- **`/logout` ends this device's zai-auth session only.** Now reachable from
+  the Account page's "Sign out" button (a plain GET link — no CSRF risk beyond
+  forcing a re-login), but still no discovery-doc `end_session_endpoint` or
+  relying-party integration (a member logging out of Open WebUI doesn't end
+  their zai-auth session — that gap is what motivated adding this route at
+  all: OIDC relying parties ending their own local session leaves zai-auth's
   session alive, so re-authenticating silently re-issues a token with no
-  prompt). For now it's a plain GET a member (or operator, for testing) hits
-  directly; RP-initiated logout is follow-up work.
+  prompt). RP-initiated logout is still follow-up work.
 - **The app has no `email` field to add — it's already on `AbstractUser`.**
   Sourcing it (via `transition:email` + `com.atproto.server.getSession`
   against the member's own PDS — DPoP tokens can't be proxied) was the

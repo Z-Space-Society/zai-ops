@@ -1,0 +1,51 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ZAI{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/base.css' %}">
+</head>
+<body>
+  <div class="page">
+    <nav class="nav">
+      <a class="nav__brand" href="{% if user.is_authenticated %}{% url 'atproto_oauth:landing' %}{% else %}{% url 'atproto_oauth:login' %}{% endif %}">
+        <svg width="22" height="22" viewBox="0 0 22 22" style="flex-shrink: 0;">
+          <rect x="1" y="2" width="20" height="13" rx="2" fill="oklch(0.62 0.17 255)"></rect>
+          <rect x="8" y="17" width="6" height="2" rx="1" fill="oklch(0.62 0.17 255)"></rect>
+          <rect x="5" y="19" width="12" height="1.5" rx="0.75" fill="oklch(0.62 0.17 255)"></rect>
+        </svg>
+        <span class="nav__brand-text">sharedcomputer<span class="nav__brand-accent">.network</span></span>
+      </a>
+
+      <div class="nav__items">
+        {% if user.is_authenticated and CHAT_URL %}
+          <a class="nav__item" href="{{ CHAT_URL }}">Chat</a>
+        {% endif %}
+
+        <div class="nav__divider"></div>
+
+        {% if user.is_authenticated %}
+          <a class="nav__account" href="{% url 'atproto_oauth:landing' %}">
+            <span class="nav__status-dot is-online"></span>
+            {{ user.username }}
+          </a>
+        {% else %}
+          <a class="nav__account" href="{% url 'atproto_oauth:login' %}">
+            <span class="nav__status-dot"></span>
+            Sign in
+          </a>
+        {% endif %}
+      </div>
+    </nav>
+
+    <main class="main">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+      <span class="footer__copy">&copy; 2026 sharedcomputer.network &middot; by <a href="https://z-space.ca" target="_blank" rel="noopener" class="footer__link">Z-Space</a></span>
+    </footer>
+  </div>
+</body>
+</html>

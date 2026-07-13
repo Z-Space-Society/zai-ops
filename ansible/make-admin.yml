@@ -1,0 +1,63 @@
+---
+# Promote an ATProto handle to zai-auth admin (is_staff + is_superuser),
+# keyed on DID — the zai-make-admin engine.
+#
+#   ansible-playbook make-admin.yml -e "handle=alice.bsky.social"
+#
+# (`zai-make-admin <handle>`, the operator command in bin/, is sugar over
+# this — no logic lives in the wrapper.) All the actual work happens in the
+# app's own `manage.py make_admin`; this playbook just reaches the zai-auth
+# CT and runs it.
+#
+# Unlike set-domain.yml/assign.yml, this targets `hosts: zai-auth` directly
+# (plain SSH, already trusted via CT 100's injected root key, same as the
+# role's own migrate task) rather than localhost — the thing being changed
+# is live app state on that CT, not runtime inventory on the control node.
+#
+# `vars_files` loads the zai-auth role's own defaults/main.yml so this play
+# gets zai_auth_venv/zai_auth_src/zai_auth_database_url without re-running
+# the whole role (which would rsync/pip-install/migrate/restart — overkill
+# for a one-shot admin grant) and without duplicating those constants in a
+# second place where they could drift out of sync.
+
+- name: Promote an ATProto handle to zai-auth admin
+  hosts: zai-auth
+  gather_facts: false
+  vars_files:
+    - roles/zai-auth/defaults/main.yml
+  vars:
+    # Handles are dot-separated domain-like labels, same shape as an FQDN —
+    # reuse set-domain.yml's plausibility check.
+    handle_regex: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+  tasks:
+    - name: Require handle
+      ansible.builtin.assert:
+        that:
+          - handle is defined and (handle | string | length) > 0
+        fail_msg: >-
+          Pass a handle, e.g. -e "handle=alice.bsky.social"
+      run_once: true
+
+    - name: Validate the handle is plausible
+      ansible.builtin.assert:
+        that: handle is match(handle_regex)
+        fail_msg: >-
+          '{{ handle }}' is not a plausible ATProto handle — expected a
+          lowercase dotted handle like 'alice.bsky.social'.
+      run_once: true
+
+    - name: Run make_admin on the zai-auth CT
+      ansible.builtin.command:
+        cmd: "{{ zai_auth_venv }}/bin/python manage.py make_admin {{ handle }}"
+      args:
+        chdir: "{{ zai_auth_src }}"
+      environment:
+        DATABASE_URL: "{{ zai_auth_database_url }}"
+        SECRET_KEY: "{{ zai_auth_secret_key }}"
+      register: zai_auth_make_admin
+      changed_when: "'created' in zai_auth_make_admin.stdout or 'promoted' in zai_auth_make_admin.stdout"
+      no_log: true
+
+    - name: Show the result
+      ansible.builtin.debug:
+        msg: "{{ zai_auth_make_admin.stdout }}"

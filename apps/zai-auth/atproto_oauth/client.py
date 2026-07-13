@@ -11,6 +11,7 @@ import secrets
 import time
 import uuid
 
+import dns.resolver
 import requests
 
 from . import config, dpop
@@ -26,14 +27,8 @@ class OAuthError(Exception):
 
 # --- Identity resolution --------------------------------------------------
 
-def resolve_handle_to_did(handle: str) -> str:
-    """Resolve a handle to a DID (or pass a DID straight through).
-
-    Tries the HTTPS well-known method first, then the public resolver XRPC.
-    """
-    handle = handle.strip().lstrip("@")
-    if handle.startswith("did:"):
-        return handle
+def _resolve_via_well_known(handle: str) -> str | None:
+    """The HTTPS well-known method: GET https://{handle}/.well-known/atproto-did."""
     try:
         r = requests.get(
             f"https://{handle}/.well-known/atproto-did", timeout=TIMEOUT
@@ -42,6 +37,33 @@ def resolve_handle_to_did(handle: str) -> str:
             return r.text.strip()
     except requests.RequestException:
         pass
+    return None
+
+
+def _resolve_via_dns_txt(handle: str) -> str | None:
+    """The DNS TXT method: a `_atproto.{handle}` TXT record of `did=did:...`."""
+    try:
+        answers = dns.resolver.resolve(f"_atproto.{handle}", "TXT", lifetime=TIMEOUT)
+    except dns.exception.DNSException:
+        return None
+    for rdata in answers:
+        txt = b"".join(rdata.strings).decode("utf-8", "replace")
+        if txt.startswith("did="):
+            return txt[len("did="):]
+    return None
+
+
+def resolve_handle_to_did(handle: str) -> str:
+    """Resolve a handle to a DID (or pass a DID straight through).
+
+    Tries the HTTPS well-known method first, then the public resolver XRPC.
+    """
+    handle = handle.strip().lstrip("@")
+    if handle.startswith("did:"):
+        return handle
+    did = _resolve_via_well_known(handle)
+    if did:
+        return did
     try:
         r = requests.get(
             "https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle",
@@ -52,6 +74,19 @@ def resolve_handle_to_did(handle: str) -> str:
         return r.json()["did"]
     except (requests.RequestException, KeyError) as exc:
         raise OAuthError(f"could not resolve handle {handle!r}") from exc
+
+
+def resolve_handle_for_admin(handle: str) -> str:
+    """Resolve a handle to a DID for admin-granting: only the two atproto-spec
+    methods (DNS TXT, then HTTPS well-known) — deliberately no fallback to the
+    third-party public resolver, since granting admin shouldn't trust it."""
+    handle = handle.strip().lstrip("@")
+    did = _resolve_via_dns_txt(handle) or _resolve_via_well_known(handle)
+    if not did:
+        raise OAuthError(
+            f"could not resolve handle {handle!r} via DNS TXT or well-known"
+        )
+    return did
 
 
 def fetch_did_document(did: str) -> dict:

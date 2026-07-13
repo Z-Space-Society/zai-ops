@@ -252,6 +252,24 @@
   no_log: true
   notify: restart zai-auth
 
+- name: Ensure the break-glass local admin exists
+  # Idempotent: only sets the password at creation (never rotates it), but
+  # re-asserts is_staff/is_superuser on every run so this stays a reliable way
+  # in even if something else flipped those flags off — see the command's
+  # own docstring. Never writes ZAI_AUTH_ADMIN_PASSWORD into the persistent
+  # env file; it's a one-shot creation input the running app never needs again.
+  ansible.builtin.command:
+    cmd: "{{ zai_auth_venv }}/bin/python manage.py ensure_admin"
+  args:
+    chdir: "{{ zai_auth_src }}"
+  environment:
+    DATABASE_URL: "{{ zai_auth_database_url }}"
+    SECRET_KEY: "{{ zai_auth_secret_key }}"
+    ZAI_AUTH_ADMIN_PASSWORD: "{{ zai_auth_admin_password }}"
+  register: zai_auth_ensure_admin
+  changed_when: "'unchanged' not in zai_auth_ensure_admin.stdout"
+  no_log: true
+
 - name: Give the zai-auth user ownership of its home (venv + synced source)
   # rsync/pip/migrate ran as root; the daemon runs as zai-auth and needs to
   # read the interpreter, the venv and the app source. Runs AFTER all of that.

@@ -297,6 +297,7 @@ later; the repo bakes in neither.
 | `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the `zai-set-domain` engine) |
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox node name in runtime inventory (the `zai-set-node` engine; `bootstrap.sh` calls it automatically) |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
+| `make-admin.yml`      | zai-auth (SSH) | Promote an ATProto handle to zai-auth admin, keyed on DID (the `zai-make-admin` engine) |
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
 | `inference.yml`       | CT 100 → SSH   | Configure inference nodes (`nvidia_cuda` + `llama_server`) |
 | `add-github-user.yml` | CT 100 (local) + SSH | Create a human admin account from GitHub keys, with sudo, on CT 100 + inference nodes |
@@ -325,6 +326,7 @@ PATH when the control node is configured. The convention:
 | `zai-assign <service> <ctid>` | Bind a service to a CTID in runtime inventory | [`assign.yml`](#playbooks) |
 | `zai-set-domain <domain>` | Record the cluster's public base domain in runtime inventory | [`set-domain.yml`](#playbooks) |
 | `zai-set-node <node>` | Record the Proxmox node name in runtime inventory (bootstrap sets it automatically) | [`set-node.yml`](#playbooks) |
+| `zai-make-admin <handle>` | Promote an ATProto handle to zai-auth admin, keyed on DID | [`make-admin.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
 
@@ -379,6 +381,10 @@ decision record.
   `/root/.vault_pass`, no manual entry. They're part of restored state: a fresh
   CT 100 regenerates different values, so restore `/root/.zai-secrets` before
   re-running Ansible.
+- zai-auth's break-glass local admin password (`zai_auth_admin_password`)
+  follows the same auto-generated, `/root/.zai-secrets`-persisted pattern —
+  it's **DR-critical**: the only way into zai-auth's `/admin/` if ATProto/OIDC
+  login is ever broken. See [`roles/zai-auth.md`](roles/zai-auth.md#secrets).
 
 ---
 

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# zai-make-admin — thin wrapper over make-admin.yml. Promote an ATProto handle
+# to zai-auth admin (is_staff + is_superuser), keyed on DID:
+#
+#   zai-make-admin alice.bsky.social
+#
+# Lives in the repo's bin/ (on PATH via /etc/profile.d/zai-ops.sh) and runs in
+# place — the script you run is always the one in git, no installed copy to drift.
+# No logic lives here; the playbook (which SSHes into the zai-auth CT and runs
+# manage.py make_admin) does the work.
+set -euo pipefail
+if [[ $# -ne 1 ]]; then
+  echo "usage: zai-make-admin <handle> [extra ansible args]" >&2
+  exit 64
+fi
+handle="$1"; shift
+# cd to the ansible dir (sibling of this bin/) so ansible.cfg loads no matter the
+# caller's CWD — it supplies the inventory (relative: inventory/) and the vault
+# password file. Self-locating off this script's path (not hardcoded) so the same
+# script works from any checkout: /opt/zai-ops on the box, a dev tree elsewhere.
+cd "$(dirname "$(readlink -f "$0")")/../ansible"
+exec ansible-playbook make-admin.yml \
+  -e "handle=$handle" "$@"

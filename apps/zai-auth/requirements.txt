@@ -14,4 +14,5 @@ django-environ>=0.11,<0.13  # 12-factor env-driven settings
 PyJWT>=2.9,<3               # JWT sign/verify for DPoP, client assertion, id_token
 cryptography>=43            # EC (P-256) + RSA key handling, backs PyJWT
 requests>=2.32              # HTTP to the PDS / DID resolution
+dnspython>=2.6,<3           # DNS TXT handle resolution (_atproto.<handle>) for make_admin
 gunicorn>=23                # production WSGI server (deployment; not used by runserver)

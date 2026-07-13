@@ -48,6 +48,7 @@ entire update story, matching the repo's `bin/` convention (`CLAUDE.md`: pull
 | Render the two signing keys | `copy` (`content:`, `0640` root:zai-auth, `no_log`) | EC P-256 (atproto DPoP/ES256) + RSA (OIDC id_token/RS256) PEMs from the cached `group_vars` secrets — see Secrets. Group-readable: Django reads these paths itself. Notifies restart. |
 | Render the secret env file | `template` (`0600` root, `no_log`) | `DATABASE_URL`, `SECRET_KEY`, key paths, `PUBLIC_BASE_URL`, `OIDC_CLIENT_ID/SECRET`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`. Read by systemd via `EnvironmentFile`. Notifies restart. |
 | Apply database migrations | `command` → `manage.py migrate --noinput` (`no_log`) | Provision-time, before the daemon ever starts — same principle as litellm's `prisma migrate deploy`. Idempotent (`changed_when` on "No migrations to apply"). Notifies restart. |
+| Ensure the break-glass local admin exists | `command` → `manage.py ensure_admin` (`no_log`) | Idempotently creates a local username/password superuser (`admin`, no ATProto identity) as a way in if OIDC/ATProto login is ever broken. Only sets the password at creation (never rotates it on re-runs); re-asserts `is_staff`/`is_superuser` on every run so provisioning re-runs heal it if those flags ever get flipped off. See [Notes](#notes). |
 | Chown the home to `zai-auth` | `ansible.builtin.file` (`recurse`) | rsync/pip/migrate ran as root; the daemon reads the venv + synced source. Runs *after* install/migrate. |
 | Install the systemd unit | `template` → `/etc/systemd/system/zai-auth.service` | Hardened (`ProtectSystem=strict`, `ReadWritePaths={{ zai_auth_home }}`); `ExecStart` runs gunicorn against `zai_auth.wsgi:application`. Notifies reload + restart. |
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
@@ -79,10 +80,14 @@ Defined in [`defaults/main.yml`](../../ansible/roles/zai-auth/defaults/main.yml)
 
 ### Secrets
 
-`zai_auth_db_password`, `zai_auth_secret_key` and `zai_auth_oidc_client_secret`
-follow the standard `password` lookup pattern in
+`zai_auth_db_password`, `zai_auth_secret_key`, `zai_auth_oidc_client_secret`
+and `zai_auth_admin_password` follow the standard `password` lookup pattern in
 [`group_vars/all/main.yml`](../../ansible/group_vars/all/main.yml) — generated
 on first run, persisted under `/root/.zai-secrets`, stable across rebuilds.
+`zai_auth_admin_password` is the **DR-critical** break-glass admin's password
+(see [Tasks](#tasks) above) — the only way into `/admin/` if ATProto/OIDC
+login is ever broken, so it belongs alongside the two signing keys below on
+any escrow checklist.
 
 The two signing keys (`zai_auth_atproto_ec_key`, `zai_auth_oidc_rsa_key`) are
 the **DR-critical** items — losing `atproto_ec` invalidates the atproto
@@ -125,6 +130,17 @@ ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep zai_auth        # DB 
 
 ## Notes
 
+- **Granting admin to an ATProto member: `zai-make-admin <handle>`.** Promotes
+  a handle to `is_staff`/`is_superuser` keyed on its DID (`manage.py
+  make_admin`, backed by [`make-admin.yml`](../../ansible/make-admin.yml)) —
+  resolves the handle via DNS TXT then HTTPS well-known, verifies against the
+  DID document's `alsoKnownAs`, then `get_or_create`s on `did`. Because
+  `atproto_oauth.views._upsert_member` also keys exclusively on `did` and
+  never touches `is_staff`/`is_superuser`, a member promoted this way (before
+  or after their first login) always lands on the same row and keeps admin
+  rights — one account, admin from first login. This account never gets a
+  password (`set_unusable_password()`); it only ever authenticates via
+  ATProto OAuth, unlike the break-glass `admin` account above.
 - **The app has no `email` field to add — it's already on `AbstractUser`.**
   Sourcing it (via `transition:email` + `com.atproto.server.getSession`
   against the member's own PDS — DPoP tokens can't be proxied) was the

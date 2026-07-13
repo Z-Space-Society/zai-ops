@@ -101,6 +101,14 @@ zai_auth_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ 
 zai_auth_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/zai_auth_secret_key chars=ascii_letters,digits length=64') }}"
 zai_auth_oidc_client_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/zai_auth_oidc_client_secret chars=digits,abcdef length=48') }}"
 
+# Password for the provision-time break-glass local admin (username `admin`,
+# /admin/login/ only — no ATProto identity). DR-critical: it's the only way in
+# if ATProto/OIDC login is ever broken, on par with the two signing keys below.
+# Same generate-once-and-persist posture as every secret above — already rides
+# the existing Tier-1 control-node backup of /root/.zai-secrets, no separate
+# escrow path needed.
+zai_auth_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/zai_auth_admin_password chars=ascii_letters,digits length=32') }}"
+
 # zai-auth's two OAuth/OIDC signing keys (PKCS8 PEM) — the DR-critical items:
 # losing ATPROTO_EC invalidates the atproto client_id's identity (every member
 # re-consents), losing OIDC_RSA invalidates every id_token/session in flight.

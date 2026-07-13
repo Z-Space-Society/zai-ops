@@ -189,6 +189,7 @@ architecture, networking, and a note for every role.
   - `site.yml` — configures the control node (CT 100)
   - `verify-proxmox.yml` — checks the API token authenticates
   - `provision.yml` — creates the service containers over the API, then configures them
+  - `make-admin.yml` — promotes an ATProto handle to zai-auth admin, keyed on DID (`zai-make-admin`)
   - `enroll-inference-node.yml` — records a bare-metal inference node in the runtime inventory
   - `inference.yml` — configures inference nodes (NVIDIA/CUDA + llama-server)
   - `add-github-user.yml` — creates a human admin account from GitHub keys (CT 100 + inference nodes)

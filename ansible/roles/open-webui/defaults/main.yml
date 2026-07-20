@@ -87,7 +87,21 @@ openwebui_database_url: "postgresql://{{ openwebui_db_user }}:{{ openwebui_db_pa
 # Keep openwebui_litellm_port in sync with litellm_port if that's ever changed.
 openwebui_litellm_port: 4000
 openwebui_openai_base_url: "http://{{ hostvars['litellm'].ansible_host }}:{{ openwebui_litellm_port }}/v1"
-openwebui_openai_api_key: "{{ litellm_master_key }}"
+
+# F1 fix: a scoped, non-admin virtual key — NEVER the master key. The litellm
+# role mints this once (generate-once-reuse guarded) and persists it under
+# _zai_secrets_dir; this is a plain file read, not a password/pipe lookup,
+# because the secret can only be produced by calling litellm's live API (see
+# ansible/roles/litellm/tasks/main.yml). That makes it the first generated
+# secret in this repo with a real ordering dependency: this play will fail
+# here if litellm's play has never successfully minted the key.
+openwebui_openai_api_key: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/openwebui_litellm_key') }}"
+
+# Forwards each logged-in member's id/email/name to litellm as headers, so
+# spend/usage is attributed to the real person (a litellm "End User" record,
+# auto-created) even though every request rides the one shared key above.
+# No per-member secret is ever minted for chat — see docs/roles/litellm.md.
+openwebui_forward_user_info_headers: true
 
 # RAG embeddings are routed through litellm too (engine=openai), not OpenWebUI's
 # built-in local sentence-transformers model — so there's no multi-GB model download

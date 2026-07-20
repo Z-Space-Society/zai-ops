@@ -68,6 +68,8 @@ source build) so the lean proxy CT never grows a C++ toolchain; the GGUF is smal
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config *before* the smoke test. By now the client is generated and the schema migrated, so startup connects to a ready DB. |
 | Wait for the port + health check | `wait_for` (`127.0.0.1:4000`) + `uri` (`/health/liveliness`) | Liveness proves the app booted and reached the migrated DB — not merely that the port is open. |
+| Mint the Open WebUI virtual key | `stat` + `uri` (POST `/key/generate`) + `copy`, all `delegate_to: localhost` | **F1 fix.** Open WebUI must never hold the master key. `/key/generate` returns a NEW key every call, so this is generate-once guarded: `stat` the control node's secrets file first, only call the API and persist a result when it's absent. `uri` (not a shelled-out `curl`) keeps the master key off argv. `models: []` grants full model access without admin scope. |
+| Render the `zai-litellm-key` admin env | `file` + `copy`, `delegate_to: localhost` | Writes `/etc/zai-litellm/admin.env` (`0600`) on the control node — `LITELLM_API_BASE` + `LITELLM_MASTER_KEY`, the bits [`bin/zai-litellm-key`](../../bin/zai-litellm-key) can't carry in git. Same idiom as the backup role's `/etc/zai-backup/restic.env`. Re-rendered every run (not generate-once — it's just the current master key + address, not a secret with its own lifecycle). |
 | *(floor embedder)* Wait + embedding smoke test | `wait_for` + `uri` (POST `/v1/embeddings`) | Runs after the flush (so a changed unit is restarted). A returned vector proves the server booted in embeddings mode and the model loaded. |
 
 ### Handlers
@@ -124,6 +126,39 @@ ssh root@10.1.1.<ctid> 'grep MASTER_KEY /etc/litellm/litellm.env'
 
 The admin UI login is username `admin`, password = that full `sk-…` master key.
 
+### Two key-management paths, kept deliberately separate
+
+The master key above should only ever be used by CT 100 (Ansible + the
+`zai-litellm-key` CLI) and the admin UI. Everything else gets one of two
+narrower things, matching how each consumer actually authenticates:
+
+- **Open WebUI (chat)** gets one scoped, non-admin **virtual key**
+  (`openwebui_litellm_key`, minted by the task above and persisted at
+  `/root/.zai-secrets/openwebui_litellm_key`) — not the master key, and not
+  one key per human, because Open WebUI has no way to swap its outbound key
+  per logged-in user (`OPENAI_API_KEY` is one app-wide env var). Per-member
+  visibility instead comes from `ENABLE_FORWARD_USER_INFO_HEADERS=true` (set
+  by the [`open-webui`](open-webui.md) role): Open WebUI forwards each
+  member's id/email/name as headers, and litellm auto-creates a "End User"
+  record from them, so spend can be attributed and (later) budgeted/blocked
+  per person — with no secret ever minted or handed to a member.
+- **Raw API access** (scripts, IDE plugins, curl — anything outside Open
+  WebUI with no session to attach an identity to) gets a real per-person
+  **virtual key**, because there's no other way to authenticate it. Minted
+  with [`bin/zai-litellm-key`](../../bin/zai-litellm-key) (`create <name>`),
+  which reads `/etc/zai-litellm/admin.env` (rendered by this role) to talk to
+  litellm's `/key/*` API directly — LiteLLM's own REST API is the actual
+  interface here; the CLI (and, later, an admin web UI) are just callers of
+  it. Every key gets the same flat budget/model defaults for now (see the
+  config block at the top of the script); revoking one member's key never
+  touches anyone else's.
+
+**`/key/generate` returns a brand-new key on every call** — there is no
+"generate if absent" behavior on litellm's side, so any code that mints a key
+must guard reuse itself (as the Ansible task above does for
+`openwebui_litellm_key`) or accept that repeat calls mint distinct keys (as
+`zai-litellm-key create` deliberately does — see its own header comment).
+
 ## Dependencies
 
 - **[`postgres`](postgres.md)** must be provisioned first — this role connects to
@@ -152,10 +187,32 @@ ssh root@10.1.1.<ctid> 'curl -fs http://127.0.0.1:4000/v1/embeddings \
   -d "{\"model\":\"nomic-embed-text\",\"input\":\"search_query: hello\"}" | head -c 120'
 # Catch the glibc gotcha early — the Ubuntu binary must resolve on Debian 13:
 ssh root@10.1.1.<ctid> 'ldd /opt/llama-embed/dist/llama-server | grep -i "not found" || echo OK'
+
+# Open WebUI's virtual key exists and is NOT the master key (F1):
+diff <(cat /root/.zai-secrets/openwebui_litellm_key) <(cat /root/.zai-secrets/litellm_master_key) \
+  && echo "BAD: same as master key" || echo "OK: distinct key"
+# It's non-admin — an admin-only call with it should be rejected:
+ssh root@10.1.1.<ctid> "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4000/key/generate \
+  -X POST -H \"Authorization: Bearer $(cat /root/.zai-secrets/openwebui_litellm_key)\" \
+  -H 'Content-Type: application/json' -d '{}'"   # expect 403, not 200
+
+# zai-litellm-key's admin env is present and usable from CT 100:
+zai-litellm-key list
 ```
 
 ## Notes
 
+- **`openwebui_litellm_key` is the first generated secret in this repo that
+  isn't a pure lookup.** Every other secret (`litellm_master_key`,
+  `openwebui_secret_key`, etc.) is a `password`/`pipe` lookup — no network
+  call, resolvable in any play order. This one can only be produced by
+  calling this role's own live `/key/generate` endpoint, so
+  [`open-webui`](open-webui.md)'s play will now hard-fail at *provisioning*
+  time (not just at chat runtime) if this role's play has never successfully
+  minted it. That's intentional (fail loud beats silently deploying a
+  master-key fallback), but it's a new class of ordering dependency — a full
+  `provision.yml` run satisfies it (litellm before open-webui), but there is
+  no path to provisioning open-webui before litellm has run at least once.
 - **`DATABASE_URL` is required even with `STORE_MODEL_IN_DB=true`** — the model
   store *is* that database; a missing/invalid DSN fails the provision-time
   `prisma migrate deploy`.

@@ -38,9 +38,10 @@ keep_daily=7
 keep_weekly=4
 keep_monthly=6
 # Tier 2: stream a cluster-wide pg_dumpall from the postgres CT into the same
-# repo (tag zai-postgres). Flip to true once the postgres CT is provisioned and
-# backup.yml has written ZAI_POSTGRES_HOST into the env. No playbook re-run needed.
-postgres_enabled=false
+# repo (tag zai-postgres). Postgres now holds unreproducible state (LiteLLM's
+# virtual keys/spend, Open WebUI users/chats), so this is no longer optional —
+# see F3 in Fable Security Review 2.
+postgres_enabled=true
 # ----------------------------------------------------------------------------
 
 run_backup() {

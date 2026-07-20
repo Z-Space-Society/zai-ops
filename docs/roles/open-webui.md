@@ -19,8 +19,13 @@ the CT itself holds nothing unreproducible.
 
 **One backend, the litellm gateway.** Open WebUI is pointed at the
 [`litellm`](litellm.md) CT as its OpenAI-compatible upstream
-(`OPENAI_API_BASE_URL → http://litellm:4000/v1`, key = litellm's master key); Ollama
-probing is off. **RAG embeddings route through the same gateway**
+(`OPENAI_API_BASE_URL → http://litellm:4000/v1`, key = a scoped, non-admin
+litellm virtual key — **never the master key**, see litellm's
+[key-management notes](litellm.md#two-key-management-paths-kept-deliberately-separate));
+Ollama probing is off. Every member's request also carries their id/email/name
+as forwarded headers (`ENABLE_FORWARD_USER_INFO_HEADERS=true`), so litellm can
+attribute spend per person even though everyone shares this one key. **RAG
+embeddings route through the same gateway**
 (`RAG_EMBEDDING_ENGINE=openai`, model `nomic-embed-text`) rather than Open WebUI's
 built-in local sentence-transformers model — so there's no multi-GB model download
 and embeddings track litellm's availability (litellm serves an always-on CPU floor
@@ -88,6 +93,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/open-webui/defaults/main.ym
 | `openwebui_rag_embedding_model` | `nomic-embed-text` | The embedding model litellm serves; keep in sync with `litellm_embedding_model_name`. |
 | `openwebui_oidc_client_id` | `open-webui` | Local default (not read from the `zai-auth` role's vars); keep in sync with `zai_auth_oidc_client_id`. |
 | `openwebui_oidc_provider_url` | `https://account.{{ cluster_domain }}/.well-known/openid-configuration` | zai-auth's OIDC discovery document. |
+| `openwebui_forward_user_info_headers` | `true` | Forwards each member's id/email/name to litellm as headers, so spend is attributed per person under the one shared key. See [`litellm`](litellm.md#two-key-management-paths-kept-deliberately-separate). |
 
 ### OIDC login: zai-auth is the only way in
 
@@ -150,15 +156,26 @@ stay stable across rebuilds. `WEBUI_SECRET_KEY` is set explicitly so existing lo
 survive a rebuild — unset, Open WebUI would write a random key into `DATA_DIR` that a
 fresh CT would regenerate.
 
+`openwebui_openai_api_key` is different from the two above: it's not a
+`password` lookup, it's a plain file read
+(`{{ _zai_secrets_dir }}/openwebui_litellm_key`) of a scoped virtual key that
+only the [`litellm`](litellm.md) role can produce (its own play calls
+litellm's live `/key/generate` API — see that role's "Two key-management
+paths" section). That makes it the one secret this role consumes but doesn't
+generate, and the source of the hard provisioning dependency below.
+
 ## Dependencies
 
 - **[`postgres`](postgres.md)** must be provisioned first — this role connects to the
   postgres CT (`delegate_to: postgres`) to create its role+database. A full
   [`provision.yml`](../../ansible/provision.yml) run guarantees the order; a
   `--limit open-webui` run still needs postgres already up.
-- **[`litellm`](litellm.md)** is the chat + embedding backend at runtime. It doesn't
-  block provisioning (the `/health` check doesn't call the model), but chat and RAG
-  won't work until litellm is reachable and serving the `nomic-embed-text` embedder.
+- **[`litellm`](litellm.md)** must be provisioned first too, and not just for chat to
+  work at runtime — `openwebui_openai_api_key` is a file lookup against a secret only
+  litellm's play produces (see above), so **this role's own provisioning now fails**
+  (missing-file error) if litellm has never successfully run. A full `provision.yml`
+  run guarantees the order (litellm before open-webui); a `--limit open-webui` run
+  needs litellm already provisioned at least once, not merely reachable.
 - **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts`
   (`chat.{{ cluster_domain }}`); set the domain once with `zai-set-domain`.
 

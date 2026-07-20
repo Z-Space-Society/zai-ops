@@ -340,6 +340,74 @@
   retries: 10
   delay: 3
 
+# --- Scoped virtual key for Open WebUI (fixes F1: OpenWebUI must never hold
+# the master/admin key) ------------------------------------------------------
+# /key/generate returns a NEW key on every call, so this is guarded
+# generate-once by checking the control node's secrets file first — same
+# idiom as happyview_token_encryption_key in group_vars/all/main.yml. Runs
+# after the health check so the daemon is confirmed live before we call its
+# API. The uri module (not a shelled-out curl) keeps the master key out of
+# argv — same fix class as the bootstrap.sh Issue 4 already closed.
+
+- name: Check whether the Open WebUI virtual key already exists
+  ansible.builtin.stat:
+    path: "{{ _zai_secrets_dir }}/openwebui_litellm_key"
+  delegate_to: localhost
+  register: openwebui_key_stat
+
+- name: Generate a scoped virtual key for Open WebUI
+  # Non-admin by default (virtual keys can't call key/model-management
+  # endpoints); models: [] grants full model access without admin scope.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ litellm_port }}/key/generate"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ litellm_master_key }}"
+    body_format: json
+    body:
+      key_alias: open-webui
+      models: []
+    status_code: 200
+  register: openwebui_key_gen
+  when: not openwebui_key_stat.stat.exists
+  no_log: true
+
+- name: Persist the Open WebUI virtual key
+  ansible.builtin.copy:
+    content: "{{ openwebui_key_gen.json.key }}"
+    dest: "{{ _zai_secrets_dir }}/openwebui_litellm_key"
+    mode: "0600"
+  delegate_to: localhost
+  when: not openwebui_key_stat.stat.exists
+  no_log: true
+
+# --- Admin-facing env for the zai-litellm-key operator CLI ------------------
+# Mirrors the backup role's /etc/zai-backup/restic.env: the role renders only
+# the secret/host-specific bits an in-git script (bin/zai-litellm-key) can't
+# carry. Unlike the secrets above this isn't generate-once state — it's just
+# the current master key + address, safe to re-render every run.
+
+- name: Ensure the zai-litellm-key admin config directory exists
+  ansible.builtin.file:
+    path: /etc/zai-litellm
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  delegate_to: localhost
+
+- name: Render the zai-litellm-key admin env file
+  ansible.builtin.copy:
+    content: |
+      LITELLM_API_BASE=http://{{ hostvars['litellm'].ansible_host }}:{{ litellm_port }}
+      LITELLM_MASTER_KEY={{ litellm_master_key }}
+    dest: /etc/zai-litellm/admin.env
+    owner: root
+    group: root
+    mode: "0600"
+  delegate_to: localhost
+  no_log: true
+
 # --- Floor embedder smoke test ----------------------------------------------
 # Runs after the flush above, so a changed llama-embed unit is already restarted.
 # Loading the GGUF on CPU takes a few seconds, hence the wait + retries.

@@ -329,6 +329,9 @@ PATH when the control node is configured. The convention:
 | `zai-make-admin <handle>` | Promote an ATProto handle to zai-auth admin, keyed on DID | [`make-admin.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
+| `zai-litellm-key create <name>` | Mint a per-person raw-API LiteLLM virtual key, printed once | litellm `/key/generate` |
+| `zai-litellm-key list` | List virtual keys by alias/spend/budget/status | litellm `/key/list` |
+| `zai-litellm-key revoke <name>` | Delete a virtual key by its alias | litellm `/key/delete` |
 
 Deployed *service* tooling (the `garage` binary, `garage-init.sh`) is a different
 category — it lives on its service CT, not the control node, and isn't an operator
@@ -385,6 +388,17 @@ decision record.
   follows the same auto-generated, `/root/.zai-secrets`-persisted pattern —
   it's **DR-critical**: the only way into zai-auth's `/admin/` if ATProto/OIDC
   login is ever broken. See [`roles/zai-auth.md`](roles/zai-auth.md#secrets).
+- Open WebUI's scoped LiteLLM key (`openwebui_litellm_key`, the F1 fix) is
+  persisted the same way, at `/root/.zai-secrets/openwebui_litellm_key` — but
+  unlike every secret above, it isn't a `password`/`pipe` lookup: it can only
+  be produced by calling litellm's live `/key/generate` API, so it's minted
+  by an Ansible task, not a Jinja lookup. See
+  [`roles/litellm.md`](roles/litellm.md#two-key-management-paths-kept-deliberately-separate).
+- CT 100 also holds `/etc/zai-litellm/admin.env` (`0600`, rendered by the
+  `litellm` role) — the LiteLLM master key + API base that
+  [`zai-litellm-key`](#operator-commands) uses to mint/list/revoke per-person
+  raw-API keys. Same plaintext-on-CT-100 posture as everything else here; not
+  generate-once state, just re-rendered every run.
 
 ---
 
@@ -414,9 +428,14 @@ it (also what the timer fires), and any restic subcommand (`zai-backup snapshots
 is an implementation detail; operators never invoke it directly.
 
 **Tiers.** Tier 1 (control-node state) is live today. Tier 2 pulls service-CT
-state into the same repo, enabled with a flag once its CT is up: **Postgres**
-(a cluster-wide `pg_dumpall` streamed over SSH straight into the repo, tag
-`zai-postgres`) with `postgres_enabled=true` in [`bin/zai-backup`](../bin/zai-backup).
+state into the same repo: **Postgres** (a cluster-wide `pg_dumpall` streamed
+over SSH straight into the repo, tag `zai-postgres`) is **on** —
+`postgres_enabled=true` in [`bin/zai-backup`](../bin/zai-backup) — since
+Postgres now holds unreproducible state with no other backup path: LiteLLM's
+virtual keys/spend (`litellm`'s `STORE_MODEL_IN_DB`, including the per-person
+raw-API keys `zai-litellm-key` mints) and Open WebUI's users/chats. Losing
+the postgres CT without this tier means losing every issued API key and every
+member's chat history, not just config.
 The proxy CT needs no Tier-2 backup — its routes are in git and its cert in the
 vault, so it holds no runtime state. See [`backup`](roles/backup.md).
 
@@ -543,6 +562,31 @@ Lessons on the **`litellm` CT floor embedder** (the always-on CPU embedding mode
   through verbatim, so the *client* (a future OpenWebUI RAG pipeline) must prepend
   them. Noted so mediocre retrieval isn't re-debugged as a model fault. nomic's full
   8192 context also needs the unit's yarn rope flags (llama.cpp defaults to 2048).
+
+Lessons on **LiteLLM virtual-key management** (F1 fix — Open WebUI's key,
+`bin/zai-litellm-key`):
+
+- **`/key/generate` returns a brand-new key on every call — there's no
+  "generate if absent" on litellm's side.** Any Ansible task that mints a key
+  must guard reuse itself, the same shape as the `happyview_token_encryption_key`
+  idiom in `group_vars/all/main.yml`: check whether the secret file already
+  exists on the control node first, and only call the API when it's absent.
+  The [`litellm`](roles/litellm.md) role does this for
+  `openwebui_litellm_key`. `bin/zai-litellm-key create` deliberately does
+  **not** do this — an operator minting a named key expects a new key each
+  time, so repeat calls mint distinct keys by design (see the script's header
+  comment).
+- **A generated secret that requires a live API call, not a pure lookup, makes
+  the consuming role's *provisioning* fail if the producing role hasn't run
+  yet.** Every other generated secret in this repo (`litellm_master_key`,
+  `openwebui_secret_key`, …) is a `password`/`pipe` lookup — resolvable in any
+  play order, no network dependency. `openwebui_litellm_key` breaks that
+  pattern: it can only be produced by calling litellm's own `/key/generate`
+  endpoint, so [`open-webui`](roles/open-webui.md)'s play now hard-fails
+  (missing-file error) if litellm's play has never successfully minted it —
+  previously litellm being down only broke chat at *runtime*. A full
+  `provision.yml` run satisfies the order; there's no path to provisioning
+  open-webui before litellm has run at least once.
 
 Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
 `ENABLE_SIGNUP`, and others):

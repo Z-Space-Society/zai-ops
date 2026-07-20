@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# zai-litellm-key — mint, list, and revoke per-person LiteLLM virtual keys for
+# raw API access (scripts, IDE plugins, curl). Distinct from Open WebUI's
+# chat access, which uses one scoped app key + per-member attribution instead
+# of a key per person — see docs/roles/litellm.md for why the two are split.
+#
+#   zai-litellm-key create <name>   mint a new key, print it ONCE (not stored)
+#   zai-litellm-key list            list keys by alias/spend/budget/status
+#   zai-litellm-key revoke <name>   delete a key by its alias
+#
+# Every key gets the same flat defaults below (v1: no per-key overrides).
+# LiteLLM's REST API is the actual interface here; this is a thin client over
+# it so a future admin web UI can call the same endpoints without anything
+# here needing to change.
+#
+# Unlike the rest of bin/, this is NOT a wrapper over an idempotent Ansible
+# task: LiteLLM has no "generate-once" concept, so `create` run twice mints
+# two distinct keys. That's correct for an operator minting a key on purpose,
+# but it's a different reliability contract than zai-backup/zai-assign — there
+# is no re-run safety here by design.
+set -euo pipefail
+
+# Secrets + host-specific values: LITELLM_API_BASE, LITELLM_MASTER_KEY.
+# Root-only (0600), rendered by the litellm role — see ansible/roles/litellm/.
+source /etc/zai-litellm/admin.env
+
+# --- config (in git — edit here, live on `git pull`) ------------------------
+default_max_budget="20"          # USD; litellm blocks the key once spent
+default_budget_duration="30d"
+# ----------------------------------------------------------------------------
+
+# The master key rides curl's argv (visible briefly via `ps` on this box) the
+# same way every operator tool here does its own API calls — acceptable
+# because CT 100 root is already the trust boundary the whole secrets model
+# is built on (see docs/README.md "Secrets & trust model").
+api() {
+  local method="$1" path="$2" body="${3:-}"
+  local args=(-sf -X "$method" "${LITELLM_API_BASE}${path}"
+    -H "Authorization: Bearer ${LITELLM_MASTER_KEY}"
+    -H "Content-Type: application/json")
+  [[ -n "$body" ]] && args+=(-d "$body")
+  curl "${args[@]}"
+}
+
+create_key() {
+  local name="$1" body resp key
+  body=$(jq -nc --arg alias "$name" --arg budget "$default_max_budget" \
+    --arg duration "$default_budget_duration" \
+    '{key_alias: $alias, models: [], max_budget: ($budget | tonumber), budget_duration: $duration}')
+  resp=$(api POST /key/generate "$body")
+  key=$(jq -r '.key' <<<"$resp")
+  echo "zai-litellm-key: created '$name' — this key is shown ONCE, record it now:"
+  echo "$key"
+}
+
+list_keys() {
+  api GET /key/list | jq -r '
+    (.keys // .)[] |
+    "\(.key_alias // "-")\tspend=\(.spend // 0)\tbudget=\(.max_budget // "unlimited")\tblocked=\(.blocked // false)"'
+}
+
+revoke_key() {
+  local name="$1"
+  api POST /key/delete "$(jq -nc --arg alias "$name" '{key_aliases: [$alias]}')" >/dev/null
+  echo "zai-litellm-key: revoked '$name'"
+}
+
+case "${1:-}" in
+  create)
+    [[ $# -eq 2 ]] || { echo "usage: zai-litellm-key create <name>" >&2; exit 64; }
+    create_key "$2"
+    ;;
+  list)
+    list_keys
+    ;;
+  revoke)
+    [[ $# -eq 2 ]] || { echo "usage: zai-litellm-key revoke <name>" >&2; exit 64; }
+    revoke_key "$2"
+    ;;
+  *)
+    echo "usage: zai-litellm-key {create <name>|list|revoke <name>}" >&2
+    exit 64
+    ;;
+esac

@@ -54,8 +54,10 @@ create_key() {
 }
 
 list_keys() {
-  api GET /key/list | jq -r '
-    (.keys // .)[] |
+  # Bare /key/list returns just hashed key tokens, not alias/spend/budget —
+  # return_full_object=true is what gets the fields we actually want.
+  api GET "/key/list?return_full_object=true" | jq -r '
+    .keys[] |
     "\(.key_alias // "-")\tspend=\(.spend // 0)\tbudget=\(.max_budget // "unlimited")\tblocked=\(.blocked // false)"'
 }
 

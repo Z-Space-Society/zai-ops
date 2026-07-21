@@ -188,13 +188,22 @@ ssh root@10.1.1.<ctid> 'curl -fs http://127.0.0.1:4000/v1/embeddings \
 # Catch the glibc gotcha early — the Ubuntu binary must resolve on Debian 13:
 ssh root@10.1.1.<ctid> 'ldd /opt/llama-embed/dist/llama-server | grep -i "not found" || echo OK'
 
+# Run these from CT 100 (ansible-control), not the litellm CT — the secrets
+# file lives on CT 100, and the litellm CT has no curl (its own health checks
+# use Ansible's Python uri module instead). CT 100 already routes to the
+# litellm CT's real address, no ssh needed.
+
 # Open WebUI's virtual key exists and is NOT the master key (F1):
 diff <(cat /root/.zai-secrets/openwebui_litellm_key) <(cat /root/.zai-secrets/litellm_master_key) \
   && echo "BAD: same as master key" || echo "OK: distinct key"
-# It's non-admin — an admin-only call with it should be rejected:
-ssh root@10.1.1.<ctid> "curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4000/key/generate \
-  -X POST -H \"Authorization: Bearer $(cat /root/.zai-secrets/openwebui_litellm_key)\" \
-  -H 'Content-Type: application/json' -d '{}'"   # expect 403, not 200
+# It works for normal (non-admin) calls...
+curl -s -o /dev/null -w '%{http_code}\n' http://10.1.1.<ctid>:4000/v1/models \
+  -H "Authorization: Bearer $(cat /root/.zai-secrets/openwebui_litellm_key)"   # expect 200
+# ...but is rejected for admin-only actions. LiteLLM returns 401 (not 403) for
+# "authenticated but not permitted" here — expect 401, not 200:
+curl -s -o /dev/null -w '%{http_code}\n' http://10.1.1.<ctid>:4000/key/generate \
+  -X POST -H "Authorization: Bearer $(cat /root/.zai-secrets/openwebui_litellm_key)" \
+  -H 'Content-Type: application/json' -d '{}'
 
 # zai-litellm-key's admin env is present and usable from CT 100:
 zai-litellm-key list

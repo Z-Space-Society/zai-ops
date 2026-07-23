@@ -1,10 +1,10 @@
-# 02-spec-service-ctid-assignment.md
+# 0003-spec-service-ctid-assignment.md
 
 > Status: **Implemented** (as-built record, committed `e41548e` 2026-06-22).
 > Supersedes: the CTID-as-variable / `reserved_ctids` portion of
 > [Fable Security Review](../../../README.md) Issue 2.
 > Out of scope: Postgres placement (its own decision — ADR-003, unwritten).
-> Validation: [`02-validation-service-ctid-assignment.md`](02-validation-service-ctid-assignment.md).
+> Validation: [`0003-validation-service-ctid-assignment.md`](0003-validation-service-ctid-assignment.md).
 
 This is the as-built spec: the original proposal lightly reconciled to what
 actually shipped. Where the implementation diverged from the proposal, the
@@ -206,7 +206,7 @@ So `zai-assign nginx 104` and `zai-assign nginx 105 -e reassign=true` both work.
 7. With `reserved_ctids: [100,101,102,103,104]` set, no assign or provision run can
    target yvette's live containers.
 
-See [`02-validation-service-ctid-assignment.md`](02-validation-service-ctid-assignment.md)
+See [`0003-validation-service-ctid-assignment.md`](0003-validation-service-ctid-assignment.md)
 for the evidence matrix.
 
 ## Security / safety considerations

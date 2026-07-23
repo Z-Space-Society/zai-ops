@@ -1,7 +1,7 @@
 # Proof Artifacts — Task 3.0: ATProto OAuth login flow (handle → session)
 
-Spec: [`01-spec-atproto-login.md`](../01-spec-atproto-login.md) · Task:
-[`01-tasks-atproto-login.md`](../01-tasks-atproto-login.md) §3.0
+Spec: [`0002-spec-atproto-login.md`](../0002-spec-atproto-login.md) · Task:
+[`0002-tasks-atproto-login.md`](../0002-tasks-atproto-login.md) §3.0
 
 > **Library decision (spec Open Question #1):** implemented directly on
 > `requests` + `PyJWT` rather than a turnkey OAuth library — atproto's DID/PDS

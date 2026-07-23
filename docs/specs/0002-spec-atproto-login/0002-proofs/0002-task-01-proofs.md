@@ -1,7 +1,7 @@
 # Proof Artifacts — Task 1.0: Project skeleton + DID-keyed identity model
 
-Spec: [`01-spec-atproto-login.md`](../01-spec-atproto-login.md) · Task:
-[`01-tasks-atproto-login.md`](../01-tasks-atproto-login.md) §1.0
+Spec: [`0002-spec-atproto-login.md`](../0002-spec-atproto-login.md) · Task:
+[`0002-tasks-atproto-login.md`](../0002-tasks-atproto-login.md) §1.0
 
 Environment: Python 3.13.14, Django 5.2.15, Postgres (local, `:5432`),
 `DATABASE_URL=postgres://localhost:5432/zai_auth`.

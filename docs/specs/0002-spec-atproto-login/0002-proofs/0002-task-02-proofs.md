@@ -1,7 +1,7 @@
 # Proof Artifacts — Task 2.0: Signing key + published client metadata & JWKS
 
-Spec: [`01-spec-atproto-login.md`](../01-spec-atproto-login.md) · Task:
-[`01-tasks-atproto-login.md`](../01-tasks-atproto-login.md) §2.0
+Spec: [`0002-spec-atproto-login.md`](../0002-spec-atproto-login.md) · Task:
+[`0002-tasks-atproto-login.md`](../0002-tasks-atproto-login.md) §2.0
 
 > **Design note (documented deviation):** atproto *mandates ES256 (EC P-256)* for
 > DPoP + the `private_key_jwt` client assertion, while the OIDC `id_token` uses

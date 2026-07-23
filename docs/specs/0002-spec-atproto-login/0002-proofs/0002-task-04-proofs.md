@@ -1,7 +1,7 @@
 # Proof Artifacts — Task 4.0: OIDC provider endpoint (id_token for Open WebUI)
 
-Spec: [`01-spec-atproto-login.md`](../01-spec-atproto-login.md) · Task:
-[`01-tasks-atproto-login.md`](../01-tasks-atproto-login.md) §4.0
+Spec: [`0002-spec-atproto-login.md`](../0002-spec-atproto-login.md) · Task:
+[`0002-tasks-atproto-login.md`](../0002-tasks-atproto-login.md) §4.0
 
 ## CLI Output — OIDC discovery document (`runserver`)
 

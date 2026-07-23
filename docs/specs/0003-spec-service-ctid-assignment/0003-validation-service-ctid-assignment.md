@@ -1,6 +1,6 @@
-# Validation Report — Spec 02: Service CTID Assignment
+# Validation Report — Spec 0003: Service CTID Assignment
 
-Spec: [`02-spec-service-ctid-assignment.md`](02-spec-service-ctid-assignment.md) ·
+Spec: [`0003-spec-service-ctid-assignment.md`](0003-spec-service-ctid-assignment.md) ·
 Commit: `e41548e` (2026-06-22) · Supersedes Fable Security Review Issue 2 (CTID
 portion).
 

@@ -16,7 +16,7 @@ Two candidates were researched in depth:
 - **zai-auth** (`apps/zai-auth/`) — a from-scratch Django app in this repo:
   hand-rolled ATProto OAuth client (PAR/PKCE/DPoP/`private_key_jwt`) plus an
   OIDC provider minting `id_token`s. Code-complete against its spec
-  ([`docs/specs/01-spec-atproto-login/`](../specs/01-spec-atproto-login/)) —
+  ([`docs/specs/0002-spec-atproto-login/`](../specs/0002-spec-atproto-login/)) —
   DID-keyed `User` model, full login flow, 38 tests passing as of the spec's
   validation.
 - **AIP** (`github.com/graze-social/aip`) — Graze Social's maintained Rust
@@ -108,7 +108,7 @@ Negative / tradeoffs:
 
 ## References
 
-- [`docs/specs/01-spec-atproto-login/`](../specs/01-spec-atproto-login/) — the
+- [`docs/specs/0002-spec-atproto-login/`](../specs/0002-spec-atproto-login/) — the
   zai-auth spec and its proof artifacts.
 - [`docs/roles/zai-auth.md`](../roles/zai-auth.md) — the deployment role this
   decision unblocks.

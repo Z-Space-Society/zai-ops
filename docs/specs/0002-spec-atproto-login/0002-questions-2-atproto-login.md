@@ -1,4 +1,4 @@
-# 01 Questions Round 2 - ZAI Auth: ATProto Login (Django)
+# 0002 Questions Round 2 - ZAI Auth: ATProto Login (Django)
 
 Round 1 locked: app lives in `apps/zai-auth/` (subdir of zai-ops); this spec is
 **app-only** (runnable locally, deployment is a later spec); Open WebUI and

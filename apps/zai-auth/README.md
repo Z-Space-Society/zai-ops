@@ -5,7 +5,7 @@ Open WebUI account. This Django app runs its own ATProto OAuth client (handle â†
 PDS authorize â†’ authenticated), persists a DID-keyed identity, and exposes an
 OIDC provider that Open WebUI consumes.
 
-See the spec: [`docs/specs/01-spec-atproto-login/`](../../docs/specs/01-spec-atproto-login/).
+See the spec: [`docs/specs/0002-spec-atproto-login/`](../../docs/specs/0002-spec-atproto-login/).
 
 > **Scope:** authentication only, **app-only** (runs locally). Deployment
 > (CT/role/nginx/TLS), Open WebUI, and Postgres are prerequisites / later specs.

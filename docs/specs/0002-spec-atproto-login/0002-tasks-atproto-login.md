@@ -1,6 +1,6 @@
-# 01 Tasks - ZAI Auth: ATProto Login (Django)
+# 0002 Tasks - ZAI Auth: ATProto Login (Django)
 
-Derived from [`01-spec-atproto-login.md`](01-spec-atproto-login.md). Scope is
+Derived from [`0002-spec-atproto-login.md`](0002-spec-atproto-login.md). Scope is
 **app-only** (runnable locally via `manage.py runserver`); deployment, Open WebUI,
 and Postgres are prerequisites/Non-Goals. Parent tasks map 1:1 to the spec's four
 demoable units and must be built in order (1 → 2 → 3 → 4).

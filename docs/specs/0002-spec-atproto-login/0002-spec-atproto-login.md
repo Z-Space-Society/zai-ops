@@ -1,4 +1,4 @@
-# 01-spec-atproto-login.md
+# 0002-spec-atproto-login.md
 
 > Status: Draft spec (not yet an ADR). Companion to: Research/ATProto (conceptual
 > overview). Scope: **authentication only** — knowledge base / notes /

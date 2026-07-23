@@ -1,8 +1,8 @@
-# Validation Report — Spec 01: ATProto Login (Django)
+# Validation Report — Spec 0002: ATProto Login (Django)
 
-Spec: [`01-spec-atproto-login.md`](01-spec-atproto-login.md) · Tasks:
-[`01-tasks-atproto-login.md`](01-tasks-atproto-login.md) · Proofs:
-[`01-proofs/`](01-proofs/)
+Spec: [`0002-spec-atproto-login.md`](0002-spec-atproto-login.md) · Tasks:
+[`0002-tasks-atproto-login.md`](0002-tasks-atproto-login.md) · Proofs:
+[`0002-proofs/`](0002-proofs/)
 
 ## 1) Executive Summary
 
@@ -69,7 +69,7 @@ F (no secrets) ✅. *C: one artifact is a documented manual step (MEDIUM).
 
 | Severity | Issue | Impact | Recommendation |
 | --- | --- | --- | --- |
-| MEDIUM (M1) | Interactive login screenshot not produced. Spec/Tasks Unit 3 list "Screenshot/recording: full login via `runserver` against a real handle". It requires a public-HTTPS `client_id` (atproto rejects a non-fetchable localhost metadata URL) + human consent — not possible headlessly. Evidence: documented in `01-task-03-proofs.md` "Manual step"; substitute evidence = live resolution to `bsky.social` + mocked callback tests. | Verification (one user-facing artifact); functionality logic is otherwise demonstrated. | Before production, run the flow through a tunnel / atproto localhost dev-client and capture the screenshot. Tied to deferred Open Q #3/#5 (public hostname/TLS). |
+| MEDIUM (M1) | Interactive login screenshot not produced. Spec/Tasks Unit 3 list "Screenshot/recording: full login via `runserver` against a real handle". It requires a public-HTTPS `client_id` (atproto rejects a non-fetchable localhost metadata URL) + human consent — not possible headlessly. Evidence: documented in `0002-task-03-proofs.md` "Manual step"; substitute evidence = live resolution to `bsky.social` + mocked callback tests. | Verification (one user-facing artifact); functionality logic is otherwise demonstrated. | Before production, run the flow through a tunnel / atproto localhost dev-client and capture the screenshot. Tied to deferred Open Q #3/#5 (public hostname/TLS). |
 | LOW (L1) | "Relevant Files" naming drift. Tasks doc lists `atproto/client.py` etc.; actual app is `atproto_oauth/` (renamed during impl to avoid colliding with the `atproto` PyPI package). Evidence: `git diff --name-only` shows `atproto_oauth/*`. | Traceability cosmetic only. | Optional: update the tasks "Relevant Files" paths to `atproto_oauth/`. |
 | LOW (L2) | Extra changed files beyond "Relevant Files" (e.g. `oidc/management/commands/generate_keys.py`, `oidc/test_signing.py`, `atproto_oauth/test_metadata.py`, templates, migrations, `apps.py`/`__init__.py`/`wsgi.py`). Evidence: `git diff --name-only`. | None — standard Django scaffolding. | Justified in commit messages (keygen command, templates, migrations). No action required. |
 
@@ -99,7 +99,7 @@ $ manage.py check
 System check identified no issues (0 silenced).
 
 $ git ls-files | grep '\.pem$'          -> none
-$ grep -rl "BEGIN.*PRIVATE KEY" docs/specs/01-spec-atproto-login/  -> none
+$ grep -rl "BEGIN.*PRIVATE KEY" docs/specs/0002-spec-atproto-login/  -> none
 $ git check-ignore apps/zai-auth/.env apps/zai-auth/keys/atproto_ec_private.pem
 apps/zai-auth/.env
 apps/zai-auth/keys/atproto_ec_private.pem

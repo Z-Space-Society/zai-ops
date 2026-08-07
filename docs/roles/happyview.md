@@ -68,7 +68,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/happyview/defaults/main.yml
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `happyview_version` | `2.10.0` | Tag checked out and built. Bump to upgrade; the build task re-runs when this changes. |
+| `happyview_version` | `2.12.0` | Tag checked out and built. Bump to upgrade; the build task re-runs when this changes. |
 | `happyview_port` / `happyview_host` | `3000` / `0.0.0.0` | Listen socket; `0.0.0.0` so Caddy can reach it from the proxy CT. |
 | `happyview_home` / `happyview_bin` / `happyview_src` | `/opt/happyview[/bin/happyview, /src]` | Install path, binary path, and source checkout. |
 | `happyview_env_file` | `/etc/happyview/happyview.env` | The `0600` secret env read via `EnvironmentFile`. |

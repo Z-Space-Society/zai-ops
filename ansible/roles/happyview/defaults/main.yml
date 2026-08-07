@@ -1,7 +1,7 @@
 ---
 # HappyView version to build from source. Bump here to upgrade; the role will
 # re-clone and rebuild when this changes.
-happyview_version: "2.10.0"
+happyview_version: "2.12.0"
 
 happyview_port: 3000
 happyview_host: "0.0.0.0"       # Caddy reaches this CT from the proxy CT over vmbr1

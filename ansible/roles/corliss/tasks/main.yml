@@ -113,6 +113,20 @@
     state: present
     update_cache: true
 
+- name: Trust the corliss checkout for root's git operations
+  # git runs as root here, but the tree is owned by the corliss service user
+  # (pre-created below /opt/corliss, and recursively chowned at the end of this
+  # role). Git refuses to touch a repo whose worktree belongs to someone else —
+  # "detected dubious ownership" — and because it bails BEFORE reading
+  # .git/config, the failure surfaces as the thoroughly misleading
+  # "'origin' does not appear to be a git repository". Marking the path safe is
+  # git's documented escape hatch for exactly this case (root maintaining a
+  # service user's checkout). --replace-all, not --add: the latter appends a
+  # duplicate entry on every run.
+  ansible.builtin.command:
+    cmd: git config --system --replace-all safe.directory {{ corliss_src }}
+  changed_when: false
+
 - name: Clone the Corliss app source at the pinned ref
   ansible.builtin.git:
     repo: "{{ corliss_repo_url }}"

@@ -55,6 +55,7 @@ CT 100.
 | Create `corliss` group + user | `group`, `user` | Run the daemon unprivileged, no login shell. |
 | Create home/src/config/keys dirs | `ansible.builtin.file` | `/opt/corliss` (+ `src/`, daemon-owned), `/etc/corliss` (+ `keys/`, root-owned, group-readable). |
 | Ensure `git` is present | `apt` | Needed for the app checkout. |
+| Mark the checkout `safe.directory` | `command` → `git config --system --replace-all safe.directory` | git runs as root but the tree is owned by the `corliss` service user, and git refuses a repo whose worktree belongs to someone else ("dubious ownership"). It bails before reading `.git/config`, so the symptom is the misleading `'origin' does not appear to be a git repository`. See [Notes](#notes). |
 | Clone the app at its pinned ref | `ansible.builtin.git` (`version: {{ corliss_version }}`, `force: true`) | Checks out `Z-Space-Society/Corliss` into `{{ corliss_src }}`. Public repo over the host's NAT — no credentials, nothing in the vault. `force` discards any on-CT drift so the checkout is exactly the pinned tag (the guarantee rsync's `delete: true` used to give). Notifies restart. |
 | Probe + install pinned `uv` | `command`, then `get_url`/`unarchive`/`copy` | Install uv reproducibly from the **pinned, checksummed** release tarball (not `curl \| sh`), same idiom as `open-webui`. Skipped when the installed `uv --version` already matches. |
 | Create the venv against the system Python | `command` → `uv venv --python python3` (`creates`) | Debian 13 ships Python 3.13 natively — Django 5.2's ceiling — so unlike `open-webui` there's no managed-interpreter fetch/placement to get right; `uv venv` just wraps the system interpreter. |
@@ -179,6 +180,13 @@ curl -s https://<domain>/auth/client-metadata.json | grep client_id        # cli
   *read-only*, not inaccessible — the env file and signing keys stay readable
   without needing `ReadWritePaths`; only `corliss_home` needs write access
   (nothing under `/etc` is written at runtime).
+- **"'origin' does not appear to be a git repository" means ownership, not
+  networking.** git refuses to operate on a repo whose worktree is owned by a
+  different user than the one running it, and it aborts *before* parsing
+  `.git/config` — so a perfectly good clone with a correct `origin` remote
+  reports a remote-access error. `git -C {{ corliss_src }} remote -v` printing
+  `detected dubious ownership` is the tell. The role sets `safe.directory` for
+  this path; if you ever move the checkout, that setting has to move with it.
 - **The atproto `client_id` IS a URL** (`<base>/auth/client-metadata.json`), so
   changing `corliss_url` *or* that path mints a new client identity and every
   member has to re-consent at their PDS. Bundle such moves into one cutover.

@@ -92,14 +92,14 @@ happyview_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~
 happyview_session_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/happyview_session_secret chars=ascii_letters,digits length=64') }}"
 happyview_token_encryption_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/happyview_token_key && cat ' ~ _zai_secrets_dir ~ '/happyview_token_key || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/happyview_token_key)') }}"
 
-# zai-auth secrets, same posture as the litellm/openwebui/happyview pairs above.
-# db_password is the password for the `zai_auth` Postgres role; secret_key is
+# corliss secrets, same posture as the litellm/openwebui/happyview pairs above.
+# db_password is the password for the `corliss` Postgres role; secret_key is
 # Django's SECRET_KEY (signs sessions/CSRF — set explicitly so logins survive a
-# rebuild); oidc_client_secret is the shared secret zai-auth and Open WebUI's
+# rebuild); oidc_client_secret is the shared secret corliss and Open WebUI's
 # OIDC client both need to agree on.
-zai_auth_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/zai_auth_db_password chars=digits,abcdef length=48') }}"
-zai_auth_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/zai_auth_secret_key chars=ascii_letters,digits length=64') }}"
-zai_auth_oidc_client_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/zai_auth_oidc_client_secret chars=digits,abcdef length=48') }}"
+corliss_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/corliss_db_password chars=digits,abcdef length=48') }}"
+corliss_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/corliss_secret_key chars=ascii_letters,digits length=64') }}"
+corliss_oidc_client_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/corliss_oidc_client_secret chars=digits,abcdef length=48') }}"
 
 # Password for the provision-time break-glass local admin (username `admin`,
 # /admin/login/ only — no ATProto identity). DR-critical: it's the only way in
@@ -107,9 +107,9 @@ zai_auth_oidc_client_secret: "{{ lookup('ansible.builtin.password', _zai_secrets
 # Same generate-once-and-persist posture as every secret above — already rides
 # the existing Tier-1 control-node backup of /root/.zai-secrets, no separate
 # escrow path needed.
-zai_auth_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/zai_auth_admin_password chars=ascii_letters,digits length=32') }}"
+corliss_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/corliss_admin_password chars=ascii_letters,digits length=32') }}"
 
-# zai-auth's two OAuth/OIDC signing keys (PKCS8 PEM) — the DR-critical items:
+# corliss's two OAuth/OIDC signing keys (PKCS8 PEM) — the DR-critical items:
 # losing ATPROTO_EC invalidates the atproto client_id's identity (every member
 # re-consents), losing OIDC_RSA invalidates every id_token/session in flight.
 # Generated ONCE with openssl (not the app's own `manage.py generate_keys`,
@@ -118,5 +118,5 @@ zai_auth_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir
 # the existing Tier-1 control-node backup for free instead of needing a new
 # per-CT backup path. The `pipe` lookup idiom (generate-if-absent, else cat)
 # matches happyview_token_encryption_key just above.
-zai_auth_atproto_ec_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/zai_auth_atproto_ec.pem && cat ' ~ _zai_secrets_dir ~ '/zai_auth_atproto_ec.pem || (openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve | tee ' ~ _zai_secrets_dir ~ '/zai_auth_atproto_ec.pem)') }}"
-zai_auth_oidc_rsa_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/zai_auth_oidc_rsa.pem && cat ' ~ _zai_secrets_dir ~ '/zai_auth_oidc_rsa.pem || (openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | tee ' ~ _zai_secrets_dir ~ '/zai_auth_oidc_rsa.pem)') }}"
+corliss_atproto_ec_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/corliss_atproto_ec.pem && cat ' ~ _zai_secrets_dir ~ '/corliss_atproto_ec.pem || (openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve | tee ' ~ _zai_secrets_dir ~ '/corliss_atproto_ec.pem)') }}"
+corliss_oidc_rsa_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/corliss_oidc_rsa.pem && cat ' ~ _zai_secrets_dir ~ '/corliss_oidc_rsa.pem || (openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | tee ' ~ _zai_secrets_dir ~ '/corliss_oidc_rsa.pem)') }}"

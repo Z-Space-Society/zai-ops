@@ -130,15 +130,15 @@
   roles:
     - postgres
 
-# zai-auth runs AFTER postgres: its role creates the zai_auth role + database ON
-# the postgres CT (delegate_to: postgres), and syncs the app source from this
-# repo's own checkout on the control node (no published package to install). A
-# --limit zai-auth run still needs postgres already provisioned.
-- name: Configure ZAI Auth (ATProto -> OIDC login bridge)
-  hosts: zai-auth
+# corliss runs AFTER postgres: its role creates the corliss role + database ON
+# the postgres CT (delegate_to: postgres), and clones the app source from
+# Z-Space-Society/Corliss at its pinned ref. A --limit corliss run still needs
+# postgres already provisioned.
+- name: Configure Corliss (ATProto -> OIDC login bridge)
+  hosts: corliss
   gather_facts: true
   roles:
-    - zai-auth
+    - corliss
 
 # litellm runs AFTER postgres: its role creates the litellm role + database ON the
 # postgres CT (delegate_to: postgres) and the server must already be up with

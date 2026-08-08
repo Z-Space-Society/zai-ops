@@ -72,18 +72,18 @@ itself from this repo.
    zai-assign object-store 101   # core infra: the restic backend
    zai-assign postgres 102       # core infra: the internal database
    zai-assign proxy 110          # platform: the LAN-facing reverse proxy
-   zai-assign zai-auth 111       # platform: the ATProto->OIDC login bridge
+   zai-assign corliss 111       # platform: the ATProto->OIDC login bridge
    zai-assign litellm 112        # platform: the AI gateway
    zai-assign open-webui 120     # applications: the chat UI
    zai-assign happyview 121      # happy view
 
    # 2. provision each — create over the API, configure over SSH.
    #    object store first: it's the restic backend the backup job writes to.
-   #    postgres before zai-auth/litellm/open-webui (all three create their DB on it).
+   #    postgres before corliss/litellm/open-webui (all three create their DB on it).
    ansible-playbook provision.yml --limit object-store
    ansible-playbook provision.yml --limit postgres
    ansible-playbook provision.yml --limit proxy
-   ansible-playbook provision.yml --limit zai-auth
+   ansible-playbook provision.yml --limit corliss
    ansible-playbook provision.yml --limit litellm
    ansible-playbook provision.yml --limit open-webui
    ```
@@ -157,7 +157,7 @@ Ansible decrypts it automatically via `/root/.vault_pass`. To view or edit:
 ansible-vault edit group_vars/all/vault.yml
 ```
 
-The zai-auth signing keys (EC P-256/ES256 for ATProto, RSA/RS256 for the OIDC
+The corliss signing keys (EC P-256/ES256 for ATProto, RSA/RS256 for the OIDC
 id_token) live in a git-ignored `keys/` as PKCS#8 PEM at mode `0600`, and are
 never committed — only the public halves are exposed, served at
 `/.well-known/jwks.json`. In production they're provisioned out-of-band; for
@@ -189,7 +189,7 @@ architecture, networking, and a note for every role.
   - `site.yml` — configures the control node (CT 100)
   - `verify-proxmox.yml` — checks the API token authenticates
   - `provision.yml` — creates the service containers over the API, then configures them
-  - `make-admin.yml` — promotes an ATProto handle to zai-auth admin, keyed on DID (`zai-make-admin`)
+  - `make-admin.yml` — promotes an ATProto handle to corliss admin, keyed on DID (`zai-make-admin`)
   - `enroll-inference-node.yml` — records a bare-metal inference node in the runtime inventory
   - `inference.yml` — configures inference nodes (NVIDIA/CUDA + llama-server)
   - `add-github-user.yml` — creates a human admin account from GitHub keys (CT 100 + inference nodes)

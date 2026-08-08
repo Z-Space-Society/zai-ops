@@ -1,0 +1,94 @@
+---
+# corliss — the cluster's ATProto→OIDC login bridge (Django). Internal-only on
+# vmbr1; reached from the LAN only through the Caddy edge, fronted like
+# litellm/open-webui/happyview.
+#
+# The app lives in its own repo (Z-Space-Society/Corliss) and is cloned onto
+# the CT at a pinned ref, like every other role installs a pinned release —
+# it used to be a sub-app of this repo, rsync'd off the control node's own
+# checkout. See docs/decisions/0006-corliss-standalone-apex.md.
+
+# Upstream app source. Public repo, so the clone needs no credentials — the CT
+# reaches GitHub over the host's NAT. Pin to a TAG, not a branch: `git pull` on
+# CT 100 updates the blueprint, but the app's version is this number, and
+# bumping it is a reviewable commit like any other version pin in this repo.
+corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
+corliss_version: v0.1.0
+
+# Port gunicorn binds. 8000 matches the app's own local-dev convention
+# (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
+# loopback) — same posture as litellm/open-webui — the Caddy edge reaches this
+# CT over vmbr1, and the security boundary is the network, not the bind address.
+corliss_port: 8000
+corliss_host: "0.0.0.0"
+corliss_gunicorn_workers: 2
+
+# Dedicated unprivileged service account (nologin) the daemon runs as.
+corliss_user: corliss
+corliss_group: corliss
+
+# On-disk layout, all under /opt like every other native service. src/ is the
+# cloned app checkout (reset to corliss_version on every run); venv/ is layered
+# on top of it.
+corliss_home: /opt/corliss
+corliss_src: "{{ corliss_home }}/src"
+corliss_venv: "{{ corliss_home }}/venv"
+
+# uv — builds the venv and installs requirements.txt into it. Installed
+# reproducibly from a pinned, checksummed release tarball (NOT `curl | sh` of
+# a moving installer), same idiom and same pin as the open-webui role. Unlike
+# open-webui, corliss doesn't need uv's managed-CPython fetch: Debian 13
+# already ships Python 3.13, which Django 5.2 fully supports, so `uv venv`
+# just wraps the system interpreter. Releases:
+# https://github.com/astral-sh/uv/releases
+corliss_uv_version: "0.11.25"
+corliss_uv_sha256: "1db18b5e76fa645a7f3865773139bdec8e2d46adbdbb35e7410b34fa8015ccd2"
+corliss_uv_url: "https://github.com/astral-sh/uv/releases/download/{{ corliss_uv_version }}/uv-x86_64-unknown-linux-gnu.tar.gz"
+corliss_uv_install_dir: /usr/local/bin
+corliss_uv_bin: "{{ corliss_uv_install_dir }}/uv"
+
+# Config + secrets live under /etc, like every other role. The env file (0600,
+# root-only) carries DATABASE_URL/SECRET_KEY/etc; the keys/ dir holds the two
+# PEM signing keys, group-readable so the daemon (not just systemd) can read
+# them directly — Django loads them itself via ATPROTO_EC_PRIVATE_KEY_PATH /
+# OIDC_RSA_PRIVATE_KEY_PATH, unlike the env file which only systemd reads.
+corliss_config_dir: /etc/corliss
+corliss_env_file: "{{ corliss_config_dir }}/corliss.env"
+corliss_keys_dir: "{{ corliss_config_dir }}/keys"
+corliss_atproto_ec_key_path: "{{ corliss_keys_dir }}/atproto_ec.pem"
+corliss_oidc_rsa_key_path: "{{ corliss_keys_dir }}/oidc_rsa.pem"
+
+# Postgres role + database this role provisions on the postgres CT (same
+# delegated idiom as litellm/open-webui/happyview). Password is the
+# auto-generated corliss_db_password from group_vars/all/main.yml.
+corliss_db_name: corliss
+corliss_db_user: corliss
+corliss_database_url: "postgresql://{{ corliss_db_user }}:{{ corliss_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ corliss_db_name }}"
+
+# Public URL: the APEX domain, not a subdomain (was account.<domain> until
+# ADR-0006). Anchors PUBLIC_BASE_URL, the atproto OAuth client_id, and the OIDC
+# issuer — and the issuer is why it's the apex: an OIDC issuer of
+# https://example.com must serve discovery at https://example.com/.well-known/
+# openid-configuration, so a bare-origin issuer needs the bare origin. The app
+# keeps its human/atproto surface under /auth/* and leaves / to the account
+# page. NOTE: the origin cert must cover the apex, not just *.<domain>.
+corliss_url: "https://{{ cluster_domain }}"
+corliss_allowed_hosts:
+  - "{{ cluster_domain }}"
+  # 127.0.0.1: the role's own provision-time smoke test hits the app over
+  # loopback (Verify the corliss OIDC discovery document responds), and
+  # Django's ALLOWED_HOSTS check 400s any Host header not on this list —
+  # without this, the health check fails even though gunicorn is up fine.
+  - "127.0.0.1"
+
+# The one OIDC relying party today: Open WebUI. client_id is a LOCAL default
+# here (not reached into the open-webui role's vars) — mirror it in
+# open-webui's own defaults (openwebui_oidc_client_id) and keep both in sync,
+# same convention as openwebui_litellm_port/litellm_port.
+corliss_oidc_client_id: open-webui
+corliss_oidc_redirect_uris:
+  - "https://chat.{{ cluster_domain }}/oauth/oidc/callback"
+
+# Drives the login/account pages' nav "Chat" link — same cluster_domain
+# derivation as corliss_url above, just a different subdomain.
+corliss_chat_url: "https://chat.{{ cluster_domain }}"

@@ -3,7 +3,7 @@
   ansible.builtin.systemd:
     daemon_reload: true
 
-- name: restart zai-auth
+- name: restart corliss
   ansible.builtin.service:
-    name: zai-auth
+    name: corliss
     state: restarted

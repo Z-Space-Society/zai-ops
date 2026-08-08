@@ -74,9 +74,18 @@ caddy_proxy_hosts:
 
 The role reads `cloudflare_origin_cert` and `cloudflare_origin_key` from the
 vault ([`group_vars/all/vault.yml`](../../ansible/group_vars/all/vault.yml)).
-Generate a (wildcard `*.example.com`) cert once in the Cloudflare dashboard
-(SSL/TLS → Origin Server → Create Certificate), paste cert + key into the vault,
-then set the Cloudflare SSL mode to **Full (strict)**. The vault is already in
+Generate a cert once in the Cloudflare dashboard (SSL/TLS → Origin Server →
+Create Certificate), paste cert + key into the vault, then set the Cloudflare
+SSL mode to **Full (strict)**. Cover **both the apex and the wildcard**
+(`example.com, *.example.com` — Cloudflare's default pair): a wildcard-only
+cert does not match the bare domain, and [`corliss`](corliss.md) is served
+there, so a wildcard-only cert makes the apex answer 526. Check an existing
+cert with:
+
+```bash
+echo | openssl s_client -connect 10.1.1.<proxy-ctid>:443 2>/dev/null \
+  | openssl x509 -noout -ext subjectAltName
+``` The vault is already in
 the [`backup`](backup.md) job's `backup_paths` (in `bin/zai-backup`), so no
 backup change is needed.
 

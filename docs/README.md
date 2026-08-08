@@ -145,7 +145,7 @@ and the gaps leave room to grow a tier without renumbering:
 | Range       | Tier         | Examples                                   |
 | ----------- | ------------ | ------------------------------------------ |
 | `100`–`109` | Core infra   | control (100), object-store (101), postgres (102) |
-| `110`–`119` | Platform     | proxy/edge (110), auth (111, the [`zai-auth`](roles/zai-auth.md) role), gateway (112) |
+| `110`–`119` | Platform     | proxy/edge (110), auth (111, the [`corliss`](roles/corliss.md) role), gateway (112) |
 | `120`–`129` | Applications | open-webui (120), happyview (121), … other user-facing apps |
 
 The dependency arrows point **downward** (apps → platform → core), and the line
@@ -297,7 +297,7 @@ later; the repo bakes in neither.
 | `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the `zai-set-domain` engine) |
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox node name in runtime inventory (the `zai-set-node` engine; `bootstrap.sh` calls it automatically) |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
-| `make-admin.yml`      | zai-auth (SSH) | Promote an ATProto handle to zai-auth admin, keyed on DID (the `zai-make-admin` engine) |
+| `make-admin.yml`      | corliss (SSH) | Promote an ATProto handle to corliss admin, keyed on DID (the `zai-make-admin` engine) |
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
 | `inference.yml`       | CT 100 → SSH   | Configure inference nodes (`nvidia_cuda` + `llama_server`) |
 | `add-github-user.yml` | CT 100 (local) + SSH | Create a human admin account from GitHub keys, with sudo, on CT 100 + inference nodes |
@@ -326,7 +326,7 @@ PATH when the control node is configured. The convention:
 | `zai-assign <service> <ctid>` | Bind a service to a CTID in runtime inventory | [`assign.yml`](#playbooks) |
 | `zai-set-domain <domain>` | Record the cluster's public base domain in runtime inventory | [`set-domain.yml`](#playbooks) |
 | `zai-set-node <node>` | Record the Proxmox node name in runtime inventory (bootstrap sets it automatically) | [`set-node.yml`](#playbooks) |
-| `zai-make-admin <handle>` | Promote an ATProto handle to zai-auth admin, keyed on DID | [`make-admin.yml`](#playbooks) |
+| `zai-make-admin <handle>` | Promote an ATProto handle to corliss admin, keyed on DID | [`make-admin.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
 | `zai-litellm-key create <name>` | Mint a per-person raw-API LiteLLM virtual key, printed once | litellm `/key/generate` |
@@ -350,7 +350,7 @@ command. Only control-node operator commands belong in `bin/`.
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
 | [`object_store`](roles/object_store.md)    | `object-store` | Single-node Garage (S3-compatible) — the on-box backup target |
 | [`postgres`](roles/postgres.md)            | `postgres` | PostgreSQL 17 (Debian-native) — the internal database server |
-| [`zai-auth`](roles/zai-auth.md)            | `zai-auth` | ATProto→OIDC login bridge (Django, venv) — Postgres-backed, fronted by Caddy; the sole identity provider for Open WebUI |
+| [`corliss`](roles/corliss.md)            | `corliss` | ATProto→OIDC login bridge (Django, venv) — Postgres-backed, cloned from [Z-Space-Society/Corliss](https://github.com/Z-Space-Society/Corliss) at a pinned tag, fronted by Caddy at the **apex** domain; the sole identity provider for Open WebUI |
 | [`litellm`](roles/litellm.md)              | `litellm`  | LiteLLM proxy (venv) — OpenAI-compatible gateway, Postgres-backed; + an always-on CPU floor embedder (`nomic-embed-text`) |
 | [`open-webui`](roles/open-webui.md)        | `open-webui` | OpenWebUI chat UI (uv-managed Python 3.12 venv) — Postgres-backed, fronted by Caddy, talks to litellm for chat + RAG embeddings |
 | [`happyview`](roles/happyview.md)          | `happyview` | HappyView AT Protocol AppView platform (Rust binary, built from source) — Postgres-backed, fronted by Caddy |
@@ -384,10 +384,10 @@ decision record.
   `/root/.vault_pass`, no manual entry. They're part of restored state: a fresh
   CT 100 regenerates different values, so restore `/root/.zai-secrets` before
   re-running Ansible.
-- zai-auth's break-glass local admin password (`zai_auth_admin_password`)
+- corliss's break-glass local admin password (`corliss_admin_password`)
   follows the same auto-generated, `/root/.zai-secrets`-persisted pattern —
-  it's **DR-critical**: the only way into zai-auth's `/admin/` if ATProto/OIDC
-  login is ever broken. See [`roles/zai-auth.md`](roles/zai-auth.md#secrets).
+  it's **DR-critical**: the only way into corliss's `/admin/` if ATProto/OIDC
+  login is ever broken. See [`roles/corliss.md`](roles/corliss.md#secrets).
 - Open WebUI's scoped LiteLLM key (`openwebui_litellm_key`, the F1 fix) is
   persisted the same way, at `/root/.zai-secrets/openwebui_litellm_key` — but
   unlike every secret above, it isn't a `password`/`pipe` lookup: it can only
@@ -595,14 +595,14 @@ Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
   `PersistentConfig`-wrapped settings from the environment only on its *very first*
   start, then writes them to its own database and reads from **there** on every
   restart after — a changed env value in `open-webui.env.j2` deploys cleanly
-  (`provision.yml` shows no error) but has zero effect. This bit deploying zai-auth
+  (`provision.yml` shows no error) but has zero effect. This bit deploying corliss
   as the sole login provider: `ENABLE_LOGIN_FORM=false` was set correctly from the
   start, but open-webui had already booted once (with the setting unset, i.e. true)
   before that env line existed, so the local email/password form kept showing.
   Fix: `ENABLE_PERSISTENT_CONFIG=false` makes Open WebUI always trust the
   environment over its DB-cached copy — the correct default for this repo anyway,
   since config is meant to live in git, not a mutable runtime database. See
-  [`open-webui`](roles/open-webui.md#oidc-login-zai-auth-is-the-only-way-in).
+  [`open-webui`](roles/open-webui.md#oidc-login-corliss-is-the-only-way-in).
 - **No native way to skip the login page when OAuth is the only option.** Visiting
   `chat.{{ cluster_domain }}` always lands on `/auth` first, showing a "Continue
   with ZAI" button rather than redirecting straight into the OIDC flow
@@ -618,13 +618,27 @@ Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
   redirect on `/auth*` with no exception also catches that completion
   request and bounces it into another OIDC round-trip, forever. The browser
   loops entirely on `chat.{{ cluster_domain }}/auth`, never visibly reaching
-  zai-auth again, while `journalctl -u open-webui` shows a *successful*
+  corliss again, while `journalctl -u open-webui` shows a *successful*
   token exchange on every single cycle — easy to chase as an OIDC config bug
   when the login is actually succeeding every time and the edge redirect is
   what's discarding it. Fix: the `redirects` entry's `skip_if_cookie: token`
   field only fires the redirect when open-webui's session cookie is absent;
   a request already carrying it falls through to the real app. See
   [`proxy`](roles/proxy.md#notes).
+
+Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
+
+- **The atproto `client_id` IS a URL** — specifically
+  `<PUBLIC_BASE_URL>/auth/client-metadata.json`. Change the domain *or* that
+  path and you have minted a brand-new client identity: every member must
+  re-consent at their PDS, and in-flight sessions die. Nothing errors; it just
+  silently becomes a different client. Bundle any such move into a single
+  cutover rather than paying the re-consent twice.
+- **A wildcard origin cert does not cover the apex.** `*.example.com` matches
+  `chat.example.com` but *not* `example.com`, and corliss is served at the
+  apex — so a wildcard-only Cloudflare Origin CA cert makes the bare domain
+  answer **526** under Full (strict) while every subdomain keeps working. Issue
+  the cert for `example.com, *.example.com`.
 
 Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
 

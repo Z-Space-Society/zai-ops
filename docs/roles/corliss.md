@@ -1,0 +1,191 @@
+# Role: `corliss`
+
+Installs [Corliss](https://github.com/Z-Space-Society/Corliss) **natively** as
+the cluster's login spine — a Django app implementing an ATProto handle → OIDC
+`id_token` bridge, so members sign into [`open-webui`](open-webui.md) (and
+future apps) with their Bluesky handle instead of a separate password. See
+[ADR-0005](../decisions/0005-zai-auth-over-aip.md) for why this app, not AIP,
+is the cluster's login bridge, and
+[ADR-0006](../decisions/0006-corliss-standalone-apex.md) for why it now lives
+in its own repo and owns the apex domain.
+
+- **Source:** [`ansible/roles/corliss/`](../../ansible/roles/corliss/); app
+  source: [`Z-Space-Society/Corliss`](https://github.com/Z-Space-Society/Corliss)
+  at the pinned `corliss_version`
+- **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure
+  play, `hosts: corliss`, **after** the postgres play)
+- **Target:** the `corliss` CT (platform tier, 110–129) over SSH, internal-only
+  on `vmbr1`
+
+## Purpose
+
+A native install: a Django app (gunicorn WSGI, dedicated venv) run under
+systemd — **no Docker** (per the [prime directive](../../CLAUDE.md)). It is
+**internal-only** on `vmbr1`; the LAN reaches it through the
+[`proxy`](proxy.md) edge — and unlike every other service it is fronted at the
+**apex** `{{ cluster_domain }}`, not a subdomain (ADR-0006: its OIDC issuer is
+the bare origin, so discovery has to live at `<issuer>/.well-known/…`). Its
+state (member identities, OAuth/OIDC tokens) lives in Postgres, so the CT
+itself holds nothing unreproducible except the two signing keys (see Secrets).
+
+**Installed like every other role: a pinned upstream release.** The app used to
+be a sub-app of this repo (`apps/zai-auth/`), rsync'd off the control node's
+checkout; it now lives in its own repo and the role `git clone`s it at the tag
+in `corliss_version`. Updating the app is therefore a *reviewable version bump*
+in `defaults/main.yml` plus a role replay — not a side effect of `git pull` on
+CT 100.
+
+### URL surface
+
+| Path | Serves |
+| ---- | ------ |
+| `/` | account landing page (login required) |
+| `/auth/login`, `/auth/logout`, `/auth/oauth/callback` | the human + ATProto-client surface |
+| `/auth/client-metadata.json` | ATProto client metadata — **this URL is the `client_id`** |
+| `/.well-known/openid-configuration`, `/.well-known/jwks.json` | OIDC discovery + JWKS (root-scoped: issuer is the bare origin) |
+| `/oidc/authorize`, `/oidc/token` | OIDC provider endpoints (reached via discovery) |
+| `/admin/` | Django admin (break-glass account) |
+
+## Tasks
+
+| Task | Module | Why |
+| ---- | ------ | --- |
+| Probe + create the `corliss` PG role | `command`/`shell` → `su - postgres -c psql`, `delegate_to: postgres` | Same idiom as litellm/open-webui/happyview: the bare postgres superuser is **peer-only**. Probe `pg_roles` → `CREATE ROLE` (else `ALTER ROLE` to sync the password). `no_log`. |
+| Probe + create the `corliss` database | `command` → `su - postgres -c psql`, `delegate_to: postgres` | `CREATE DATABASE` can't run in a transaction → probe `pg_database`, then create `OWNER corliss`. |
+| Create `corliss` group + user | `group`, `user` | Run the daemon unprivileged, no login shell. |
+| Create home/src/config/keys dirs | `ansible.builtin.file` | `/opt/corliss` (+ `src/`, daemon-owned), `/etc/corliss` (+ `keys/`, root-owned, group-readable). |
+| Ensure `git` is present | `apt` | Needed for the app checkout. |
+| Clone the app at its pinned ref | `ansible.builtin.git` (`version: {{ corliss_version }}`, `force: true`) | Checks out `Z-Space-Society/Corliss` into `{{ corliss_src }}`. Public repo over the host's NAT — no credentials, nothing in the vault. `force` discards any on-CT drift so the checkout is exactly the pinned tag (the guarantee rsync's `delete: true` used to give). Notifies restart. |
+| Probe + install pinned `uv` | `command`, then `get_url`/`unarchive`/`copy` | Install uv reproducibly from the **pinned, checksummed** release tarball (not `curl \| sh`), same idiom as `open-webui`. Skipped when the installed `uv --version` already matches. |
+| Create the venv against the system Python | `command` → `uv venv --python python3` (`creates`) | Debian 13 ships Python 3.13 natively — Django 5.2's ceiling — so unlike `open-webui` there's no managed-interpreter fetch/placement to get right; `uv venv` just wraps the system interpreter. |
+| Install dependencies into the venv | `command` → `uv pip install --python {{ corliss_venv }}/bin/python -r {{ corliss_src }}/requirements.txt` | The cloned tag's `requirements.txt` **is** the dependency pin — one version number (`corliss_version`) governs both app and deps. Notifies restart. |
+| Collect static assets | `command` → `manage.py collectstatic --noinput` | Populates `STATIC_ROOT` (whitenoise, installed above, serves it straight out of gunicorn — no separate nginx-for-statics box) with the login/account pages' `base.css` + vendored fonts. No DB/secrets needed, just a loadable settings module. Notifies restart. |
+| Render the two signing keys | `copy` (`content:`, `0640` root:corliss, `no_log`) | EC P-256 (atproto DPoP/ES256) + RSA (OIDC id_token/RS256) PEMs from the cached `group_vars` secrets — see Secrets. Group-readable: Django reads these paths itself. Notifies restart. |
+| Render the secret env file | `template` (`0600` root, `no_log`) | `DATABASE_URL`, `SECRET_KEY`, key paths, `PUBLIC_BASE_URL`, `OIDC_CLIENT_ID/SECRET`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`. Read by systemd via `EnvironmentFile`. Notifies restart. |
+| Apply database migrations | `command` → `manage.py migrate --noinput` (`no_log`) | Provision-time, before the daemon ever starts — same principle as litellm's `prisma migrate deploy`. Idempotent (`changed_when` on "No migrations to apply"). Notifies restart. |
+| Ensure the break-glass local admin exists | `command` → `manage.py ensure_admin` (`no_log`) | Idempotently creates a local username/password superuser (`admin`, no ATProto identity) as a way in if OIDC/ATProto login is ever broken. Only sets the password at creation (never rotates it on re-runs); re-asserts `is_staff`/`is_superuser` on every run so provisioning re-runs heal it if those flags ever get flipped off. See [Notes](#notes). |
+| Chown the home to `corliss` | `ansible.builtin.file` (`recurse`) | clone/pip/migrate ran as root; the daemon reads the venv + cloned source. Runs *after* install/migrate. |
+| Install the systemd unit | `template` → `/etc/systemd/system/corliss.service` | Hardened (`ProtectSystem=strict`, `ReadWritePaths={{ corliss_home }}`); `ExecStart` runs gunicorn against `corliss.wsgi:application`. Notifies reload + restart. |
+| Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
+| Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config before the smoke test. |
+| Wait for the port + health check | `wait_for` (`127.0.0.1:8000`) + `uri` (`/.well-known/openid-configuration`) | The discovery doc proves the app booted, reached the migrated DB, *and* the signing keys loaded (`signing.py` fails closed on a missing key) — not merely that the port is open. |
+
+### Handlers
+
+| Handler | Action |
+| ------- | ------ |
+| `reload systemd` | `systemd: daemon_reload=true` |
+| `restart corliss` | `service: name=corliss state=restarted` |
+
+## Variables
+
+Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
+
+| Variable | Default | Meaning |
+| -------- | ------- | ------- |
+| `corliss_repo_url` | `https://github.com/Z-Space-Society/Corliss.git` | Upstream app repo (public — the clone needs no credentials). |
+| `corliss_version` | `v0.1.0` | The **pinned tag** cloned onto the CT. Bumping this is how the app is upgraded. |
+| `corliss_port` / `corliss_host` | `8000` / `0.0.0.0` | gunicorn's bind; `0.0.0.0` so Caddy can reach it from the proxy CT. |
+| `corliss_gunicorn_workers` | `2` | gunicorn worker count. |
+| `corliss_home` / `corliss_src` / `corliss_venv` | `/opt/corliss[/src,/venv]` | Cloned source + venv, all under the chowned tree. |
+| `corliss_config_dir` / `corliss_keys_dir` | `/etc/corliss[/keys]` | Env file + the two signing-key PEMs. |
+| `corliss_db_name` / `corliss_db_user` | `corliss` | The Postgres database + role this role creates. |
+| `corliss_url` | `https://{{ cluster_domain }}` | `PUBLIC_BASE_URL` — the **apex**, anchoring the atproto `client_id`, OIDC issuer, and redirect/JWKS URLs. Changing it mints a new atproto client identity. |
+| `corliss_oidc_client_id` | `open-webui` | Local default — keep in sync with `open-webui`'s own `openwebui_oidc_client_id`. |
+| `corliss_oidc_redirect_uris` | `[https://chat.{{ cluster_domain }}/oauth/oidc/callback]` | Open WebUI's OIDC callback, registered on this side. |
+| `corliss_chat_url` | `https://chat.{{ cluster_domain }}` | Drives the login/account pages' nav "Chat" link — same `cluster_domain` derivation as `corliss_url`, different subdomain. |
+
+### Secrets
+
+`corliss_db_password`, `corliss_secret_key`, `corliss_oidc_client_secret`
+and `corliss_admin_password` follow the standard `password` lookup pattern in
+[`group_vars/all/main.yml`](../../ansible/group_vars/all/main.yml) — generated
+on first run, persisted under `/root/.zai-secrets`, stable across rebuilds.
+`corliss_admin_password` is the **DR-critical** break-glass admin's password
+(see [Tasks](#tasks) above) — the only way into `/admin/` if ATProto/OIDC
+login is ever broken, so it belongs alongside the two signing keys below on
+any escrow checklist.
+
+The two signing keys (`corliss_atproto_ec_key`, `corliss_oidc_rsa_key`) are
+the **DR-critical** items — losing `atproto_ec` invalidates the atproto
+`client_id`'s identity (every member re-consents); losing `oidc_rsa`
+invalidates every `id_token`/session in flight. They're generated **once**
+with `openssl genpkey` (PKCS8 PEM, matching the format the app's own
+`manage.py generate_keys` produces for local dev) and cached under
+`/root/.zai-secrets` — **not** generated on-box by the app's own management
+command, whose docstring explicitly defers production provisioning as "a
+deployment-spec decision." Caching them on the control node means they ride
+the *existing* Tier-1 control-node backup for free, rather than needing a new
+per-CT backup path.
+
+## Dependencies
+
+- **[`postgres`](postgres.md)** must be provisioned first — this role connects
+  to the postgres CT (`delegate_to: postgres`) to create its role+database. A
+  full [`provision.yml`](../../ansible/provision.yml) run guarantees the
+  order; a `--limit corliss` run still needs postgres already up.
+- **Outbound HTTPS from the CT** — the clone reaches github.com through the
+  host's NAT (`gw=10.1.1.1`), like every other role's package downloads.
+- **[`open-webui`](open-webui.md)** is the one OIDC relying party today. It
+  doesn't block corliss's provisioning, but Open WebUI logins won't work
+  until both are up and its `OPENID_PROVIDER_URL`/`OAUTH_CLIENT_*` are
+  pointed at corliss (already wired in `open-webui`'s own defaults/template).
+- **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts` at the
+  apex `{{ cluster_domain }}`; set the domain once with `zai-set-domain`. The
+  origin cert must cover the apex — a wildcard-only `*.<domain>` cert does
+  **not**, and Cloudflare answers such a request with a 526.
+
+## Verify
+
+```bash
+ssh root@10.1.1.<ctid> 'systemctl is-active corliss'
+ssh root@10.1.1.<ctid> 'ss -ltnp | grep 8000'                              # listening?
+curl -fs http://10.1.1.<ctid>:8000/.well-known/openid-configuration        # discovery doc
+ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep corliss        # DB present
+ssh root@10.1.1.<ctid> 'git -C /opt/corliss/src describe --tags'          # deployed version
+curl -s https://<domain>/.well-known/openid-configuration | grep issuer    # issuer == bare apex
+curl -s https://<domain>/auth/client-metadata.json | grep client_id        # client_id on /auth/
+# end-to-end: browse https://chat.<domain>, click the ZAI OAuth button,
+# log in with an ATProto handle, confirm sub/handle/email land in Open WebUI
+# and that local signup/login are gone.
+```
+
+## Notes
+
+- **Granting admin to an ATProto member: `zai-make-admin <handle>`.** Promotes
+  a handle to `is_staff`/`is_superuser` keyed on its DID (`manage.py
+  make_admin`, backed by [`make-admin.yml`](../../ansible/make-admin.yml)) —
+  resolves the handle via DNS TXT then HTTPS well-known, verifies against the
+  DID document's `alsoKnownAs`, then `get_or_create`s on `did`. Because
+  `corliss.views._upsert_member` also keys exclusively on `did` and
+  never touches `is_staff`/`is_superuser`, a member promoted this way (before
+  or after their first login) always lands on the same row and keeps admin
+  rights — one account, admin from first login. This account never gets a
+  password (`set_unusable_password()`); it only ever authenticates via
+  ATProto OAuth, unlike the break-glass `admin` account above.
+- **`/logout` ends this device's corliss session only.** Now reachable from
+  the Account page's "Sign out" button (a plain GET link — no CSRF risk beyond
+  forcing a re-login), but still no discovery-doc `end_session_endpoint` or
+  relying-party integration (a member logging out of Open WebUI doesn't end
+  their corliss session — that gap is what motivated adding this route at
+  all: OIDC relying parties ending their own local session leaves corliss's
+  session alive, so re-authenticating silently re-issues a token with no
+  prompt). RP-initiated logout is still follow-up work.
+- **The app has no `email` field to add — it's already on `AbstractUser`.**
+  Sourcing it (via `transition:email` + `com.atproto.server.getSession`
+  against the member's own PDS — DPoP tokens can't be proxied) is documented
+  in [Corliss's own README](https://github.com/Z-Space-Society/Corliss).
+- **`ProtectSystem=strict` doesn't hide `/etc/corliss`.** Strict makes `/`
+  *read-only*, not inaccessible — the env file and signing keys stay readable
+  without needing `ReadWritePaths`; only `corliss_home` needs write access
+  (nothing under `/etc` is written at runtime).
+- **The atproto `client_id` IS a URL** (`<base>/auth/client-metadata.json`), so
+  changing `corliss_url` *or* that path mints a new client identity and every
+  member has to re-consent at their PDS. Bundle such moves into one cutover.
+- **Upgrading the app is a version bump.** Tag a release in the Corliss repo,
+  bump `corliss_version`, replay the role. `git pull` on CT 100 updates the
+  blueprint but never the app — deliberate: the app's version is now a
+  reviewable line in git, not a side effect of when provisioning last ran.
+- For how the CT is assigned a CTID, created and reached, see
+  [`provision.yml`](../../ansible/provision.yml) and the
+  [main docs](../README.md#service-ctid-assignment).

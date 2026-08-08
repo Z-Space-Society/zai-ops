@@ -1,30 +1,30 @@
 ---
-# Promote an ATProto handle to zai-auth admin (is_staff + is_superuser),
+# Promote an ATProto handle to corliss admin (is_staff + is_superuser),
 # keyed on DID — the zai-make-admin engine.
 #
 #   ansible-playbook make-admin.yml -e "handle=alice.bsky.social"
 #
 # (`zai-make-admin <handle>`, the operator command in bin/, is sugar over
 # this — no logic lives in the wrapper.) All the actual work happens in the
-# app's own `manage.py make_admin`; this playbook just reaches the zai-auth
+# app's own `manage.py make_admin`; this playbook just reaches the corliss
 # CT and runs it.
 #
-# Unlike set-domain.yml/assign.yml, this targets `hosts: zai-auth` directly
+# Unlike set-domain.yml/assign.yml, this targets `hosts: corliss` directly
 # (plain SSH, already trusted via CT 100's injected root key, same as the
 # role's own migrate task) rather than localhost — the thing being changed
 # is live app state on that CT, not runtime inventory on the control node.
 #
-# `vars_files` loads the zai-auth role's own defaults/main.yml so this play
-# gets zai_auth_venv/zai_auth_src/zai_auth_database_url without re-running
+# `vars_files` loads the corliss role's own defaults/main.yml so this play
+# gets corliss_venv/corliss_src/corliss_database_url without re-running
 # the whole role (which would rsync/pip-install/migrate/restart — overkill
 # for a one-shot admin grant) and without duplicating those constants in a
 # second place where they could drift out of sync.
 
-- name: Promote an ATProto handle to zai-auth admin
-  hosts: zai-auth
+- name: Promote an ATProto handle to corliss admin
+  hosts: corliss
   gather_facts: false
   vars_files:
-    - roles/zai-auth/defaults/main.yml
+    - roles/corliss/defaults/main.yml
   vars:
     # Handles are dot-separated domain-like labels, same shape as an FQDN —
     # reuse set-domain.yml's plausibility check.
@@ -46,18 +46,18 @@
           lowercase dotted handle like 'alice.bsky.social'.
       run_once: true
 
-    - name: Run make_admin on the zai-auth CT
+    - name: Run make_admin on the corliss CT
       ansible.builtin.command:
-        cmd: "{{ zai_auth_venv }}/bin/python manage.py make_admin {{ handle }}"
+        cmd: "{{ corliss_venv }}/bin/python manage.py make_admin {{ handle }}"
       args:
-        chdir: "{{ zai_auth_src }}"
+        chdir: "{{ corliss_src }}"
       environment:
-        DATABASE_URL: "{{ zai_auth_database_url }}"
-        SECRET_KEY: "{{ zai_auth_secret_key }}"
-      register: zai_auth_make_admin
-      changed_when: "'created' in zai_auth_make_admin.stdout or 'promoted' in zai_auth_make_admin.stdout"
+        DATABASE_URL: "{{ corliss_database_url }}"
+        SECRET_KEY: "{{ corliss_secret_key }}"
+      register: corliss_make_admin
+      changed_when: "'created' in corliss_make_admin.stdout or 'promoted' in corliss_make_admin.stdout"
       no_log: true
 
     - name: Show the result
       ansible.builtin.debug:
-        msg: "{{ zai_auth_make_admin.stdout }}"
+        msg: "{{ corliss_make_admin.stdout }}"

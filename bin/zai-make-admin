@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # zai-make-admin — thin wrapper over make-admin.yml. Promote an ATProto handle
-# to zai-auth admin (is_staff + is_superuser), keyed on DID:
+# to corliss admin (is_staff + is_superuser), keyed on DID:
 #
 #   zai-make-admin alice.bsky.social
 #
 # Lives in the repo's bin/ (on PATH via /etc/profile.d/zai-ops.sh) and runs in
 # place — the script you run is always the one in git, no installed copy to drift.
-# No logic lives here; the playbook (which SSHes into the zai-auth CT and runs
+# No logic lives here; the playbook (which SSHes into the corliss CT and runs
 # manage.py make_admin) does the work.
 set -euo pipefail
 if [[ $# -ne 1 ]]; then

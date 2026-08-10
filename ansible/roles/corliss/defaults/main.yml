@@ -9,11 +9,21 @@
 # checkout. See docs/decisions/0006-corliss-standalone-apex.md.
 
 # Upstream app source. Public repo, so the clone needs no credentials — the CT
-# reaches GitHub over the host's NAT. Pin to a TAG, not a branch: `git pull` on
-# CT 100 updates the blueprint, but the app's version is this number, and
-# bumping it is a reviewable commit like any other version pin in this repo.
+# reaches GitHub over the host's NAT. Pin to an IMMUTABLE ref — a tag or a
+# commit SHA, never a branch: `git pull` on CT 100 updates the blueprint, but
+# the app's version is this value, and bumping it is a reviewable commit like
+# any other version pin in this repo. A branch would make replays silently pick
+# up whatever moved upstream in between.
+#
+# NOTE: unrelated to the `version` field in the app's pyproject.toml. That is
+# package metadata, unread by anything (Corliss sets `package = false`); this is
+# the git ref ansible.builtin.git checks out.
 corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
-corliss_version: v0.1.0
+# Adopts the uv project workflow: pyproject.toml + uv.lock replace
+# requirements.txt, Python 3.14, Django 6.1. Requires the uv sync + managed
+# CPython tasks in this role — do not point this at ead332d or later while the
+# role still runs `uv pip install -r requirements.txt`.
+corliss_version: ead332d4cd255eaf7cc97d6f4b13c9398e1a8106
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

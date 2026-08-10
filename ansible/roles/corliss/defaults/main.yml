@@ -29,23 +29,42 @@ corliss_group: corliss
 
 # On-disk layout, all under /opt like every other native service. src/ is the
 # cloned app checkout (reset to corliss_version on every run); venv/ is layered
-# on top of it.
+# on top of it — `uv sync` builds it there rather than at the source tree's
+# default src/.venv because the tasks set UV_PROJECT_ENVIRONMENT to this path.
+#
+# The uv-managed CPython is deliberately placed UNDER corliss_home (not uv's
+# default ~/.local/share/uv/python), same as open-webui, so that: (a) the
+# recursive chown at the end of the role owns it, and (b) ProtectHome=true in
+# the unit — which hides /root — never hides the interpreter the daemon execs.
 corliss_home: /opt/corliss
 corliss_src: "{{ corliss_home }}/src"
 corliss_venv: "{{ corliss_home }}/venv"
+corliss_python_install_dir: "{{ corliss_home }}/python"
 
-# uv — builds the venv and installs requirements.txt into it. Installed
-# reproducibly from a pinned, checksummed release tarball (NOT `curl | sh` of
-# a moving installer), same idiom and same pin as the open-webui role. Unlike
-# open-webui, corliss doesn't need uv's managed-CPython fetch: Debian 13
-# already ships Python 3.13, which Django 5.2 fully supports, so `uv venv`
-# just wraps the system interpreter. Releases:
-# https://github.com/astral-sh/uv/releases
+# uv — provisions the venv from the checkout's pyproject.toml + uv.lock, and
+# fetches the managed CPython to build it against. Installed reproducibly from
+# a pinned, checksummed release tarball (NOT `curl | sh` of a moving
+# installer), same idiom and same pin as the open-webui role. Like open-webui,
+# corliss DOES need uv's managed-CPython fetch: the app requires Python 3.14
+# (pinned in its committed .python-version) and Debian 13 ships 3.13.
+#
+# There is deliberately no corliss_python_version var here: the app's
+# .python-version is the single source of truth and uv reads it off the
+# checkout, so a role var would only be a second copy to drift.
+# Releases: https://github.com/astral-sh/uv/releases
 corliss_uv_version: "0.11.25"
 corliss_uv_sha256: "1db18b5e76fa645a7f3865773139bdec8e2d46adbdbb35e7410b34fa8015ccd2"
 corliss_uv_url: "https://github.com/astral-sh/uv/releases/download/{{ corliss_uv_version }}/uv-x86_64-unknown-linux-gnu.tar.gz"
 corliss_uv_install_dir: /usr/local/bin
 corliss_uv_bin: "{{ corliss_uv_install_dir }}/uv"
+
+# Per-request HTTP timeout (seconds) for uv's downloads. uv defaults to 30s,
+# which the managed-CPython tarball (tens of MB, fetched on a cold CT) can blow
+# past on the host's NAT'd link. Corliss's own dependency set is small — no
+# torch-sized wheel like open-webui's — so this is a modest lift, not
+# open-webui's 900. uv caches under /root/.cache/uv, so a re-run after a
+# partial download resumes rather than refetching.
+corliss_uv_http_timeout: 180
 
 # Config + secrets live under /etc, like every other role. The env file (0600,
 # root-only) carries DATABASE_URL/SECRET_KEY/etc; the keys/ dir holds the two

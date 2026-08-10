@@ -58,14 +58,14 @@ CT 100.
 | Mark the checkout `safe.directory` | `command` → `git config --system --replace-all safe.directory` | git runs as root but the tree is owned by the `corliss` service user, and git refuses a repo whose worktree belongs to someone else ("dubious ownership"). It bails before reading `.git/config`, so the symptom is the misleading `'origin' does not appear to be a git repository`. See [Notes](#notes). |
 | Clone the app at its pinned ref | `ansible.builtin.git` (`version: {{ corliss_version }}`, `force: true`) | Checks out `Z-Space-Society/Corliss` into `{{ corliss_src }}`. Public repo over the host's NAT — no credentials, nothing in the vault. `force` discards any on-CT drift so the checkout is exactly the pinned tag (the guarantee rsync's `delete: true` used to give). Notifies restart. |
 | Probe + install pinned `uv` | `command`, then `get_url`/`unarchive`/`copy` | Install uv reproducibly from the **pinned, checksummed** release tarball (not `curl \| sh`), same idiom as `open-webui`. Skipped when the installed `uv --version` already matches. |
-| Create the venv against the system Python | `command` → `uv venv --python python3` (`creates`) | Debian 13 ships Python 3.13 natively — Django 5.2's ceiling — so unlike `open-webui` there's no managed-interpreter fetch/placement to get right; `uv venv` just wraps the system interpreter. |
-| Install dependencies into the venv | `command` → `uv pip install --python {{ corliss_venv }}/bin/python -r {{ corliss_src }}/requirements.txt` | The cloned tag's `requirements.txt` **is** the dependency pin — one version number (`corliss_version`) governs both app and deps. Notifies restart. |
+| Sync the venv from `uv.lock` | `command` → `uv sync --locked --no-dev` (`chdir: {{ corliss_src }}`) | One task builds the whole environment: creates the venv, fetches a managed CPython of the version in the checkout's `.python-version`, and installs the exact tree in `uv.lock`. `--locked` **fails** the run if the lock is stale against `pyproject.toml` instead of quietly resolving something else — that's what makes `corliss_version` a pin of the whole dependency tree. `UV_PROJECT_ENVIRONMENT` + `UV_PYTHON_INSTALL_DIR` are load-bearing — see [Notes](#notes). Notifies restart. |
+| Confirm the base interpreter is under `/opt/corliss` | `command` → `python -c 'sys._base_executable'` (`failed_when`) | Guards `UV_PYTHON_INSTALL_DIR`: an interpreter outside `corliss_home` is invisible to the daemon under `ProtectHome=true`. Fail loud at provision time, not as a cryptic unit-start failure. Same guard as `open-webui`. |
 | Collect static assets | `command` → `manage.py collectstatic --noinput` | Populates `STATIC_ROOT` (whitenoise, installed above, serves it straight out of gunicorn — no separate nginx-for-statics box) with the login/account pages' `base.css` + vendored fonts. No DB/secrets needed, just a loadable settings module. Notifies restart. |
 | Render the two signing keys | `copy` (`content:`, `0640` root:corliss, `no_log`) | EC P-256 (atproto DPoP/ES256) + RSA (OIDC id_token/RS256) PEMs from the cached `group_vars` secrets — see Secrets. Group-readable: Django reads these paths itself. Notifies restart. |
 | Render the secret env file | `template` (`0600` root, `no_log`) | `DATABASE_URL`, `SECRET_KEY`, key paths, `PUBLIC_BASE_URL`, `OIDC_CLIENT_ID/SECRET`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`. Read by systemd via `EnvironmentFile`. Notifies restart. |
 | Apply database migrations | `command` → `manage.py migrate --noinput` (`no_log`) | Provision-time, before the daemon ever starts — same principle as litellm's `prisma migrate deploy`. Idempotent (`changed_when` on "No migrations to apply"). Notifies restart. |
 | Ensure the break-glass local admin exists | `command` → `manage.py ensure_admin` (`no_log`) | Idempotently creates a local username/password superuser (`admin`, no ATProto identity) as a way in if OIDC/ATProto login is ever broken. Only sets the password at creation (never rotates it on re-runs); re-asserts `is_staff`/`is_superuser` on every run so provisioning re-runs heal it if those flags ever get flipped off. See [Notes](#notes). |
-| Chown the home to `corliss` | `ansible.builtin.file` (`recurse`) | clone/pip/migrate ran as root; the daemon reads the venv + cloned source. Runs *after* install/migrate. |
+| Chown the home to `corliss` | `ansible.builtin.file` (`recurse`) | clone/sync/migrate ran as root; the daemon reads the venv, the uv-managed interpreter and the cloned source. Runs *after* install/migrate, so it covers the interpreter too. |
 | Install the systemd unit | `template` → `/etc/systemd/system/corliss.service` | Hardened (`ProtectSystem=strict`, `ReadWritePaths={{ corliss_home }}`); `ExecStart` runs gunicorn against `corliss.wsgi:application`. Notifies reload + restart. |
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config before the smoke test. |
@@ -88,7 +88,9 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | `corliss_version` | `v0.1.0` | The **pinned tag** cloned onto the CT. Bumping this is how the app is upgraded. |
 | `corliss_port` / `corliss_host` | `8000` / `0.0.0.0` | gunicorn's bind; `0.0.0.0` so Caddy can reach it from the proxy CT. |
 | `corliss_gunicorn_workers` | `2` | gunicorn worker count. |
-| `corliss_home` / `corliss_src` / `corliss_venv` | `/opt/corliss[/src,/venv]` | Cloned source + venv, all under the chowned tree. |
+| `corliss_home` / `corliss_src` / `corliss_venv` | `/opt/corliss[/src,/venv]` | Cloned source + venv, all under the chowned tree. `uv sync` is pointed at `corliss_venv` via `UV_PROJECT_ENVIRONMENT` — see [Notes](#notes). |
+| `corliss_python_install_dir` | `/opt/corliss/python` | Where uv puts the managed CPython — **under** `corliss_home` deliberately, so the recursive chown owns it and `ProtectHome=true` doesn't hide it. |
+| `corliss_uv_http_timeout` | `180` | Per-request timeout (s) for uv's downloads; uv's 30s default can drop the interpreter tarball on the NAT'd link. Far below `open-webui`'s `900` — corliss has no torch-sized wheel. |
 | `corliss_config_dir` / `corliss_keys_dir` | `/etc/corliss[/keys]` | Env file + the two signing-key PEMs. |
 | `corliss_db_name` / `corliss_db_user` | `corliss` | The Postgres database + role this role creates. |
 | `corliss_url` | `https://{{ cluster_domain }}` | `PUBLIC_BASE_URL` — the **apex**, anchoring the atproto `client_id`, OIDC issuer, and redirect/JWKS URLs. Changing it mints a new atproto client identity. |
@@ -153,6 +155,36 @@ curl -s https://<domain>/auth/client-metadata.json | grep client_id        # cli
 
 ## Notes
 
+- **The venv is a `uv sync` of the app's own lockfile, and two env vars hold it
+  together.** Corliss is a uv project: `pyproject.toml` pins every direct
+  dependency exactly and the committed `uv.lock` pins the full tree including
+  transitives, so `uv sync --locked --no-dev` reproduces the exact environment
+  the tag was tested with — and *fails* if the lock has drifted from
+  `pyproject.toml` rather than resolving something else behind your back. Two
+  environment variables on that task are load-bearing:
+  - `UV_PROJECT_ENVIRONMENT={{ corliss_venv }}` — without it uv builds `.venv`
+    **inside the source tree**, and every consumer that addresses
+    `/opt/corliss/venv` by path (the unit's `ExecStart`, `collectstatic`,
+    `migrate`, `ensure_admin`, the chown) silently misses it.
+  - `UV_PYTHON_INSTALL_DIR={{ corliss_python_install_dir }}` — the app needs
+    Python 3.14 (its committed `.python-version`) and Debian 13 ships 3.13, so
+    uv fetches a managed interpreter. Left at uv's default it lands in
+    `/root/.local/share/uv/python`, which `ProtectHome=true` hides from the
+    daemon. The follow-up `sys._base_executable` check fails the run if it ever
+    lands outside `corliss_home`.
+
+  There is deliberately **no `corliss_python_version` variable**: the app's
+  `.python-version` is the single source of truth and uv reads it off the
+  checkout. A role var would just be a second copy to drift. (Contrast
+  `open-webui`, which installs a PyPI release and so has nowhere else to state
+  the version.)
+- **`DEV_LOGIN_ENABLED` must never reach this CT.** Corliss has a local-dev
+  sign-in (`/auth/dev-login`) that mints a session for any handle typed into a
+  form. It defaults off and is deliberately absent from `corliss.env.j2` — not
+  set to `false`, just never templated. Belt and braces: the app's own system
+  check `corliss.E001` hard-fails `manage.py check`/`migrate` if it is set
+  without `DEBUG`, so this role's migrate task would fail the whole run rather
+  than deploy an auth bypass. No Ansible assertion needed.
 - **Granting admin to an ATProto member: `zai-make-admin <handle>`.** Promotes
   a handle to `is_staff`/`is_superuser` keyed on its DID (`manage.py
   make_admin`, backed by [`make-admin.yml`](../../ansible/make-admin.yml)) —

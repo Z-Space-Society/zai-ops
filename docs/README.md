@@ -626,6 +626,27 @@ Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
   a request already carrying it falls through to the real app. See
   [`proxy`](roles/proxy.md#notes).
 
+Lessons on **uv-provisioned Python services** ([`corliss`](roles/corliss.md),
+[`open-webui`](roles/open-webui.md)) — both need a Python that Debian 13 doesn't
+ship, so uv fetches a managed CPython:
+
+- **Point `UV_PYTHON_INSTALL_DIR` under the role's `/opt` home, or the daemon
+  can't exec its own interpreter.** uv's default is
+  `/root/.local/share/uv/python` — which the units' `ProtectHome=true` hides,
+  and which the roles' recursive chown never reaches. Provisioning goes green
+  and the unit then fails to start. Both roles place it under the service home
+  and follow the install with a `sys._base_executable` check that fails the play
+  if it ever lands elsewhere.
+- **`uv sync` says "Checked", `uv pip install` says "Audited".** The two have
+  *different* no-op wording, so a `changed_when` copied from one to the other
+  silently reports changed on every run and notifies a needless service restart.
+  Both messages go to **stderr**, not stdout. (Verified on uv 0.11.)
+- **`uv sync` builds `.venv` inside the source tree unless
+  `UV_PROJECT_ENVIRONMENT` says otherwise.** Every role addresses its venv by
+  absolute path (`ExecStart`, the `manage.py` tasks, the chown), so a project
+  sync without that variable puts the environment somewhere none of them look
+  while still exiting 0.
+
 Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
 
 - **The atproto `client_id` IS a URL** — specifically

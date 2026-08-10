@@ -135,8 +135,8 @@
     force: true
   notify: restart corliss
 
-# --- uv + the system Python 3.13 (Debian 13's default — no managed-interpreter
-# fetch needed, unlike open-webui, which needs a version Debian doesn't ship) ---
+# --- uv + a managed CPython (the app pins 3.14 in its committed .python-version;
+# Debian 13 ships 3.13, so uv fetches its own — exactly like open-webui) --------
 
 - name: Ensure CA certificates are present for the uv + package downloads
   ansible.builtin.apt:
@@ -180,24 +180,59 @@
         - uv
         - uvx
 
-# `uv venv` builds the venv itself (no python3-venv apt package needed) against
-# the SYSTEM python3 — Debian 13 already ships 3.13, which Django 5.2 fully
-# supports, so there's no managed-interpreter fetch/placement to get right here
-# (contrast open-webui, which needs a version Debian doesn't ship).
-- name: Create the venv against the system Python
+# One task provisions the whole environment: run from the checkout, `uv sync`
+# creates the venv itself (no separate `uv venv`, no python3-venv apt package),
+# fetches a managed CPython of the version pinned in the app's committed
+# .python-version (3.14 — Debian 13 ships 3.13, so the system interpreter is
+# unusable here), and installs the exact tree in uv.lock.
+#
+# --locked makes the deploy FAIL if uv.lock is stale against pyproject.toml
+# rather than quietly resolving something else — that's the point of it: the CT
+# runs precisely the tree committed at corliss_version. --no-dev keeps
+# dev-only tooling off the CT. Together with the lockfile, this is what makes
+# corliss_version a true pin of the whole dependency tree (requirements.txt
+# never was one — it only ever pinned the app's own ref).
+#
+# Both env vars are load-bearing:
+#   UV_PROJECT_ENVIRONMENT redirects the venv out of uv's default location
+#     (.venv INSIDE the source tree) to corliss_venv — the path the systemd
+#     unit's ExecStart, the manage.py tasks below and the recursive chown all
+#     address literally. Without it every one of those breaks.
+#   UV_PYTHON_INSTALL_DIR forces the managed interpreter UNDER corliss_home
+#     (not uv's default /root/.local/share/uv/python) so the chown owns it and
+#     ProtectHome=true in the unit doesn't hide it from the daemon.
+# UV_HTTP_TIMEOUT lifts uv's stingy 30s per-request default so the interpreter
+# tarball doesn't time out mid-download on the NAT'd link.
+#
+# uv prints "Checked N packages" to stderr when the environment already matches
+# the lock — the only no-change signal. NOT "Audited", which is `uv pip
+# install`'s wording (verified on uv 0.11); keying on that would report changed
+# every run and notify a pointless restart.
+- name: Sync the venv from the checkout's uv.lock
   ansible.builtin.command:
-    cmd: "{{ corliss_uv_bin }} venv --python python3 {{ corliss_venv }}"
-    creates: "{{ corliss_venv }}/bin/python"
-
-# `requirements:` reads straight from the synced source's requirements.txt —
-# the repo's own pin is the version pin, no role-level version var to drift
-# out of sync with what's actually committed.
-- name: Install corliss's dependencies into the venv
-  ansible.builtin.command:
-    cmd: "{{ corliss_uv_bin }} pip install --python {{ corliss_venv }}/bin/python -r {{ corliss_src }}/requirements.txt"
-  register: corliss_pip
-  changed_when: "'Audited' not in corliss_pip.stderr"
+    cmd: "{{ corliss_uv_bin }} sync --locked --no-dev"
+  args:
+    chdir: "{{ corliss_src }}"
+  environment:
+    UV_PROJECT_ENVIRONMENT: "{{ corliss_venv }}"
+    UV_PYTHON_INSTALL_DIR: "{{ corliss_python_install_dir }}"
+    UV_HTTP_TIMEOUT: "{{ corliss_uv_http_timeout }}"
+  register: corliss_uv_sync
+  changed_when: "'Checked' not in corliss_uv_sync.stderr"
   notify: restart corliss
+
+- name: Confirm the venv's base interpreter resolves under the role tree
+  # Guards the load-bearing UV_PYTHON_INSTALL_DIR above: if the interpreter ever
+  # lands outside corliss_home — a missed env var, or uv satisfying the request
+  # from a system 3.14 someone installed — the daemon would fail to exec it
+  # under ProtectHome=true. Fail loud at provision time instead of with a
+  # cryptic unit start failure. Same guard as the open-webui role.
+  ansible.builtin.command:
+    cmd: >-
+      {{ corliss_venv }}/bin/python -c "import sys; print(sys._base_executable)"
+  register: corliss_base_py
+  changed_when: false
+  failed_when: not (corliss_base_py.stdout | trim).startswith(corliss_home)
 
 # Static assets (base.css, vendored fonts) are collected into STATIC_ROOT here;
 # whitenoise (installed above) serves them straight out of gunicorn — no
@@ -285,9 +320,10 @@
   changed_when: "'unchanged' not in corliss_ensure_admin.stdout"
   no_log: true
 
-- name: Give the corliss user ownership of its home (venv + cloned source)
-  # clone/pip/migrate ran as root; the daemon runs as corliss and needs to
-  # read the interpreter, the venv and the app source. Runs AFTER all of that.
+- name: Give the corliss user ownership of its home (venv, interpreter, source)
+  # clone/sync/migrate ran as root; the daemon runs as corliss and needs to read
+  # the uv-managed interpreter, the venv and the app source. Runs AFTER all of
+  # that, so it covers the managed CPython under corliss_python_install_dir too.
   ansible.builtin.file:
     path: "{{ corliss_home }}"
     state: directory

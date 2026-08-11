@@ -85,7 +85,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `corliss_repo_url` | `https://github.com/Z-Space-Society/Corliss.git` | Upstream app repo (public — the clone needs no credentials). |
-| `corliss_version` | `v0.1.0` | The **pinned tag** cloned onto the CT. Bumping this is how the app is upgraded. |
+| `corliss_version` | `v0.2.0` | The **pinned tag** cloned onto the CT. Bumping this is how the app is upgraded. `v0.2.0` is the uv-project release (pyproject + `uv.lock`, Python 3.14, Django 6.1) this role's `uv sync --locked` requires. |
 | `corliss_port` / `corliss_host` | `8000` / `0.0.0.0` | gunicorn's bind; `0.0.0.0` so Caddy can reach it from the proxy CT. |
 | `corliss_gunicorn_workers` | `2` | gunicorn worker count. |
 | `corliss_home` / `corliss_src` / `corliss_venv` | `/opt/corliss[/src,/venv]` | Cloned source + venv, all under the chowned tree. `uv sync` is pointed at `corliss_venv` via `UV_PROJECT_ENVIRONMENT` — see [Notes](#notes). |

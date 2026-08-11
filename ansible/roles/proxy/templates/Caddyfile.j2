@@ -45,7 +45,22 @@
 {% else %}
 http://{{ h.domain }} {
 {% endif %}
-{% if h.redirects is defined and h.redirects %}
+{% if h.root is defined %}
+    # A static route: this entry names a directory instead of an upstream
+    # service, so Caddy serves the files itself — no CT, no daemon, no port.
+    # Used for pre-built browser apps (scn_console); everything else here
+    # proxies.
+    root * {{ h.root }}
+    # SPA fallback, and it is load-bearing rather than boilerplate: a
+    # single-page app owns client-side routes that have no file behind them
+    # (the admin console's OAuth callback lands on /oauth/callback). Without
+    # this, that request 404s and sign-in fails *silently* — the token
+    # exchange has already happened, so the only symptom is a user who never
+    # lands. Any path that isn't a real file resolves to index.html and the
+    # app routes it.
+    try_files {path} /index.html
+    file_server
+{% elif h.redirects is defined and h.redirects %}
     # handle blocks are mutually exclusive and evaluated in order (same idiom
     # as the :80 catch-all above) — each redirect is checked before falling
     # through to the catch-all reverse_proxy.

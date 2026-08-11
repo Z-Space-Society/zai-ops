@@ -184,7 +184,6 @@ architecture, networking, and a note for every role.
 ## Structure
 
 - `bootstrap.sh` — Host-level script to create CT 100 (the one host entry point)
-- `apps/zai-auth/` — Django control app; ATProto-handle login (OIDC for Open WebUI) today, dashboard + Proxmox/Ansible control to come
 - `ansible/`
   - `site.yml` — configures the control node (CT 100)
   - `verify-proxmox.yml` — checks the API token authenticates
@@ -196,6 +195,13 @@ architecture, networking, and a note for every role.
   - `inventory/` — committed blueprint (`hosts.yml`) + git-ignored runtime roster (`local.yml`)
   - `group_vars/all/` — shared vars (`main.yml`) and the encrypted `vault.yml`
   - `roles/` — `control_node`, `proxy`, `object_store`, `postgres`, `nvidia_cuda`, `llama_server`, and more as they come online
+
+No application source lives here. The control app (ATProto-handle login, OIDC
+for Open WebUI) is [Z-Space-Society/Corliss](https://github.com/Z-Space-Society/Corliss);
+the `corliss` role clones it onto its CT at the tag pinned in
+[`defaults/main.yml`](ansible/roles/corliss/defaults/main.yml), like every other
+role installs a pinned release. See
+[ADR-0006](docs/decisions/0006-corliss-standalone-apex.md).
 
 ## Contributing
 

@@ -71,7 +71,8 @@ dead.
   is a deliberate narrowing of the repo's "pull = live" convention, which was
   always about *operator scripts in `bin/`*, not about vendored application
   source.
-- **The old `apps/zai-auth/` tree is left in place for now**, unreferenced by
-  any role, until the cutover is confirmed working. Deleting it is a follow-up.
+- **The old `apps/zai-auth/` tree is deleted** (it was kept, unreferenced by any
+  role, until the cutover was confirmed working). Its history stays in this
+  repo's git history; the live source is the Corliss repo.
 - The blueprint stays host-agnostic (ADR-0001): the apex is still
   `{{ cluster_domain }}` from the git-ignored `inventory/local.yml`.

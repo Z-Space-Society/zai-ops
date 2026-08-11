@@ -85,7 +85,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `corliss_repo_url` | `https://github.com/Z-Space-Society/Corliss.git` | Upstream app repo (public — the clone needs no credentials). |
-| `corliss_version` | `v0.2.0` | The **pinned tag** cloned onto the CT. Bumping this is how the app is upgraded. `v0.2.0` is the uv-project release (pyproject + `uv.lock`, Python 3.14, Django 6.1) this role's `uv sync --locked` requires. |
+| `corliss_version` | `v0.2.1` | The **pinned tag** cloned onto the CT. Bumping this is how the app is upgraded — and since `v0.2.1` the deployed site's footer stamps the tag it's running (resolved by `git describe --tags` off the checkout), so the pin is verifiable from a browser. Floor is `v0.2.0`, the uv-project release (pyproject + `uv.lock`, Python 3.14, Django 6.1) this role's `uv sync --locked` requires. |
 | `corliss_port` / `corliss_host` | `8000` / `0.0.0.0` | gunicorn's bind; `0.0.0.0` so Caddy can reach it from the proxy CT. |
 | `corliss_gunicorn_workers` | `2` | gunicorn worker count. |
 | `corliss_home` / `corliss_src` / `corliss_venv` | `/opt/corliss[/src,/venv]` | Cloned source + venv, all under the chowned tree. `uv sync` is pointed at `corliss_venv` via `UV_PROJECT_ENVIRONMENT` — see [Notes](#notes). |
@@ -146,6 +146,7 @@ ssh root@10.1.1.<ctid> 'ss -ltnp | grep 8000'                              # lis
 curl -fs http://10.1.1.<ctid>:8000/.well-known/openid-configuration        # discovery doc
 ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep corliss        # DB present
 ssh root@10.1.1.<ctid> 'git -C /opt/corliss/src describe --tags'          # deployed version
+curl -s https://<domain>/ | grep -o 'Corliss v[^<]*'                       # same, from the footer
 curl -s https://<domain>/.well-known/openid-configuration | grep issuer    # issuer == bare apex
 curl -s https://<domain>/auth/client-metadata.json | grep client_id        # client_id on /auth/
 # end-to-end: browse https://chat.<domain>, click the ZAI OAuth button,
@@ -222,10 +223,16 @@ curl -s https://<domain>/auth/client-metadata.json | grep client_id        # cli
 - **The atproto `client_id` IS a URL** (`<base>/auth/client-metadata.json`), so
   changing `corliss_url` *or* that path mints a new client identity and every
   member has to re-consent at their PDS. Bundle such moves into one cutover.
-- **Upgrading the app is a version bump.** Tag a release in the Corliss repo,
-  bump `corliss_version`, replay the role. `git pull` on CT 100 updates the
-  blueprint but never the app — deliberate: the app's version is now a
+- **Upgrading the app is a version bump.** Tag a release in the Corliss repo
+  (its `bin/release` bumps `pyproject.toml`, re-locks, tests and tags in one
+  step), bump `corliss_version`, replay the role. `git pull` on CT 100 updates
+  the blueprint but never the app — deliberate: the app's version is now a
   reviewable line in git, not a side effect of when provisioning last ran.
+  Since `v0.2.1` the live footer reports the tag it's serving, so the bump can
+  be confirmed from a browser rather than over SSH. That stamp is
+  `git describe --tags` run *inside* the CT's checkout, which is why the clone
+  is full and unshallow — adding `depth:` to the git task would degrade the
+  footer to a bare SHA.
 - For how the CT is assigned a CTID, created and reached, see
   [`provision.yml`](../../ansible/provision.yml) and the
   [main docs](../README.md#service-ctid-assignment).

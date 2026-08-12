@@ -119,6 +119,16 @@ corliss_allowed_hosts:
   # Django's ALLOWED_HOSTS check 400s any Host header not on this list —
   # without this, the health check fails even though gunicorn is up fine.
   - "127.0.0.1"
+  # This CT's own internal address, because the SCN registry pushes membership
+  # events to it CT-to-CT over vmbr1 rather than out through Caddy — so the
+  # Host header on those POSTs is the bare `10.1.1.<ctid>:8000`, which the two
+  # entries above do not cover. Django rejects a Host that is not listed here
+  # with a 400 *before* the view runs, so without this the push fails in the
+  # worst possible way: the endpoint looks deployed, the registry's Lua logs a
+  # 400 it cannot explain, and the membership cache silently stays empty.
+  # Derived from the CTID via hostvars, never hardcoded (same rule as
+  # corliss_database_url).
+  - "{{ hostvars['corliss'].ansible_host }}"
 
 # The one OIDC relying party today: Open WebUI. client_id is a LOCAL default
 # here (not reached into the open-webui role's vars) — mirror it in

@@ -95,6 +95,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | `corliss_config_dir` / `corliss_keys_dir` | `/etc/corliss[/keys]` | Env file + the two signing-key PEMs. |
 | `corliss_db_name` / `corliss_db_user` | `corliss` | The Postgres database + role this role creates. |
 | `corliss_url` | `https://{{ cluster_domain }}` | `PUBLIC_BASE_URL` — the **apex**, anchoring the atproto `client_id`, OIDC issuer, and redirect/JWKS URLs. Changing it mints a new atproto client identity. |
+| `corliss_allowed_hosts` | `[{{ cluster_domain }}, 127.0.0.1, <this CT's IP>]` | Django's `ALLOWED_HOSTS`. The apex for browser traffic through Caddy, loopback for the provision-time smoke test, and this CT's own internal address because the SCN registry pushes membership events **CT-to-CT over `vmbr1`**, so those POSTs carry a bare-IP `Host`. Django 400s an unlisted `Host` before the view runs — see [Notes](#notes). |
 | `corliss_oidc_client_id` | `open-webui` | Local default — keep in sync with `open-webui`'s own `openwebui_oidc_client_id`. |
 | `corliss_oidc_redirect_uris` | `[https://chat.{{ cluster_domain }}/oauth/oidc/callback]` | Open WebUI's OIDC callback, registered on this side. |
 | `corliss_chat_url` | `https://chat.{{ cluster_domain }}` | Drives the login/account pages' nav "Chat" link — same `cluster_domain` derivation as `corliss_url`, different subdomain. |

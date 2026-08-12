@@ -20,17 +20,20 @@
 # package metadata, unread by anything (Corliss sets `package = false`); this is
 # the git ref ansible.builtin.git checks out.
 corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
-# v0.2.1 stamps the running version in every page footer, so which build is
-# serving can be read off the site itself instead of by SSHing to the CT. It
-# resolves from `git describe --tags` against the checkout this role clones —
-# which works only because that clone is a full one at a tag (see the git task;
-# don't add `depth:`), and reads back exactly the value pinned here.
+# v0.3.0 adds atproto membership caching, so a login no longer costs a live
+# lookup against the user's PDS on every request.
+#
+# Since v0.2.1 the running version is stamped in every page footer, so which
+# build is serving can be read off the site itself instead of by SSHing to the
+# CT. It resolves from `git describe --tags` against the checkout this role
+# clones — which works only because that clone is a full one at a tag (see the
+# git task; don't add `depth:`), and reads back exactly the value pinned here.
 #
 # Floor: v0.2.0 adopted the uv project workflow (pyproject.toml + uv.lock
 # replace requirements.txt, Python 3.14, Django 6.1). This role's `uv sync
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
-corliss_version: v0.2.1
+corliss_version: v0.3.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

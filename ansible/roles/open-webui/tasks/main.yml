@@ -125,12 +125,21 @@
 - name: Install the pinned uv binary
   when: openwebui_uv_version not in (openwebui_uv_installed.stdout | default(''))
   block:
+    # Retried for the same reason as the corliss role's copy of this task: the
+    # fetch crosses the host's NAT to GitHub's release CDN, which intermittently
+    # closes the connection on an otherwise healthy link. The checksum is what
+    # makes retrying safe — a truncated or substituted download still fails hard
+    # rather than being papered over by another attempt.
     - name: Download the pinned uv release tarball
       ansible.builtin.get_url:
         url: "{{ openwebui_uv_url }}"
         dest: /tmp/uv-{{ openwebui_uv_version }}.tar.gz
         checksum: "sha256:{{ openwebui_uv_sha256 }}"
         mode: "0644"
+      register: openwebui_uv_download
+      retries: 3
+      delay: 5
+      until: openwebui_uv_download is succeeded
 
     - name: Extract the uv tarball
       ansible.builtin.unarchive:

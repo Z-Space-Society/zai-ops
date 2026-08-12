@@ -461,6 +461,31 @@ by `bootstrap.sh` and re-asserted by the `control_node` role, *not* the 1.3.0
 bundled with Debian 13's `ansible` 12 (see the timeout lesson). These will recur
 on the remaining service CTs:
 
+- **Renumbering a CT breaks CT 100's `known_hosts`, and the error accuses you of
+  a MITM.** Addresses derive from the CTID, so reassigning numbers recycles IPs
+  between services — `10.1.1.120` can be Open WebUI in the morning and Corliss
+  in the afternoon, with a different host key. Ansible then fails
+  `UNREACHABLE!` with `REMOTE HOST IDENTIFICATION HAS CHANGED!`, which reads
+  alarming and is simply true: it *is* a different machine. Clear the stale
+  entry for **every IP whose occupant changed**, not just the one that failed,
+  or the run fails again on the next host:
+
+  ```bash
+  ssh-keygen -f /root/.ssh/known_hosts -R 10.1.1.<ctid>
+  ```
+
+  Do **not** reach for `host_key_checking = False` in `ansible.cfg` — that
+  trades a once-per-renumber annoyance for permanently unverified SSH to every
+  CT. `StrictHostKeyChecking=accept-new` does not help either: it accepts keys
+  for *unknown* hosts, and these hosts are known with the wrong key.
+
+- **Downloads over the host NAT drop intermittently.** Release fetches from
+  GitHub's CDN fail with `Remote end closed connection without response` on an
+  otherwise healthy link — the same flakiness `corliss_uv_http_timeout: 180`
+  exists to absorb. Any `get_url` for a release artifact wants
+  `retries`/`until`; a checksum makes the retry safe, because a truncated or
+  substituted file still fails hard instead of being papered over.
+
 - **Create needs `api_timeout`, not just `timeout`.** Bundled 1.3.0 calls
   `ProxmoxAPI()` without a connection timeout, so proxmoxer falls back to a 5s
   read timeout that the LXC-create POST exceeds on a fresh node

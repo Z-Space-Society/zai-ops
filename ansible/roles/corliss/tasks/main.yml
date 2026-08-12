@@ -155,12 +155,24 @@
 - name: Install the pinned uv binary
   when: corliss_uv_version not in (corliss_uv_installed.stdout | default(''))
   block:
+    # Retried: this fetch crosses the host's NAT to GitHub's release CDN, which
+    # intermittently drops the connection ("Remote end closed connection without
+    # response") on an otherwise healthy link — the same flakiness that
+    # corliss_uv_http_timeout already exists to absorb for uv's own downloads.
+    # A one-off blip here fails the whole provision run, which is a poor trade
+    # for a task that is safe to repeat: the checksum makes a partial or
+    # substituted download a hard failure rather than something a retry could
+    # paper over.
     - name: Download the pinned uv release tarball
       ansible.builtin.get_url:
         url: "{{ corliss_uv_url }}"
         dest: /tmp/uv-{{ corliss_uv_version }}.tar.gz
         checksum: "sha256:{{ corliss_uv_sha256 }}"
         mode: "0644"
+      register: corliss_uv_download
+      retries: 3
+      delay: 5
+      until: corliss_uv_download is succeeded
 
     - name: Extract the uv tarball
       ansible.builtin.unarchive:

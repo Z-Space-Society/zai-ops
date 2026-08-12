@@ -145,8 +145,14 @@ and the gaps leave room to grow a tier without renumbering:
 | Range       | Tier         | Examples                                   |
 | ----------- | ------------ | ------------------------------------------ |
 | `100`–`109` | Core infra   | control (100), object-store (101), postgres (102) |
-| `110`–`119` | Platform     | proxy/edge (110), auth (111, the [`corliss`](roles/corliss.md) role), gateway (112) |
-| `120`–`129` | Applications | open-webui (120), happyview (121), … other user-facing apps |
+| `110`–`119` | Platform     | proxy/edge (110), registry (111, the [`happyview`](roles/happyview.md) role), gateway (112) |
+| `120`–`129` | Applications | [`corliss`](roles/corliss.md) (120), open-webui (121), … other user-facing apps |
+
+What separates the last two tiers is **who talks to it**: platform CTs are
+consumed by other services, application CTs are consumed by members. `corliss`
+is an application despite being the thing that does authentication — it is also
+the membership surface and the page a member lands on. `happyview` is the
+inverse: no one signs in to it, it is the registry `corliss` reads.
 
 The dependency arrows point **downward** (apps → platform → core), and the line
 between core and platform doubles as a trust line: the data foundations stay off

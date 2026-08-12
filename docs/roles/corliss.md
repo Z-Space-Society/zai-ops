@@ -14,8 +14,8 @@ in its own repo and owns the apex domain.
   at the pinned `corliss_version`
 - **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure
   play, `hosts: corliss`, **after** the postgres play)
-- **Target:** the `corliss` CT (platform tier, 110–129) over SSH, internal-only
-  on `vmbr1`
+- **Target:** the `corliss` CT (application tier, 120–129) over SSH,
+  internal-only on `vmbr1`
 
 ## Purpose
 

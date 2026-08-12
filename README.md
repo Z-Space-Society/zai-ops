@@ -63,19 +63,28 @@ itself from this repo.
    cluster's actual layout is in the [docs](docs/README.md#networking).
 
    The example CTIDs below follow a tiered convention: **100–109 core infra**
-   (control, object store, postgres), **110–119 platform** (the edge proxy, auth,
-   the LiteLLM gateway), **120–129 applications**. The gaps are deliberate — the
-   CTID tells you the tier, and there's room to grow without renumbering.
+   (control, object store, postgres), **110–119 platform** (the edge proxy, the
+   registry, the LiteLLM gateway), **120–129 applications** — the surfaces people
+   actually sign in to. The gaps are deliberate — the CTID tells you the tier, and
+   there's room to grow without renumbering.
+
+   The line between the last two is *who talks to it*: platform CTs are consumed by
+   other services, application CTs are consumed by members. Corliss sits in the
+   application tier for that reason — it authenticates people, but it is also the
+   membership surface and the page a member lands on, not a component something
+   else calls.
 
    ```bash
    # 1. assign every CTID up front — records numbers only, creates nothing
-   zai-assign object-store 101   # core infra: the restic backend
-   zai-assign postgres 102       # core infra: the internal database
-   zai-assign proxy 110          # platform: the LAN-facing reverse proxy
-   zai-assign corliss 111       # platform: the ATProto->OIDC login bridge
-   zai-assign litellm 112        # platform: the AI gateway
-   zai-assign open-webui 120     # applications: the chat UI
-   zai-assign happyview 121      # happy view
+   zai-assign object-store 101   # core infra: restic backend
+   zai-assign postgres 102       # core infra: internal database
+   zai-assign proxy 110          # platform: LAN-facing reverse proxy
+   zai-assign happyview 111      # platform: atproto AppView — indexes the firehose
+                                 #   and hosts the spaces holding the membership registry
+   zai-assign litellm 112        # platform: AI gateway
+   zai-assign corliss 120        # application: the member's front door — ATProto
+                                 #   sign-in, membership and tier, OIDC provider
+   zai-assign open-webui 121     # application: the chat UI
 
    # 2. provision each — create over the API, configure over SSH.
    #    object store first: it's the restic backend the backup job writes to.
@@ -83,8 +92,9 @@ itself from this repo.
    ansible-playbook provision.yml --limit object-store
    ansible-playbook provision.yml --limit postgres
    ansible-playbook provision.yml --limit proxy
-   ansible-playbook provision.yml --limit corliss
+   ansible-playbook provision.yml --limit happyview
    ansible-playbook provision.yml --limit litellm
+   ansible-playbook provision.yml --limit corliss
    ansible-playbook provision.yml --limit open-webui
    ```
 

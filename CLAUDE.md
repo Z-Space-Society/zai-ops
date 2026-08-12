@@ -44,7 +44,11 @@ out and update the docs.
   and is the NAT gateway for internal-only CTs. Addresses derive from the CTID
   (`10.1.1.{ctid}`, static); CTIDs follow a tiered convention — `100-109` core
   infra (control `.100`, object-store, postgres), `110-119` platform (proxy/edge,
-  auth, gateway), `120-129` apps. `proxy` (Caddy) is the only LAN-facing CT
+  registry, gateway), `120-129` apps. The split between the last two is **who
+  talks to it**: platform CTs are consumed by other services, app CTs are
+  consumed by members. `corliss` is an app despite doing auth — it is the
+  membership surface and the page a member lands on, not a component something
+  else calls. `proxy` (Caddy) is the only LAN-facing CT
   (dual-homed on `vmbr0` + `vmbr1`); everything else is internal-only and routes
   out via the host.
 - **SSH into service CTs via an injected key.** CT 100's root ed25519 public key

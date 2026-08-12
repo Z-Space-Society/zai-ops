@@ -101,6 +101,21 @@ corliss_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '
 corliss_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/corliss_secret_key chars=ascii_letters,digits length=64') }}"
 corliss_oidc_client_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/corliss_oidc_client_secret chars=digits,abcdef length=48') }}"
 
+# Bearer token the SCN registry (HappyView Lua) presents when it POSTs a grant
+# or revocation to corliss's /membership/events. Same generate-once posture as
+# the secrets above, with one difference worth knowing: this is the first
+# secret here that has to travel OUTWARD. The identical value must be set as
+# CORLISS_PUSH_TOKEN in the scn-ops checkout's .env on whichever machine runs
+# `npm run deploy`, because that script — not Ansible — is what installs it as
+# a HappyView script variable. Read it off the control node with:
+#
+#     cat /root/.zai-secrets/corliss_membership_push_token
+#
+# Corliss refuses every push with a 503 while this is unset on its side, so a
+# half-configured pair fails closed and loudly rather than silently accepting
+# unauthenticated events.
+corliss_membership_push_token: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/corliss_membership_push_token chars=ascii_letters,digits length=48') }}"
+
 # Password for the provision-time break-glass local admin (username `admin`,
 # /admin/login/ only — no ATProto identity). DR-critical: it's the only way in
 # if ATProto/OIDC login is ever broken, on par with the two signing keys below.

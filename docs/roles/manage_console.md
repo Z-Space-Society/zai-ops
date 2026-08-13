@@ -6,6 +6,8 @@ the roster — at `manage.<cluster_domain>`.
 
 - **Source:** [`ansible/roles/manage_console/`](../../ansible/roles/manage_console/)
 - **Applied by:** [`provision.yml`](../../ansible/provision.yml) (its own play, `hosts: proxy`)
+  — a placement that is **deliberately temporary**; see
+  [Placement, and how to remove this cleanly](#placement-and-how-to-remove-this-cleanly)
 - **Target:** the `proxy` service CT, over SSH — with every build task delegated
   to the control node (CT 100)
 - **Upstream app:** [Z-Space-Society/scn-ops](https://github.com/Z-Space-Society/scn-ops)
@@ -102,6 +104,87 @@ non-secret in the vault is the mistake this repo's conventions call out by name.
 `manage_console_*`: the service DID is the *registry's* identity, needed
 identically by [`corliss`](corliss.md) for its roster read (`SCN_SERVICE_DID`),
 and one identity should not be recorded twice under two names in the same file.
+
+## Placement, and how to remove this cleanly
+
+**This console is expected to be stripped out**, whether because the admin
+surface moves into Corliss as Django views or because `scn-ops` is replaced. The
+placement below was chosen for speed of landing it, not because it is the right
+long-term shape — recorded here so the decision is visible rather than
+archaeology, and so the removal is a checklist rather than a hunt.
+
+### What was done, and the alternative that was preferred
+
+The role is attached as **a second play inside
+[`provision.yml`](../../ansible/provision.yml)** (`hosts: proxy`), immediately
+after the `proxy` play. That reuses the existing create-then-configure ordering
+and makes `--limit proxy` deploy the edge and the console together.
+
+The alternative — **a self-contained `manage.yml` playbook** — is the cleaner
+shape and was not built. It would make the console independently deployable
+(`ansible-playbook manage.yml`), keep an unrelated concern out of the cluster's
+core provisioning path, and make removal a single file deletion instead of the
+list below.
+
+What the current placement costs:
+
+- **The console is not independently deployable.** There is no way to redeploy
+  it without going through `provision.yml`, and `--limit proxy` always couples
+  it to the edge — a console build failure and a Caddy failure arrive through
+  the same command. (The separate *play* limits the blast radius: a broken
+  console build does not stop the `proxy` play from having already run. It does
+  not make the two separately *invocable*.)
+- **It is not discoverable.** Someone asking "how do I deploy the admin
+  console?" has to already know it lives inside the provisioning playbook.
+- **It puts an application concern in the base-system path**, which is the line
+  this repo otherwise holds.
+
+If this outlives the next cleanup, promoting it to `manage.yml` is mechanical:
+move the play body out of `provision.yml`, add a row to the Playbooks table in
+[`docs/README.md`](../README.md#playbooks), and it is done — nothing in the role
+itself assumes where it is invoked from.
+
+### Removal checklist
+
+Delete outright:
+
+| Path | Note |
+| ---- | ---- |
+| [`ansible/roles/manage_console/`](../../ansible/roles/manage_console/) | The whole role |
+| [`ansible/set-console.yml`](../../ansible/set-console.yml) | The setter playbook |
+| [`bin/zai-set-console`](../../bin/zai-set-console) | The operator command |
+| `docs/roles/manage_console.md` | This file |
+
+Edit out:
+
+| File | What |
+| ---- | ---- |
+| [`ansible/provision.yml`](../../ansible/provision.yml) | The `Configure the SCN admin console` play |
+| [`ansible/roles/proxy/defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml) | The `manage.{{ cluster_domain }}` entry in `caddy_proxy_hosts` |
+| [`ansible/group_vars/all/main.yml`](../../ansible/group_vars/all/main.yml) | `manage_console_root` |
+| [`docs/README.md`](../README.md) | Roles-table row, Playbooks-table row, operator-command row, and the `try_files` gotcha |
+
+Two things that are **not** simple deletions:
+
+> [!warning] `scn_service_did` is shared with corliss — don't delete it blindly
+> It is deliberately unprefixed because it is the *registry's* identity, not the
+> console's: corliss needs the identical value for its ELEVATE roster read
+> (`SCN_SERVICE_DID`). Removing the console must not remove that variable from
+> the runtime inventory, and if `zai-set-console` goes away, whatever replaces it
+> still has to be able to set the service DID. `console_client_key` and
+> `scn_registry_space_uri` *are* console-only and can go with it.
+
+> [!note] The Caddy `root:` support is generic — keep or drop on its own merits
+> The `{% if h.root is defined %}` branch in
+> [`Caddyfile.j2`](../../ansible/roles/proxy/templates/Caddyfile.j2) is not
+> console-specific: it is static-file serving for any route, and it was a
+> separate commit for that reason. It becomes dead code when the last `root:`
+> entry goes, but it is correct and inert, so deleting it is a tidiness call
+> rather than part of this removal.
+
+Also clean up on the hosts themselves (nothing in git tracks these):
+`/opt/manage-console-src` on CT 100, `/srv/manage-console` on the proxy CT, and
+the `manage.` DNS record.
 
 ## Dependencies
 

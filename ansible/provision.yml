@@ -118,6 +118,17 @@
   roles:
     - proxy
 
+# The admin console is a static bundle Caddy serves, so it targets the proxy CT
+# too — but as its own play rather than a second role on the one above, because
+# the two fail for unrelated reasons and a console that can't build should not
+# take the cluster's edge down with it. It also builds on the CONTROL node (see
+# the role), so a --limit proxy run still exercises both hosts.
+- name: Configure the SCN admin console
+  hosts: proxy
+  gather_facts: true
+  roles:
+    - manage_console
+
 - name: Configure the object store
   hosts: object-store
   gather_facts: true

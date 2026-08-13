@@ -17,6 +17,13 @@
 # git-ignored runtime inventory (inventory/local.yml) under `all: vars:`. Leaving
 # it out of the committed tree keeps the blueprint generic (ADR-0001).
 
+# Where the built admin console lands on the proxy CT. Shared rather than role-
+# local because two roles need the same string and role defaults aren't visible
+# across roles: manage_console writes the directory, and the proxy role's
+# caddy_proxy_hosts entry points Caddy's `root` at it. A generic blueprint path
+# with no this-cluster identity in it, so it belongs here.
+manage_console_root: /srv/manage-console
+
 # CTIDs the assign action (ansible/assign.yml) refuses to hand out — the safety
 # rail against stomping live or externally-managed containers. Default is just
 # the control node's pinned target (100). On a BROWNFIELD host, widen this to

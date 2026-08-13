@@ -1,0 +1,107 @@
+---
+# manage_console — the SCN admin console (approve, revoke, set tier, manage the
+# roster) served at manage.{{ cluster_domain }}.
+#
+# Named for the SURFACE, not the repo: the app lives in Z-Space-Society/scn-ops
+# today and that repo is expected to be renamed, but the thing an operator
+# points a browser at is "the manage console" either way.
+#
+# Two things make this role shaped unlike every other app role here:
+#
+#   1. It has NO container. The console is a pre-built browser bundle that talks
+#      to HappyView directly from the browser — there is no server for it to
+#      live in, so a whole CT to run a file server would be the wrong shape.
+#      Caddy's file_server serves it, which is core Caddy function, so the role
+#      targets the proxy CT and the proxy role's caddy_proxy_hosts carries a
+#      static `root:` entry for it. Hosting it on the corliss CT instead would
+#      keep the browser origin separate but re-entangle the two deploys and
+#      widen ALLOWED_HOSTS/CSRF_TRUSTED_ORIGINS on the exact app the origin
+#      split exists to hold at arm's length.
+#
+#   2. It BUILDS on the control node, not where it runs. npm, a node_modules
+#      tree and a TypeScript toolchain have no business on the only LAN-facing
+#      CT in the cluster. CT 100 already has git and is where Ansible runs from,
+#      so it builds and Ansible copies the emitted bundle across. The edge CT
+#      keeps exactly the static files and nothing that produced them.
+
+# Upstream app source. Public repo, so the clone needs no credentials — the
+# control node reaches GitHub over the host's NAT. Pin to a TAG, never a branch,
+# for the same reason corliss_version is a tag: `git pull` on CT 100 updates the
+# blueprint, but the app's version is this value, and bumping it is a reviewable
+# commit like any other version pin here. A branch would make replays silently
+# pick up whatever moved upstream in between.
+manage_console_repo_url: https://github.com/Z-Space-Society/scn-ops.git
+# NOTE: scn-ops carries no tags yet, and its `main` is PRE-E0 — the LiteLLM
+# vocabulary is still in the grant shape there, so a console built from `main`
+# renders the old shape. The E0 strip and the membership push both live on the
+# unmerged `membership-push` branch. Merging that and cutting a tag is the one
+# upstream prerequisite this role has; until then a replay will fail at the
+# checkout with "Failed to checkout branch", which is the correct loud failure.
+manage_console_version: v0.1.0
+
+# Where the source is cloned and built, on the CONTROL node (never the proxy).
+manage_console_src: /opt/manage-console-src
+
+# Which host does the build. The control node is the only one with a toolchain;
+# resolved from the group rather than hardcoded to 'control' so the blueprint
+# survives the control host being renamed.
+manage_console_build_host: "{{ groups['control_node'][0] }}"
+
+# manage_console_root (where the built bundle lands on the proxy CT) is in
+# group_vars/all/main.yml — the proxy role's Caddy route needs the same string
+# and role defaults aren't visible across roles.
+
+# --- Browser-side config, baked in at build time ---------------------------
+# Vite inlines VITE_* at build time, so these end up in the bundle. That is fine
+# HERE and would not be everywhere: the bundle is built per-cluster by this role
+# from the repo, so it never has to be cluster-independent. (The alternative
+# designed earlier — ship a generic bundle and fetch /config.json at boot —
+# only earns its extra moving part if a PREBUILT artifact is ever distributed,
+# which this role's existence makes unnecessary.)
+#
+# None of these are secrets. Every one of them ships to the browser or is
+# published at a public URL; the client key is origin-bound, which is what makes
+# it safe to hand out. So they live in the runtime inventory as this-cluster
+# identity (`zai-set-console`), never in the vault.
+
+# HappyView instance the console reads and writes the registry through. Derived
+# from cluster_domain, like every other route — no separate setting to drift.
+manage_console_happyview_url: "https://view.{{ cluster_domain }}"
+
+# The OAuth client id IS a URL, and the member's PDS fetches it: it must resolve
+# to the client metadata JSON served on the console's own origin. `prebuild`
+# (scripts/client-metadata.mjs) generates that file into public/ from these same
+# three values, which is why they have to agree.
+manage_console_client_id: "https://manage.{{ cluster_domain }}/client-metadata.json"
+manage_console_redirect_uri: "https://manage.{{ cluster_domain }}/oauth/callback"
+
+# Must match the REGISTERED HappyView client's scopes exactly, or sign-in fails
+# at the consent screen. `transition:email` is dead weight — nothing has read it
+# since E0 — but dropping it here alone would break that match: it has to come
+# out of the registered client and this string in the same change.
+manage_console_scope: >-
+  atproto transition:email
+  repo:network.sharedcomputer.membership.request?action=create&action=update&action=delete
+  repo:network.sharedcomputer.admin.list?action=create&action=update
+
+# --- Set per cluster with `zai-set-console` --------------------------------
+# Blank defaults, and blank FAILS CLOSED in each case: without a client key the
+# console cannot reach HappyView at all, and without the service DID the admin
+# roster panel renders its "set this" placeholder instead of silently claiming
+# the roster is empty. Blank is a genuine blueprint default; the real values are
+# this-cluster identity and live in the git-ignored runtime inventory.
+
+# The `hvc_` public client key for the console's origin, from the HappyView
+# dashboard. Public by construction — it ships inside the bundle — and bound to
+# the manage. origin, which is what carries the security, not its secrecy.
+console_client_key: ""
+
+# The service DID whose repo anchors the admin roster. Public information.
+# Deliberately NOT prefixed manage_console_*: corliss needs this identical value
+# for its ELEVATE roster read (SCN_SERVICE_DID), and one registry identity
+# should not be recorded twice under two names in the same inventory.
+scn_service_did: ""
+
+# The registry space uri. Optional — the console only reads it for the
+# service-identity panel, which an ordinary admin never opens.
+scn_registry_space_uri: ""

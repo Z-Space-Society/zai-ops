@@ -1,0 +1,199 @@
+---
+# manage_console — build the SCN admin console on the CONTROL node, serve it as
+# static files from the proxy CT. See defaults/main.yml for why it has no
+# container of its own and why the build happens somewhere other than where it
+# runs.
+#
+# The role targets the proxy CT; every build task is delegated to the control
+# node, so the only thing that ever lands on the LAN-facing CT is the emitted
+# bundle.
+
+# --- Preconditions ---------------------------------------------------------
+# Both are fail-closed and both name the fix, rather than letting the failure
+# surface later as a broken consent screen (which is the expensive way to find
+# out — see the try_files trap in the Caddyfile).
+
+- name: Require cluster_domain
+  ansible.builtin.assert:
+    that: cluster_domain is defined and (cluster_domain | string | length) > 0
+    fail_msg: >-
+      manage_console needs the cluster's base domain to build its OAuth client
+      id and redirect URI — run: zai-set-domain <domain>
+
+- name: Require the HappyView client key
+  ansible.builtin.assert:
+    that: console_client_key | length > 0
+    fail_msg: >-
+      console_client_key is unset — register a public client for
+      https://manage.{{ cluster_domain }} in the HappyView dashboard, then run:
+      zai-set-console client_key hvc_xxxxx
+
+# --- Toolchain on the control node -----------------------------------------
+
+- name: Install the node toolchain on the control node
+  ansible.builtin.apt:
+    name:
+      - nodejs
+      - npm
+    state: present
+    update_cache: true
+  delegate_to: "{{ manage_console_build_host }}"
+
+# Vite 8 requires node ^20.19 || >=22.12. Debian 13 ships 20.19.x, which clears
+# it by a hair — so assert rather than assume, because the failure without this
+# is an npm error deep in a build log rather than a sentence naming the cause.
+- name: Read the installed node version
+  ansible.builtin.command:
+    cmd: node --version
+  delegate_to: "{{ manage_console_build_host }}"
+  register: manage_console_node_version
+  changed_when: false
+
+- name: Require a node version vite can build under
+  ansible.builtin.assert:
+    that:
+      - manage_console_node_version.stdout | regex_replace('^v', '')
+        is version('20.19.0', '>=')
+    fail_msg: >-
+      node {{ manage_console_node_version.stdout }} is too old for vite —
+      needs >=20.19.0. Debian 13's `nodejs` package satisfies this; a control
+      node on an older base does not.
+
+# --- Source + build, on the control node ------------------------------------
+
+# A full clone at a tag, deliberately no `depth:` — same reason corliss's role
+# takes one: a shallow clone breaks `git describe --tags`, and the checked-out
+# SHA is what stamps the deployed bundle below.
+- name: Clone the console source at the pinned tag
+  ansible.builtin.git:
+    repo: "{{ manage_console_repo_url }}"
+    dest: "{{ manage_console_src }}"
+    version: "{{ manage_console_version }}"
+    force: true
+  delegate_to: "{{ manage_console_build_host }}"
+  register: manage_console_clone
+
+# Gitignored in the repo, so it survives the clone's force and never dirties the
+# checkout. Vite reads it from the project root at build time.
+- name: Render the build-time config
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ manage_console_src }}/.env"
+    mode: "0644"
+  delegate_to: "{{ manage_console_build_host }}"
+  register: manage_console_env
+
+- name: Check whether dependencies are already installed
+  ansible.builtin.stat:
+    path: "{{ manage_console_src }}/node_modules"
+  delegate_to: "{{ manage_console_build_host }}"
+  register: manage_console_node_modules
+
+# `npm ci` (not `npm install`) — it installs exactly package-lock.json and fails
+# if the lock and manifest disagree, which is the reproducibility guarantee the
+# pinned tag is meant to give. `npm install` would silently resolve newer deps.
+- name: Install dependencies
+  ansible.builtin.command:
+    cmd: npm ci
+    chdir: "{{ manage_console_src }}"
+  delegate_to: "{{ manage_console_build_host }}"
+  when: manage_console_clone.changed or not manage_console_node_modules.stat.exists
+
+- name: Check whether a build already exists
+  ansible.builtin.stat:
+    path: "{{ manage_console_src }}/dist/index.html"
+  delegate_to: "{{ manage_console_build_host }}"
+  register: manage_console_dist
+
+# Rebuild only when something that feeds the bundle moved — the source ref or
+# the inlined config — otherwise every replay would report changed. `npm run
+# build` runs the `prebuild` hook first, which writes public/client-metadata.json
+# from the same .env.
+- name: Build the console
+  ansible.builtin.command:
+    cmd: npm run build
+    chdir: "{{ manage_console_src }}"
+  delegate_to: "{{ manage_console_build_host }}"
+  when: >-
+    manage_console_clone.changed
+    or manage_console_env.changed
+    or not manage_console_dist.stat.exists
+  register: manage_console_build
+
+# The banked trap, asserted at the only point it is cheap to catch. With
+# VITE_OAUTH_CLIENT_ID unset, scripts/client-metadata.mjs prints a note and
+# EXITS 0 — the build succeeds, the file is simply absent, and Caddy's
+# try_files then serves index.html at the client-id URL. The member's PDS gets
+# HTML where it expects JSON and sign-in dies at the consent screen with
+# nothing in any log pointing here.
+- name: Assert the build emitted client metadata
+  ansible.builtin.stat:
+    path: "{{ manage_console_src }}/dist/client-metadata.json"
+  delegate_to: "{{ manage_console_build_host }}"
+  register: manage_console_metadata
+  failed_when: not manage_console_metadata.stat.exists
+
+# --- Deploy to the proxy CT -------------------------------------------------
+
+# Identify the build by the source SHA plus the config's checksum: the bundle is
+# a function of both, and a config-only change (a new client key, say) leaves
+# the SHA identical while producing genuinely different files.
+- name: Compute the build id
+  ansible.builtin.set_fact:
+    manage_console_build_id: >-
+      {{ manage_console_clone.after }}-{{ manage_console_env.checksum }}
+
+- name: Read the currently deployed build id
+  ansible.builtin.slurp:
+    src: "{{ manage_console_root }}/.build-id"
+  register: manage_console_deployed
+  failed_when: false
+
+# Vite emits content-hashed asset filenames, so a plain copy never overwrites
+# the old ones — they accumulate forever. Wipe on a real change instead, which
+# also means a file DELETED upstream actually disappears here.
+- name: Remove the previous bundle when the build changed
+  ansible.builtin.file:
+    path: "{{ manage_console_root }}"
+    state: absent
+  when: >-
+    (manage_console_deployed.content | default('') | b64decode | trim)
+    != (manage_console_build_id | trim)
+
+- name: Create the console root
+  ansible.builtin.file:
+    path: "{{ manage_console_root }}"
+    state: directory
+    owner: caddy
+    group: caddy
+    mode: "0755"
+
+# src is read from the CONTROLLER's filesystem — which is the control node, the
+# same host that just built it — so this needs no rsync and no intermediate
+# tarball. Trailing slash: copy the CONTENTS of dist, not dist itself.
+- name: Install the built bundle
+  ansible.builtin.copy:
+    src: "{{ manage_console_src }}/dist/"
+    dest: "{{ manage_console_root }}/"
+    owner: caddy
+    group: caddy
+    mode: "0644"
+    directory_mode: "0755"
+
+# Written last, so an interrupted deploy leaves a stale/missing id and the next
+# run redeploys rather than trusting a half-copied tree.
+- name: Stamp the deployed build id
+  ansible.builtin.copy:
+    content: "{{ manage_console_build_id | trim }}\n"
+    dest: "{{ manage_console_root }}/.build-id"
+    owner: caddy
+    group: caddy
+    mode: "0644"
+
+# Same assertion as on the build side, now against what Caddy will actually
+# serve — this is the one that would catch a copy that dropped the file.
+- name: Verify the served client metadata
+  ansible.builtin.stat:
+    path: "{{ manage_console_root }}/client-metadata.json"
+  register: manage_console_served_metadata
+  failed_when: not manage_console_served_metadata.stat.exists

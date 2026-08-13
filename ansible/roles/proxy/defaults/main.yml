@@ -50,6 +50,14 @@ caddy_proxy_hosts:
         code: 302
         skip_if_cookie: token
   - { domain: "view.{{ cluster_domain }}", service: happyview, port: 3000 }
+  # The admin console — the one STATIC route: `root` instead of `service`/`port`,
+  # so Caddy's own file_server serves it and there is no CT behind it. The SPA
+  # has no backend (it talks to HappyView from the browser), so a container to
+  # run a file server would be the wrong shape; serving files is core Caddy.
+  # The directory is written by the manage_console role, which runs on this same
+  # CT right after this one. Serving a 404 until then is the correct failure —
+  # the Caddyfile stays valid and the rest of the edge is unaffected.
+  - { domain: "manage.{{ cluster_domain }}", root: "{{ manage_console_root }}" }
   # Corliss owns the APEX (ADR-0006), not a subdomain: its OIDC issuer is the
   # bare origin, and discovery has to sit at <issuer>/.well-known/... . Note
   # this is the one route a wildcard-only origin cert does NOT cover — the

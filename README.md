@@ -33,22 +33,48 @@ itself from this repo.
    off-box — it's also stored on the control node at `/root/.vault_pass`.
 
 3. Enter the control node, configure CT 100 itself, verify the API token, and
-   record the cluster's public base domain.
+   record this cluster's identity — the public base domain and the registry
+   settings.
 
    ```bash
    pct enter 100
    cd /opt/zai-ops/ansible
    ansible-playbook site.yml             # configure the control node
    ansible-playbook verify-proxmox.yml   # confirm the API token authenticates
-   zai-set-domain example.com            # record the cluster's public base domain
+   zai-set-domain example.com            # the cluster's public base domain
+
+   # the admin console + registry settings (see below — client_key is required
+   # before provisioning the proxy; register the client at manage.example.com
+   # in the HappyView dashboard first)
+   zai-set-console client_key hvc_xxxxx
+   zai-set-console service_did did:plc:xxxxx
    ```
 
    `bootstrap.sh` already recorded the **Proxmox node name** from the host's
    `hostname`, so there's no node step here; run `zai-set-node <node>` only to
-   correct it (e.g. after renaming the host). The **domain** has no auto-source,
-   so `zai-set-domain` is required before provisioning the proxy — its Caddy
-   routes are built from `cluster_domain`. Both are stored in git-ignored runtime
-   state ([`inventory/local.yml`](docs/README.md#networking)).
+   correct it (e.g. after renaming the host). Everything else here has no
+   auto-source:
+
+   - **`zai-set-domain`** — required before provisioning the proxy; its Caddy
+     routes are built from `cluster_domain`, and every service's public URL
+     (`chat.`, `api.`, `manage.`, …) derives from it, so setting it once moves
+     them all together.
+   - **`zai-set-console client_key`** — the HappyView public client key for the
+     `manage.` origin. Also required before provisioning the proxy: the admin
+     console is static files served by the proxy CT rather than its own
+     container (so it never gets a `zai-assign`), and its role asserts this key,
+     so `provision.yml --limit proxy` fails without it.
+   - **`zai-set-console service_did`** — the SCN service DID whose repo holds
+     the public admin roster. Read by both the console and
+     [corliss](docs/roles/corliss.md) to decide who is an admin. Unlike the two
+     above this one does *not* fail the run when unset — provisioning succeeds
+     and the roster is simply empty, meaning nobody sees the admin surfaces, so
+     it's the one to check when admin links don't appear.
+
+   A third console setting, `zai-set-console registry_space_uri`, is optional —
+   it only populates the console's identity panel. All of these are stored in
+   git-ignored runtime state ([`inventory/local.yml`](docs/README.md#networking)),
+   which is what keeps the committed tree free of this cluster's identity.
 
 4. Build the service containers in two passes: **assign** every service its
    container ID first, then **provision** them. `zai-assign` only records the
@@ -91,7 +117,8 @@ itself from this repo.
    #    postgres before corliss/litellm/open-webui (all three create their DB on it).
    ansible-playbook provision.yml --limit object-store
    ansible-playbook provision.yml --limit postgres
-   ansible-playbook provision.yml --limit proxy
+   ansible-playbook provision.yml --limit proxy   # also builds + serves the
+                                                  #   admin console at manage.<domain>
    ansible-playbook provision.yml --limit happyview
    ansible-playbook provision.yml --limit litellm
    ansible-playbook provision.yml --limit corliss

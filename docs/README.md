@@ -333,7 +333,7 @@ PATH when the control node is configured. The convention:
 | `zai-assign <service> <ctid>` | Bind a service to a CTID in runtime inventory | [`assign.yml`](#playbooks) |
 | `zai-set-domain <domain>` | Record the cluster's public base domain in runtime inventory | [`set-domain.yml`](#playbooks) |
 | `zai-set-node <node>` | Record the Proxmox node name in runtime inventory (bootstrap sets it automatically) | [`set-node.yml`](#playbooks) |
-| `zai-set-console <key> <value>` | Record an admin-console setting (`client_key`, `service_did`, `registry_space_uri`) in runtime inventory | [`set-console.yml`](#playbooks) |
+| `zai-set-console <key> <value>` | Record an admin-console setting (`client_key`, `service_did`, `registry_space_uri`) in runtime inventory. `service_did` is read by [corliss](roles/corliss.md) too, not just the console — it's the registry's identity, recorded once | [`set-console.yml`](#playbooks) |
 | `zai-make-admin <handle>` | Promote an ATProto handle to corliss admin, keyed on DID | [`make-admin.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |

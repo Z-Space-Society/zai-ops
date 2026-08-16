@@ -20,7 +20,13 @@
 # package metadata, unread by anything (Corliss sets `package = false`); this is
 # the git ref ansible.builtin.git checks out.
 corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
-# v0.3.0 adds atproto membership caching, so a login no longer costs a live
+# v0.3.2 adds the home page, the /api/ page and the nav's identity/admin menu —
+# the surfaces API_URL and MANAGE_URL below feed — and reads the admin roster
+# from the service DID's repo (SCN_SERVICE_DID). Those four env keys are set in
+# corliss.env.j2; a pin BELOW v0.3.2 simply ignores them, so the env file is
+# safe either way, but the links won't render.
+#
+# v0.3.0 added atproto membership caching, so a login no longer costs a live
 # lookup against the user's PDS on every request.
 #
 # Since v0.2.1 the running version is stamped in every page footer, so which
@@ -33,7 +39,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # replace requirements.txt, Python 3.14, Django 6.1). This role's `uv sync
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
-corliss_version: v0.3.0
+corliss_version: v0.3.2
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -138,6 +144,15 @@ corliss_oidc_client_id: open-webui
 corliss_oidc_redirect_uris:
   - "https://chat.{{ cluster_domain }}/oauth/oidc/callback"
 
-# Drives the login/account pages' nav "Chat" link — same cluster_domain
-# derivation as corliss_url above, just a different subdomain.
-corliss_chat_url: "https://chat.{{ cluster_domain }}"
+# The other cluster surfaces corliss links out to. All three derive from
+# cluster_domain exactly like corliss_url above — just different subdomains, so
+# a `zai-set-domain` moves every link at once and none of them can drift. Each
+# is the SAME public origin the corresponding Caddy route already serves
+# (caddy_proxy_hosts), reached through the edge rather than CT-to-CT, because
+# these are hrefs a member's browser follows, not service-to-service calls.
+#
+# Blank hides the corresponding link/block in the app, which is why they're
+# derived rather than required: nothing here fails when a surface is absent.
+corliss_chat_url: "https://chat.{{ cluster_domain }}"     # nav "Chat" link
+corliss_api_url: "https://api.{{ cluster_domain }}"       # base URL shown on /api/
+corliss_manage_url: "https://manage.{{ cluster_domain }}"  # admin block's console link

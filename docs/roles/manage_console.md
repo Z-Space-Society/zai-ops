@@ -113,6 +113,25 @@ placement below was chosen for speed of landing it, not because it is the right
 long-term shape — recorded here so the decision is visible rather than
 archaeology, and so the removal is a checklist rather than a hunt.
 
+> [!important] Decided 2026-08-18 — the first of those two reasons happened
+> Corliss now serves its own console at `/manage/`, and it **supersedes this
+> one**. So this section is no longer hypothetical: it is the plan, waiting on
+> one thing.
+>
+> What has moved: the member roll, the admin roster, and reconciliation. What
+> has **not**: the write surface — approve, revoke, set tier, roster edits — which
+> is still only here. Those are *writes to the registry space* and must keep
+> requiring a current-admin caller, so they need per-admin HappyView auth in
+> Corliss rather than the read-only service token reconciliation uses. **Do not
+> remove this role until that lands**, or admins lose the ability to approve
+> anyone.
+>
+> One coupling already broken in advance: corliss's reconciliation deliberately
+> does **not** read `manage_console_happyview_url`, even though the value is
+> identical. It carries its own `corliss_membership_registry_url` so that
+> deleting this role cannot break the cache rebuild. `scn_service_did` and
+> `console_client_key` are still genuinely shared — see the warning below.
+
 ### What was done, and the alternative that was preferred
 
 The role is attached as **a second play inside
@@ -166,13 +185,27 @@ Edit out:
 
 Two things that are **not** simple deletions:
 
-> [!warning] `scn_service_did` is shared with corliss — don't delete it blindly
-> It is deliberately unprefixed because it is the *registry's* identity, not the
-> console's: corliss needs the identical value for its ELEVATE roster read
-> (`SCN_SERVICE_DID`). Removing the console must not remove that variable from
-> the runtime inventory, and if `zai-set-console` goes away, whatever replaces it
-> still has to be able to set the service DID. `console_client_key` and
-> `scn_registry_space_uri` *are* console-only and can go with it.
+> [!warning] `scn_service_did` **and `console_client_key`** are shared with
+> corliss — don't delete either blindly
+> `scn_service_did` is deliberately unprefixed because it is the *registry's*
+> identity, not the console's: corliss needs the identical value for its ELEVATE
+> roster read (`SCN_SERVICE_DID`).
+>
+> `console_client_key` became shared on 2026-08-18: corliss passes the same
+> public, origin-bound HappyView key as `MEMBERSHIP_REGISTRY_CLIENT_KEY` for its
+> reconciliation reads. Reused rather than copied under a second name, on the
+> same principle `set-console.yml` records — one identity should not appear twice
+> in one file. The cost is a `console_*` name outliving the console, which is a
+> rename to make **after** this role is gone, alongside the `SCN_SERVICE_DID` →
+> `ADMIN_ROSTER_DID` rename deferred for the same reason. Both are naming, not
+> behaviour; neither is urgent, and doing them while two consumers still exist is
+> what makes them expensive.
+>
+> So: removing the console must not remove *either* variable from the runtime
+> inventory, and if `zai-set-console` goes away, whatever replaces it still has
+> to be able to set both. `scn_registry_space_uri` *is* console-only (the
+> registry's Lua carries its own copy in the HappyView script env) and can go
+> with it.
 
 > [!note] The Caddy `root:` support is generic — keep or drop on its own merits
 > The `{% if h.root is defined %}` branch in

@@ -39,14 +39,22 @@ CT 100.
 
 | Path | Serves |
 | ---- | ------ |
-| `/` | account landing page (login required) |
-| `/auth/login`, `/auth/logout`, `/auth/oauth/callback` | the human + ATProto-client surface |
+| `/` | the landing page — public brochure signed out, your standing signed in. **Open to everyone by design:** it is where a refused non-member lands, and the only page that explains why and offers the way to ask |
+| `/auth/login`, `/auth/logout`, `/auth/oauth/callback` | the human + ATProto-client surface. Anyone with an atproto handle may sign *in*; membership is a separate question, asked below |
 | `/auth/client-metadata.json` | ATProto client metadata — **this URL is the `client_id`** |
 | `/.well-known/openid-configuration`, `/.well-known/jwks.json` | OIDC discovery + JWKS (root-scoped: issuer is the bare origin) |
-| `/oidc/authorize`, `/oidc/token` | OIDC provider endpoints (reached via discovery) |
+| `/oidc/authorize`, `/oidc/token` | OIDC provider endpoints (reached via discovery). **`authorize` is membership-gated** — it is the handoff into open-webui and is re-checked on every exchange, so a session that predates the gate, or a member revoked since signing in, is refused here rather than walking into chat |
+| `/api/` | direct API access (placeholder copy today). Membership-gated |
 | `/membership/events` | the SCN registry's membership push — bearer-authed, machine-to-machine (see [Secrets](#secrets)) |
-| `/manage/` | the cluster console — member roll, admin roster, and the reconcile button. Gated on the atproto roster (`is_cluster_admin`), **not** on any Django flag, so it stays reachable on a rebuilt cluster with an empty membership cache. Supersedes [`manage_console`](manage_console.md) |
-| `/admin/` | Django admin (break-glass account) |
+| `/manage/` | the cluster console — member roll, admin roster, and the reconcile button. Gated on the atproto roster (`is_cluster_admin`), **not** on any Django flag and **never on membership**, so it stays reachable on a rebuilt cluster with an empty membership cache. Supersedes [`manage_console`](manage_console.md) |
+| `/admin/` | Django admin (break-glass account). **Never membership-gated:** `did:local:admin` is not on the roster and will never have a cache row, so a gate here would lock out the recovery account |
+
+Membership enforcement is a per-view check in corliss, deliberately not
+middleware — middleware covers every path by default, and `/manage/` and
+`/admin/login/` are exactly the doors that must keep working when membership is
+what is broken. A roster admin passes the gate with **no cache row**, which is
+what lets a rebuilt cluster be entered at all; they still receive no tier, so
+nobody gains an entitlement the registry never granted.
 
 ## Tasks
 

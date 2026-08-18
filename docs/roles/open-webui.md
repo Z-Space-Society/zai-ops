@@ -94,6 +94,29 @@ Defined in [`defaults/main.yml`](../../ansible/roles/open-webui/defaults/main.ym
 | `openwebui_oidc_client_id` | `open-webui` | Local default (not read from the `corliss` role's vars); keep in sync with `corliss_oidc_client_id`. |
 | `openwebui_oidc_provider_url` | `https://{{ cluster_domain }}/.well-known/openid-configuration` | corliss's OIDC discovery document — at the **apex**, not a subdomain (ADR-0006). |
 | `openwebui_forward_user_info_headers` | `true` | Forwards each member's id/email/name to litellm as headers, so spend is attributed per person under the one shared key. See [`litellm`](litellm.md#two-key-management-paths-kept-deliberately-separate). |
+| `openwebui_jwt_expires_in` | `4h` | Lifetime of OpenWebUI's **own** session JWT. Bounds how long a revoked member keeps chat access — see [Sessions outlive corliss](#sessions-outlive-corliss). The upstream default is `4w`. |
+
+### Sessions outlive corliss
+
+OpenWebUI mints its own session JWT after the OIDC exchange and authenticates
+from it thereafter. **corliss is not consulted again until that token expires.**
+Two consequences, neither fixable from the corliss side alone:
+
+- **Revoking a member does not end their chat session.** corliss enforces
+  membership at `/oidc/authorize` (v0.5.0), which is reached only when OpenWebUI
+  has no valid session of its own. `openwebui_jwt_expires_in` is therefore the
+  real bound on revocation, which is why it is `4h` and not the `4w` default.
+- **Signing out of corliss does not sign you out of chat.** There is no
+  `end_session_endpoint` in corliss's discovery document and no back-channel
+  logout, so nothing tells OpenWebUI the session ended. Without Redis,
+  OpenWebUI's *own* sign-out does not revoke its JWT either — the token stays
+  usable until expiry.
+
+The full fix is Redis plus `ENABLE_OAUTH_BACKCHANNEL_LOGOUT=true` here, and
+corliss POSTing a `logout_token` to `/oauth/backchannel-logout` on logout and on
+revocation. Not built. Keep the short expiry even after it is: back-channel
+logout puts Redis on the chat login path, and this is the bound that still holds
+when a service on that path is unreachable.
 
 ### OIDC login: corliss is the only way in
 

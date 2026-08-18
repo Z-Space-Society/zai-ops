@@ -130,3 +130,25 @@ openwebui_oidc_provider_url: "https://{{ cluster_domain }}/.well-known/openid-co
 # openwebui_openai_api_key wrapping litellm_master_key just above.
 openwebui_oidc_client_secret: "{{ corliss_oidc_client_secret }}"
 
+# How long OpenWebUI's OWN session JWT lives. It mints one after the OIDC
+# exchange and authenticates from it thereafter — corliss is not consulted
+# again until it expires — so this value is what bounds two things corliss
+# cannot reach from its side:
+#
+#   1. **Revocation.** corliss enforces membership at /oidc/authorize, which is
+#      only reached when OpenWebUI has no valid session. Revoke a member and
+#      their chat access survives until this expires. At the 4w default that is
+#      a month; at 4h it is an afternoon.
+#   2. **Sign-out.** Signing out of corliss cannot end an OpenWebUI session,
+#      and without Redis OpenWebUI's own sign-out does not revoke its JWT
+#      either — the token stays usable until it expires.
+#
+# 4h is what OpenWebUI's hardening guide recommends for deployments without
+# Redis, which is this one. The cost is near zero: while the corliss session is
+# alive (Django's 2w default) re-auth is a silent redirect, not a login prompt.
+#
+# **Keep this short even once Redis lands.** Redis plus back-channel logout
+# makes revocation immediate, but it puts a service on the chat login path, and
+# this is the bound that still holds if that service is unreachable.
+openwebui_jwt_expires_in: "4h"
+

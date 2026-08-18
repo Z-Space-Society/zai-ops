@@ -144,7 +144,7 @@ and the gaps leave room to grow a tier without renumbering:
 
 | Range       | Tier         | Examples                                   |
 | ----------- | ------------ | ------------------------------------------ |
-| `100`–`109` | Core infra   | control (100), object-store (101), postgres (102) |
+| `100`–`109` | Core infra   | control (100), object-store (101), postgres (102), [`redis`](roles/redis.md) (103) |
 | `110`–`119` | Platform     | proxy/edge (110), registry (111, the [`happyview`](roles/happyview.md) role), gateway (112) |
 | `120`–`129` | Applications | [`corliss`](roles/corliss.md) (120), open-webui (121), … other user-facing apps |
 
@@ -153,6 +153,12 @@ consumed by other services, application CTs are consumed by members. `corliss`
 is an application despite being the thing that does authentication — it is also
 the membership surface and the page a member lands on. `happyview` is the
 inverse: no one signs in to it, it is the registry `corliss` reads.
+
+That rule does **not** separate core from platform, and reaching for it there
+puts things in the wrong tier — `postgres` and `redis` are also "consumed by
+services, not members", and both are core. What separates *those* two is what
+core infra is: the **data foundations**, storage with no logic of its own.
+Platform holds services *with* logic — the edge, the AppView, the gateway.
 
 The dependency arrows point **downward** (apps → platform → core), and the line
 between core and platform doubles as a trust line: the data foundations stay off
@@ -359,6 +365,7 @@ command. Only control-node operator commands belong in `bin/`.
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
 | [`object_store`](roles/object_store.md)    | `object-store` | Single-node Garage (S3-compatible) — the on-box backup target |
 | [`postgres`](roles/postgres.md)            | `postgres` | PostgreSQL 17 (Debian-native) — the internal database server |
+| [`redis`](roles/redis.md)                  | `redis`    | Redis (Debian-native) — the revocation store that lets Open WebUI invalidate an already-issued session JWT, so a corliss back-channel logout actually ends a chat session. **Once wired, it is a hard dependency of the whole chat surface, not just of logout** |
 | [`corliss`](roles/corliss.md)            | `corliss` | ATProto→OIDC login bridge (Django, venv) — Postgres-backed, cloned from [Z-Space-Society/Corliss](https://github.com/Z-Space-Society/Corliss) at a pinned tag, fronted by Caddy at the **apex** domain; the sole identity provider for Open WebUI. Also serves the cluster console at `/manage/`, which supersedes [`manage_console`](roles/manage_console.md), and reconciles its membership cache from the registry |
 | [`litellm`](roles/litellm.md)              | `litellm`  | LiteLLM proxy (venv) — OpenAI-compatible gateway, Postgres-backed; + an always-on CPU floor embedder (`nomic-embed-text`) |
 | [`open-webui`](roles/open-webui.md)        | `open-webui` | OpenWebUI chat UI (uv-managed Python 3.12 venv) — Postgres-backed, fronted by Caddy, talks to litellm for chat + RAG embeddings |
@@ -670,6 +677,25 @@ Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
   field only fires the redirect when open-webui's session cookie is absent;
   a request already carrying it falls through to the real app. See
   [`proxy`](roles/proxy.md#notes).
+- **Setting `REDIS_URL` makes Redis a hard dependency of every authenticated
+  request — it does not degrade, it takes chat down and logs everyone out.**
+  Established by reading open-webui 0.11.0's source *before* building the
+  [`redis`](roles/redis.md) role, on the theory that this is exactly the kind of
+  thing that should not be discovered during an outage. `get_current_user` calls
+  `is_valid_token(data, request.app.state.redis)` on every request; the
+  `await redis.get(...)` inside is unguarded, so a `ConnectionError` propagates
+  into the surrounding `except Exception` — which **deletes the `token` cookie**
+  and re-raises → 500. And it loops rather than failing once: the OIDC round
+  trip doesn't touch Redis, so login succeeds and mints a fresh cookie, then the
+  next authenticated call 500s and wipes it again. There is no fallback path
+  either — `get_redis_client` returns `None` only when `REDIS_URL` is *unset*,
+  and `redis.asyncio.from_url` connects lazily, so "unreachable at boot" is
+  indistinguishable from configured. Two mitigations, both deliberate:
+  `REDIS_SOCKET_CONNECT_TIMEOUT`/`REDIS_SOCKET_TIMEOUT` are set explicitly
+  (unset upstream = no timeout = ~130 s hang per request against a dead CT), and
+  `ENABLE_STAR_SESSIONS_MIDDLEWARE` is left off — it defaults off
+  *independently* of `REDIS_URL`, which is what keeps the OAuth handshake's own
+  state in a signed cookie and Redis off the **login** path. Never set it.
 
 Lessons on **uv-provisioned Python services** ([`corliss`](roles/corliss.md),
 [`open-webui`](roles/open-webui.md)) — both need a Python that Debian 13 doesn't

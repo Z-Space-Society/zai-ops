@@ -141,6 +141,17 @@
   roles:
     - postgres
 
+# redis sits beside postgres because it is the same kind of thing: a data
+# foundation the apps above it consume. It has no dependencies of its own (one
+# apt package, one config file), so its position here is about grouping the
+# stores, not about ordering — it only has to precede open-webui, which builds
+# its REDIS_URL from this host's derived address.
+- name: Configure Redis (the back-channel logout revocation store)
+  hosts: redis
+  gather_facts: true
+  roles:
+    - redis
+
 # corliss runs AFTER postgres: its role creates the corliss role + database ON
 # the postgres CT (delegate_to: postgres), and clones the app source from
 # Z-Space-Society/Corliss at its pinned ref. A --limit corliss run still needs

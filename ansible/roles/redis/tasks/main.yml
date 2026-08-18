@@ -1,0 +1,69 @@
+---
+# Install Redis natively from Debian's own repo (no Docker, no third-party apt
+# key). The whole role is four steps and a proof — this CT does one thing.
+
+- name: Install Redis
+  # Debian's redis-server package creates the redis user, /var/lib/redis, and
+  # the redis-server unit; the template below replaces the config it ships.
+  ansible.builtin.apt:
+    name: "{{ redis_package }}"
+    state: present
+    update_cache: true
+
+- name: Deploy redis.conf
+  # Full-file template, not a drop-in: Redis has no conf.d include directory,
+  # so this is the only way config lives in git rather than in edits to a vendor
+  # file. 0640 root:redis — it carries requirepass, so the daemon must read it
+  # and nobody else should.
+  ansible.builtin.template:
+    src: redis.conf.j2
+    dest: "{{ redis_config_file }}"
+    owner: root
+    group: redis
+    mode: "0640"
+  no_log: true  # the rendered file contains requirepass
+  notify: restart redis
+
+- name: Ensure Redis is started and enabled
+  ansible.builtin.service:
+    name: "{{ redis_service }}"
+    state: started
+    enabled: true
+
+# Bring the server up with the final config BEFORE proving it works, exactly as
+# the postgres role does — otherwise the check below can pass against the
+# still-running old config and report a bind/auth change that never took.
+- name: Apply pending restarts before validation
+  ansible.builtin.meta: flush_handlers
+
+# The listener on the INTERNAL address is the feature being shipped: open-webui
+# reaches this from a different CT, so a loopback-only PING would prove nothing
+# about the thing that has to work. Authenticating here also proves requirepass
+# and the password the open-webui role will put in its REDIS_URL agree.
+#
+# The password goes in REDISCLI_AUTH rather than `-a`, for two reasons: `-a`
+# puts it on the command line where any user on the CT can read it out of `ps`,
+# and it would force `no_log: true` on the task — which hides the error message
+# in exactly the run where it matters. This way a failure is legible.
+- name: Verify Redis answers on the internal address with the configured password
+  ansible.builtin.command: >-
+    redis-cli -h {{ ansible_host }} -p {{ redis_port }} ping
+  environment:
+    REDISCLI_AUTH: "{{ redis_password }}"
+  register: redis_ping
+  changed_when: false
+  failed_when: redis_ping.stdout is not search('PONG')
+
+# Guard the one setting whose wrong value fails SILENTLY and dangerously. An
+# eviction policy would drop revocation markers under memory pressure and hand a
+# revoked member their chat session back, with nothing reporting it — so assert
+# the running server actually has noeviction rather than trusting that the
+# template rendered and was read.
+- name: Assert the eviction policy is noeviction (a revocation must never be evicted)
+  ansible.builtin.command: >-
+    redis-cli -h {{ ansible_host }} -p {{ redis_port }} config get maxmemory-policy
+  environment:
+    REDISCLI_AUTH: "{{ redis_password }}"
+  register: redis_policy
+  changed_when: false
+  failed_when: redis_policy.stdout is not search(redis_maxmemory_policy)

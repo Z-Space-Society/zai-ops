@@ -99,6 +99,18 @@ happyview_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~
 happyview_session_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/happyview_session_secret chars=ascii_letters,digits length=64') }}"
 happyview_token_encryption_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/happyview_token_key && cat ' ~ _zai_secrets_dir ~ '/happyview_token_key || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/happyview_token_key)') }}"
 
+# Redis auth. Same generate-once-and-persist posture as everything above, and
+# read by TWO roles: the `redis` role renders it as requirepass, and the
+# open-webui role builds it into REDIS_URL — one value resolved on the control
+# node, so the two can never disagree the way a per-role default could. Hex, so
+# it needs no percent-encoding inside that URL.
+#
+# Named `redis_auth_password` rather than `redis_password` because the role
+# default of that name wraps this one (same idiom as openwebui_oidc_client_secret
+# wrapping corliss_oidc_client_secret); a role default and a group_var sharing a
+# name would make which one wins depend on precedence rather than on intent.
+redis_auth_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/redis_password chars=digits,abcdef length=48') }}"
+
 # corliss secrets, same posture as the litellm/openwebui/happyview pairs above.
 # db_password is the password for the `corliss` Postgres role; secret_key is
 # Django's SECRET_KEY (signs sessions/CSRF — set explicitly so logins survive a

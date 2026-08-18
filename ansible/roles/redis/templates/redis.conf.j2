@@ -1,0 +1,49 @@
+# {{ ansible_managed }}
+# Redis configuration, rendered by the redis role. Never edited on the CT —
+# git pull on CT 100 + re-run provision.yml is the update story.
+#
+# This REPLACES Debian's stock redis.conf rather than patching it. Redis has no
+# conf.d include directory the way Postgres does, so the choice is a full file
+# or in-place edits of a 2000-line vendor file; a full file is the one that
+# keeps configuration in git and makes a drifted CT impossible. Same reasoning
+# as the proxy role's git-tracked Caddyfile. The cost is that Debian's defaults
+# are NOT inherited — anything this file doesn't say takes Redis's own built-in
+# default, not the distro's, so add settings here rather than assuming.
+
+# --- Network ---------------------------------------------------------------
+# The CT's internal address (derived from its CTID) plus loopback. Reachable
+# from the open-webui CT over vmbr1; not routable from the LAN.
+bind {{ redis_bind }}
+port {{ redis_port }}
+protected-mode yes
+
+# --- Auth ------------------------------------------------------------------
+requirepass {{ redis_password }}
+
+# --- Memory ----------------------------------------------------------------
+maxmemory {{ redis_maxmemory }}
+# See the role defaults: an eviction policy here would silently drop revocation
+# markers under pressure and quietly restore a revoked member's chat access.
+# noeviction fails the write instead, which is visible.
+maxmemory-policy {{ redis_maxmemory_policy }}
+
+# --- Persistence: deliberately none ----------------------------------------
+# No RDB snapshots, no AOF. What lives here is TTL'd revocation state that is
+# rebuildable by nothing and needed by nobody after the relying party's own
+# tokens have expired — so the CT holds nothing unreproducible, which is what
+# keeps it out of the backup set.
+#
+# Be clear-eyed about the direction this fails, though: a restart RESURRECTS
+# every revoked member's session, because the marker that killed their token is
+# gone. That window is bounded by open-webui's JWT_EXPIRES_IN (4h) and by
+# nothing else — which is the single sharpest reason that value stays short.
+save ""
+appendonly no
+
+# Debian's unit runs redis-server in the foreground under systemd; daemonizing
+# would make systemd lose track of the process it supervises.
+daemonize no
+supervised systemd
+
+dir /var/lib/redis
+logfile ""

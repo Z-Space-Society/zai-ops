@@ -1,0 +1,54 @@
+---
+# Redis — the revocation store that makes OIDC back-channel logout mean
+# something. Installed natively from Debian's own repo under systemd; no Docker,
+# no third-party apt key (Debian 13 ships a current Redis, same reasoning as the
+# postgres role taking PG 17 from the distro rather than PGDG).
+#
+# WHAT IT IS FOR, precisely, because "we added a cache" would be the wrong story:
+# open-webui mints its own session JWT after the OIDC exchange and authenticates
+# from it thereafter, so corliss is not consulted again until it expires. When
+# corliss POSTs a logout_token — on sign-out, and on revocation — open-webui can
+# only *revoke an already-issued JWT* if it has somewhere to write "every token
+# for this user issued before now is dead". That is this. Without it open-webui
+# can drop stored OAuth sessions and nothing more, which does not end the
+# session that matters. See docs/roles/redis.md.
+#
+# It holds a few kilobytes of TTL'd revocation markers. It is not a cache in
+# front of anything, and nothing else consumes it today.
+
+# Listen socket. Bind the CT's own internal address (DERIVED from its CTID via
+# ansible_host, never hardcoded) plus loopback so redis-cli works on the box for
+# the role's own verify step. The security boundary is the vmbr1-only NAT
+# network with no LAN route — same posture as postgres, which also listens on
+# its internal address — reinforced by requirepass below.
+redis_port: 6379
+redis_bind: "{{ ansible_host }} 127.0.0.1"
+
+# Debian's package name, unit name, and the config file its unit passes to the
+# daemon. Named rather than inlined so the tasks read as intent and a future
+# distro rename is one edit.
+redis_package: redis-server
+redis_service: redis-server
+redis_config_file: /etc/redis/redis.conf
+
+# Memory ceiling. Generous by two orders of magnitude for what actually lives
+# here (a revocation marker per revoked member, each expiring in 30 days), so
+# the ceiling is a guard against a runaway, not a capacity plan.
+redis_maxmemory: 64mb
+
+# **noeviction, NOT an LRU or TTL policy.** This is the one config line here
+# with a genuinely dangerous alternative. Every eviction policy silently drops
+# keys under memory pressure, and the keys in here are revocations — so
+# `volatile-ttl` or `allkeys-lru` would mean a full Redis quietly restores a
+# revoked member's chat access, with nothing anywhere reporting it. noeviction
+# makes the write fail instead: open-webui returns an error on the logout POST,
+# corliss logs a delivery failure, and the problem is visible. Fail-visible over
+# fail-open, the same posture that made the two production membership defects
+# ten-minute fixes.
+redis_maxmemory_policy: noeviction
+
+# Auth. Generated once on the control node and persisted under /root/.zai-secrets
+# like every other auto-generated secret (see group_vars/all/main.yml), so no
+# manual step and a stable value across rebuilds. Hex, which keeps it free of
+# any character that would need percent-encoding inside open-webui's REDIS_URL.
+redis_password: "{{ redis_auth_password }}"

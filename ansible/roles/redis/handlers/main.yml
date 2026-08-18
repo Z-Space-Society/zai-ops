@@ -1,0 +1,9 @@
+---
+# A bind, port or requirepass change needs a full restart — Redis re-reads none
+# of those on SIGHUP. Restarting is cheap here precisely because the data is
+# disposable (see the persistence note in redis.conf.j2); the cost is that any
+# revocation markers in flight are lost, bounded by open-webui's JWT_EXPIRES_IN.
+- name: restart redis
+  ansible.builtin.service:
+    name: "{{ redis_service }}"
+    state: restarted

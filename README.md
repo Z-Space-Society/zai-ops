@@ -104,6 +104,8 @@ itself from this repo.
    # 1. assign every CTID up front — records numbers only, creates nothing
    zai-assign object-store 101   # core infra: restic backend
    zai-assign postgres 102       # core infra: internal database
+   zai-assign redis 103          # core infra: revocation store — lets open-webui
+                                 #   invalidate a session JWT it already issued
    zai-assign proxy 110          # platform: LAN-facing reverse proxy
    zai-assign happyview 111      # platform: atproto AppView — indexes the firehose
                                  #   and hosts the spaces holding the membership registry
@@ -117,6 +119,8 @@ itself from this repo.
    #    postgres before corliss/litellm/open-webui (all three create their DB on it).
    ansible-playbook provision.yml --limit object-store
    ansible-playbook provision.yml --limit postgres
+   ansible-playbook provision.yml --limit redis   # before open-webui, which
+                                                  #   builds its REDIS_URL from it
    ansible-playbook provision.yml --limit proxy   # also builds + serves the
                                                   #   admin console at manage.<domain>
    ansible-playbook provision.yml --limit happyview

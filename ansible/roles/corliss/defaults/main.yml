@@ -20,6 +20,15 @@
 # package metadata, unread by anything (Corliss sets `package = false`); this is
 # the git ref ansible.builtin.git checks out.
 corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
+# v0.4.0 reconciles membership from the registry, and serves the cluster console
+# at /manage/. This is the membership half of the prime directive: until now the
+# cache could only be filled by pushes, so a corliss rebuilt from nothing had no
+# way to learn about grants that had already happened. Needs the three
+# MEMBERSHIP_REGISTRY_* keys in corliss.env.j2 (a pin below v0.4.0 ignores them);
+# reconciliation reports itself unconfigured until RECONCILE_TOKEN is also
+# installed registry-side by scn-ops' `npm run deploy` — see Secrets in
+# docs/roles/corliss.md.
+#
 # v0.3.2 adds the home page, the /api/ page and the nav's identity/admin menu —
 # the surfaces API_URL and MANAGE_URL below feed — and reads the admin roster
 # from the service DID's repo (SCN_SERVICE_DID). Those four env keys are set in
@@ -39,7 +48,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # replace requirements.txt, Python 3.14, Django 6.1). This role's `uv sync
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
-corliss_version: v0.3.2
+corliss_version: v0.4.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

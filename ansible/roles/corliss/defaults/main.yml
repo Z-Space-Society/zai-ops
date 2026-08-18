@@ -20,6 +20,10 @@
 # package metadata, unread by anything (Corliss sets `package = false`); this is
 # the git ref ansible.builtin.git checks out.
 corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
+# v0.4.1 presents the registry's public Host when reaching it at its internal
+# address — without it every reconcile run fails with HTTP 421 "Unknown host",
+# so v0.4.0 is not usable with the internal MEMBERSHIP_REGISTRY_URL below.
+#
 # v0.4.0 reconciles membership from the registry, and serves the cluster console
 # at /manage/. This is the membership half of the prime directive: until now the
 # cache could only be filled by pushes, so a corliss rebuilt from nothing had no
@@ -48,7 +52,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # replace requirements.txt, Python 3.14, Django 6.1). This role's `uv sync
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
-corliss_version: v0.4.0
+corliss_version: v0.4.1
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -201,3 +205,10 @@ corliss_manage_url: "https://manage.{{ cluster_domain }}"  # admin block's conso
 # push keep working.
 corliss_membership_registry_url: "http://{{ hostvars['happyview'].ansible_host }}:{{ corliss_membership_registry_port }}"
 corliss_membership_registry_port: 3000
+
+# The Host header corliss presents on that internal call. happyview routes by
+# virtual host and answers HTTP 421 "Unknown host" to a request whose Host is a
+# bare 10.1.1.x — the edge normally preserves the public name on the way
+# through, so going direct means presenting it ourselves. Same derivation as the
+# `view.<domain>` entry in caddy_proxy_hosts, which is the name it routes on.
+corliss_membership_registry_host: "view.{{ cluster_domain }}"

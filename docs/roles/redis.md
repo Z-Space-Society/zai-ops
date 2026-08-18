@@ -167,19 +167,39 @@ one-service-per-CT convention the whole inventory is built on.
 
 ## Verify
 
-```bash
-ssh root@10.1.1.<ctid> 'systemctl is-active redis-server'
+**`redis-cli` is on the redis CT, not on CT 100.** It arrives with the
+`redis-server` package, and CT 100 is the control node — nothing installs redis
+tooling there. So these run *on the CT*, reading the password out of the config
+file beside them, which also keeps it off the wire and out of CT 100's shell
+history:
 
-export REDISCLI_AUTH=$(cat /root/.zai-secrets/redis_password)   # on CT 100
-redis-cli -h 10.1.1.<ctid> ping                                 # PONG
-redis-cli -h 10.1.1.<ctid> config get maxmemory-policy
+```bash
+ssh root@10.1.1.<ctid>
+export REDISCLI_AUTH=$(awk '/^requirepass/{print $2}' /etc/redis/redis.conf)
+
+systemctl is-active redis-server
+redis-cli ping                              # PONG
+redis-cli config get maxmemory-policy
 # → noeviction. Anything else is a silent fail-open; see above.
 
-# End to end, which is the only check that proves the point of the role:
-# with a test member signed in to chat, revoke them in the console and confirm
-# their session ends within seconds. Then:
-redis-cli -h 10.1.1.<ctid> keys 'open-webui:auth:user:*'
-ssh root@<open-webui-ip> 'journalctl -u open-webui | grep -i backchannel'
+# What open-webui has actually written. Empty db0 means it has never reached
+# Redis at all — a bigger signal than any single key being absent.
+redis-cli info keyspace
+redis-cli keys 'open-webui:auth:user:*'
+```
+
+The end-to-end check is the only one that proves the point of the role: with a
+test member signed in to chat, revoke them in the console and confirm their
+session ends within seconds. A `…:auth:user:<id>:revoked_at` key appearing is
+the half that says corliss delivered and open-webui accepted; the session
+actually ending is the half that says open-webui then *read* it.
+
+When those two disagree, the logs say which leg broke — corliss reports a
+delivery failure, open-webui reports a rejected token and why:
+
+```bash
+ssh root@<corliss-ip>    "journalctl -u corliss --since '1 hour ago' | grep -i back-channel"
+ssh root@<open-webui-ip> "journalctl -u open-webui --since '1 hour ago' | grep -i backchannel"
 ```
 
 ## Notes

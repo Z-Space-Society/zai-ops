@@ -20,6 +20,22 @@
 # package metadata, unread by anything (Corliss sets `package = false`); this is
 # the git ref ansible.builtin.git checks out.
 corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
+# v0.6.0 ends relying-party sessions instead of waiting them out: corliss mints
+# an OIDC logout_token and POSTs it to open-webui on sign-out, on a revocation
+# push, and when a reconcile run deactivates someone. That closes the one hole
+# GATE could not reach — v0.5.0 refuses a revoked member at /oidc/authorize, but
+# open-webui only goes there when it has no session of its own, so revocation
+# used to take effect at open-webui's next token expiry.
+#
+# **Needs two things provisioned first, or it is inert or broken:** the `redis`
+# CT (open-webui cannot revoke an already-issued JWT without it), and the
+# OIDC_BACKCHANNEL_LOGOUT_URI key in corliss.env.j2. A pin below v0.6.0 simply
+# ignores that key, so the env file is safe either way.
+#
+# Note what this does NOT change: open-webui's JWT_EXPIRES_IN stays 4h. Immediate
+# revocation now depends on a message being delivered, and the short expiry is
+# the bound that still holds when it isn't.
+#
 # v0.5.0 enforces membership: /oidc/authorize, /api/ and the post-login resume
 # refuse anyone who is not a member, so signing in with an atproto handle no
 # longer reaches open-webui on its own. **This is the first pin whose safety
@@ -62,7 +78,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # replace requirements.txt, Python 3.14, Django 6.1). This role's `uv sync
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
-corliss_version: v0.5.0
+corliss_version: v0.6.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

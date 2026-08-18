@@ -43,12 +43,16 @@ out and update the docs.
 - **Internal network on `vmbr1` (`10.1.1.0/24`, no uplink).** Host = `10.1.1.1`
   and is the NAT gateway for internal-only CTs. Addresses derive from the CTID
   (`10.1.1.{ctid}`, static); CTIDs follow a tiered convention — `100-109` core
-  infra (control `.100`, object-store, postgres), `110-119` platform (proxy/edge,
-  registry, gateway), `120-129` apps. The split between the last two is **who
-  talks to it**: platform CTs are consumed by other services, app CTs are
+  infra (control `.100`, object-store, postgres, redis), `110-119` platform
+  (proxy/edge, registry, gateway), `120-129` apps. The split between the last two
+  is **who talks to it**: platform CTs are consumed by other services, app CTs are
   consumed by members. `corliss` is an app despite doing auth — it is the
   membership surface and the page a member lands on, not a component something
-  else calls. `proxy` (Caddy) is the only LAN-facing CT
+  else calls. That rule does *not* separate core from platform, and reaching for
+  it there misfiles things — postgres and redis are also consumed by services
+  rather than members, and both are core. What separates those two is that core
+  infra is the **data foundations**: storage with no logic of its own, versus
+  platform's services *with* logic. `proxy` (Caddy) is the only LAN-facing CT
   (dual-homed on `vmbr0` + `vmbr1`); everything else is internal-only and routes
   out via the host.
 - **SSH into service CTs via an injected key.** CT 100's root ed25519 public key

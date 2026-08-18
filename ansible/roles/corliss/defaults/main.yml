@@ -20,6 +20,17 @@
 # package metadata, unread by anything (Corliss sets `package = false`); this is
 # the git ref ansible.builtin.git checks out.
 corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
+# v0.6.1 makes v0.6.0 actually do its job. v0.6.0 decided who to send a
+# logout_token to by reading its own OidcSession rows — which only start existing
+# at the first token redemption AFTER it deploys, so on deploy day there are none
+# and every already-live chat session was unreachable. Signing out of corliss left
+# chat running, silently, because "this member holds no relying-party session" is
+# a legitimate state the code passed over quietly. v0.6.1 drives delivery from the
+# REGISTERED relying parties instead (known from config, true immediately) and
+# uses a session row only to supply `sid`; open-webui resolves the member by
+# `sub`, which corliss always has. Nothing to do on this side beyond the pin —
+# same env key, same redis, no new variables.
+#
 # v0.6.0 ends relying-party sessions instead of waiting them out: corliss mints
 # an OIDC logout_token and POSTs it to open-webui on sign-out, on a revocation
 # push, and when a reconcile run deactivates someone. That closes the one hole
@@ -78,7 +89,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # replace requirements.txt, Python 3.14, Django 6.1). This role's `uv sync
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
-corliss_version: v0.6.0
+corliss_version: v0.6.1
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

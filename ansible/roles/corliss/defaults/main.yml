@@ -167,6 +167,19 @@ corliss_oidc_client_id: open-webui
 corliss_oidc_redirect_uris:
   - "https://chat.{{ cluster_domain }}/oauth/oidc/callback"
 
+# Open WebUI's back-channel logout endpoint — where corliss POSTs a logout_token
+# on sign-out and on revocation. INTERNAL (derived from open-webui's CTID via
+# hostvars), unlike the redirect URI above: that one is a URL a member's browser
+# follows, this one is a call between two CTs on the same bridge. Same
+# distinction, and the same reasoning, as corliss_membership_registry_url below.
+#
+# The port is a LOCAL default rather than a reach into the open-webui role's
+# vars (a role default isn't a reliable host fact from this play) — keep it in
+# sync with openwebui_port, same convention as corliss_oidc_client_id mirroring
+# openwebui_oidc_client_id.
+corliss_openwebui_port: 8080
+corliss_oidc_backchannel_logout_uri: "http://{{ hostvars['open-webui'].ansible_host }}:{{ corliss_openwebui_port }}/oauth/backchannel-logout"
+
 # The other cluster surfaces corliss links out to. All three derive from
 # cluster_domain exactly like corliss_url above — just different subdomains, so
 # a `zai-set-domain` moves every link at once and none of them can drift. Each

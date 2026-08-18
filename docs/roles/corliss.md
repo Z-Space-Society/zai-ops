@@ -45,6 +45,7 @@ CT 100.
 | `/.well-known/openid-configuration`, `/.well-known/jwks.json` | OIDC discovery + JWKS (root-scoped: issuer is the bare origin) |
 | `/oidc/authorize`, `/oidc/token` | OIDC provider endpoints (reached via discovery) |
 | `/membership/events` | the SCN registry's membership push — bearer-authed, machine-to-machine (see [Secrets](#secrets)) |
+| `/manage/` | the cluster console — member roll, admin roster, and the reconcile button. Gated on the atproto roster (`is_cluster_admin`), **not** on any Django flag, so it stays reachable on a rebuilt cluster with an empty membership cache. Supersedes [`manage_console`](manage_console.md) |
 | `/admin/` | Django admin (break-glass account) |
 
 ## Tasks
@@ -63,7 +64,7 @@ CT 100.
 | Confirm the base interpreter is under `/opt/corliss` | `command` → `python -c 'sys._base_executable'` (`failed_when`) | Guards `UV_PYTHON_INSTALL_DIR`: an interpreter outside `corliss_home` is invisible to the daemon under `ProtectHome=true`. Fail loud at provision time, not as a cryptic unit-start failure. Same guard as `open-webui`. |
 | Collect static assets | `command` → `manage.py collectstatic --noinput` | Populates `STATIC_ROOT` (whitenoise, installed above, serves it straight out of gunicorn — no separate nginx-for-statics box) with the login/account pages' `base.css` + vendored fonts. No DB/secrets needed, just a loadable settings module. Notifies restart. |
 | Render the two signing keys | `copy` (`content:`, `0640` root:corliss, `no_log`) | EC P-256 (atproto DPoP/ES256) + RSA (OIDC id_token/RS256) PEMs from the cached `group_vars` secrets — see Secrets. Group-readable: Django reads these paths itself. Notifies restart. |
-| Render the secret env file | `template` (`0600` root, `no_log`) | `DATABASE_URL`, `SECRET_KEY`, key paths, `PUBLIC_BASE_URL`, `OIDC_CLIENT_ID/SECRET`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MEMBERSHIP_PUSH_TOKEN`, the outbound links (`CHAT_URL`, `API_URL`, `MANAGE_URL`) and `SCN_SERVICE_DID`. Read by systemd via `EnvironmentFile`. Notifies restart. |
+| Render the secret env file | `template` (`0600` root, `no_log`) | `DATABASE_URL`, `SECRET_KEY`, key paths, `PUBLIC_BASE_URL`, `OIDC_CLIENT_ID/SECRET`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MEMBERSHIP_PUSH_TOKEN`, the outbound links (`CHAT_URL`, `API_URL`, `MANAGE_URL`), `SCN_SERVICE_DID` and the three `MEMBERSHIP_REGISTRY_*` reconciliation settings. Read by systemd via `EnvironmentFile`. Notifies restart. |
 | Apply database migrations | `command` → `manage.py migrate --noinput` (`no_log`) | Provision-time, before the daemon ever starts — same principle as litellm's `prisma migrate deploy`. Idempotent (`changed_when` on "No migrations to apply"). Notifies restart. |
 | Ensure the break-glass local admin exists | `command` → `manage.py ensure_admin` (`no_log`) | Idempotently creates a local username/password superuser (`admin`, no ATProto identity) as a way in if OIDC/ATProto login is ever broken. Only sets the password at creation (never rotates it on re-runs); re-asserts `is_staff`/`is_superuser` on every run so provisioning re-runs heal it if those flags ever get flipped off. See [Notes](#notes). |
 | Chown the home to `corliss` | `ansible.builtin.file` (`recurse`) | clone/sync/migrate ran as root; the daemon reads the venv, the uv-managed interpreter and the cloned source. Runs *after* install/migrate, so it covers the interpreter too. |
@@ -102,11 +103,15 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | `corliss_api_url` | `https://api.{{ cluster_domain }}` | Shown on `/api/` as the base URL to point a client at — the same origin the `litellm` route serves. |
 | `corliss_manage_url` | `https://manage.{{ cluster_domain }}` | The home page's "Manage Console" link (admins only) — the same origin the [`manage_console`](manage_console.md) route serves. |
 | `scn_service_did` | `""` | The SCN service DID whose repo holds the public admin roster; corliss reads it to decide who sees the admin block. **Not** a `corliss_*` var — it's the registry's identity, shared verbatim with `manage_console`, recorded once by `zai-set-console service_did <did>`. Blank is a working state (empty roster, nobody elevated). |
+| `corliss_membership_registry_url` | `http://{{ hostvars['happyview'].ansible_host }}:3000` | The HappyView instance corliss reads membership back out of, for reconciliation. **Internal, over `vmbr1`** — not the public `view.<domain>` origin, which would route out through the host's NAT, across Cloudflare and back in via the proxy. This is the *recovery* path (it refills an empty cache at boot), so it must not depend on public DNS, Cloudflare and the proxy CT all being up. Derived from the inventory with the same `hostvars[...]` expression the Caddyfile routes with, so the CTID assignment stays the single source; same coupling `CORLISS_PUSH_URL` already accepts, degrading the same way. |
+| `corliss_membership_registry_port` | `3000` | HappyView's listen port, matching the `view.<domain>` entry in `caddy_proxy_hosts`. |
+| `console_client_key` | `""` | The console's public, origin-bound HappyView client key, passed through for corliss's registry reads — one key, recorded once by `zai-set-console client_key <hvc_…>`, not a second copy under a second name. **Optional**: verified 2026-08-18 that HappyView dispatches to a Lua script with no session and no client key, so blank does **not** block reconciliation. It must not, or a cluster rebuilt before the console was configured could not recover its membership. |
 
 ### Secrets
 
 `corliss_db_password`, `corliss_secret_key`, `corliss_oidc_client_secret`,
-`corliss_admin_password` and `corliss_membership_push_token` follow the
+`corliss_admin_password`, `corliss_membership_push_token` and
+`corliss_membership_registry_token` follow the
 standard `password` lookup pattern in
 [`group_vars/all/main.yml`](../../ansible/group_vars/all/main.yml) — generated
 on first run, persisted under `/root/.zai-secrets`, stable across rebuilds.
@@ -132,6 +137,29 @@ half-configured pair fails **closed** — corliss answers every push with a 503
 while its side is unset, and the registry's Lua logs the failure and completes
 the approval anyway, because the space record is the membership event and
 corliss only holds a cache of it.
+
+`corliss_membership_registry_token` travels **outward** the same way, to the
+same place, and is set as `RECONCILE_TOKEN` in scn-ops' `.env` before
+`npm run deploy`:
+
+```bash
+cat /root/.zai-secrets/corliss_membership_registry_token
+```
+
+It authenticates the *other* direction — corliss reading membership back out of
+the registry through the `syncMembers` service door, which is how the cache is
+rebuilt after a flash. Deliberately a **separate secret** from the push token
+rather than a reuse of it: this one *reads* (a leak exposes the member roll),
+the push token only asserts a cache update. Separate secrets rotate
+independently, and widening one door cannot widen the other. Also fails closed
+both ways — the Lua refuses every call while `RECONCILE_TOKEN` is unset, and
+corliss's console shows reconciliation as unconfigured rather than erroring.
+
+Not DR-critical either, with one caveat worth knowing: **reconciliation is the
+membership half of the prime directive.** A rebuilt corliss has witnessed no
+pushes and cannot be told about events that already happened, so without a
+working pair here a flashed cluster comes back with an empty
+`MembershipCache` and no scripted way to refill it.
 
 The two signing keys (`corliss_atproto_ec_key`, `corliss_oidc_rsa_key`) are
 the **DR-critical** items — losing `atproto_ec` invalidates the atproto

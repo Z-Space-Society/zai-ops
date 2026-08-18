@@ -333,7 +333,7 @@ PATH when the control node is configured. The convention:
 | `zai-assign <service> <ctid>` | Bind a service to a CTID in runtime inventory | [`assign.yml`](#playbooks) |
 | `zai-set-domain <domain>` | Record the cluster's public base domain in runtime inventory | [`set-domain.yml`](#playbooks) |
 | `zai-set-node <node>` | Record the Proxmox node name in runtime inventory (bootstrap sets it automatically) | [`set-node.yml`](#playbooks) |
-| `zai-set-console <key> <value>` | Record an admin-console setting (`client_key`, `service_did`, `registry_space_uri`) in runtime inventory. `service_did` is read by [corliss](roles/corliss.md) too, not just the console — it's the registry's identity, recorded once | [`set-console.yml`](#playbooks) |
+| `zai-set-console <key> <value>` | Record an admin-console setting (`client_key`, `service_did`, `registry_space_uri`) in runtime inventory. **Two of the three are read by [corliss](roles/corliss.md) too**, not just the console — `service_did` for its roster read and `client_key` for its registry reconciliation, each one registry identity recorded once | [`set-console.yml`](#playbooks) |
 | `zai-make-admin <handle>` | Promote an ATProto handle to corliss admin, keyed on DID | [`make-admin.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
@@ -359,7 +359,7 @@ command. Only control-node operator commands belong in `bin/`.
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
 | [`object_store`](roles/object_store.md)    | `object-store` | Single-node Garage (S3-compatible) — the on-box backup target |
 | [`postgres`](roles/postgres.md)            | `postgres` | PostgreSQL 17 (Debian-native) — the internal database server |
-| [`corliss`](roles/corliss.md)            | `corliss` | ATProto→OIDC login bridge (Django, venv) — Postgres-backed, cloned from [Z-Space-Society/Corliss](https://github.com/Z-Space-Society/Corliss) at a pinned tag, fronted by Caddy at the **apex** domain; the sole identity provider for Open WebUI |
+| [`corliss`](roles/corliss.md)            | `corliss` | ATProto→OIDC login bridge (Django, venv) — Postgres-backed, cloned from [Z-Space-Society/Corliss](https://github.com/Z-Space-Society/Corliss) at a pinned tag, fronted by Caddy at the **apex** domain; the sole identity provider for Open WebUI. Also serves the cluster console at `/manage/`, which supersedes [`manage_console`](roles/manage_console.md), and reconciles its membership cache from the registry |
 | [`litellm`](roles/litellm.md)              | `litellm`  | LiteLLM proxy (venv) — OpenAI-compatible gateway, Postgres-backed; + an always-on CPU floor embedder (`nomic-embed-text`) |
 | [`open-webui`](roles/open-webui.md)        | `open-webui` | OpenWebUI chat UI (uv-managed Python 3.12 venv) — Postgres-backed, fronted by Caddy, talks to litellm for chat + RAG embeddings |
 | [`happyview`](roles/happyview.md)          | `happyview` | HappyView AT Protocol AppView platform (Rust binary, built from source) — Postgres-backed, fronted by Caddy |

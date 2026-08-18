@@ -156,3 +156,39 @@ corliss_oidc_redirect_uris:
 corliss_chat_url: "https://chat.{{ cluster_domain }}"     # nav "Chat" link
 corliss_api_url: "https://api.{{ cluster_domain }}"       # base URL shown on /api/
 corliss_manage_url: "https://manage.{{ cluster_domain }}"  # admin block's console link
+
+# The HappyView instance corliss reads membership back out of, for reconciliation
+# (`manage.py reconcile_membership`, and the button on corliss's own /manage/).
+#
+# **Internal, not the public origin.** Unlike chat/api/manage above — hrefs a
+# member's browser follows — this is a service-to-service call between two CTs on
+# the same bridge, so it goes direct: one hop over vmbr1, never leaving the
+# cluster. `https://view.<domain>` would route out through the host's NAT, across
+# the public internet and Cloudflare, and back in through the proxy CT.
+#
+# That matters because **this is the recovery path**. Reconciliation is what
+# refills an empty MembershipCache on a rebuilt cluster, and it is meant to run
+# at boot; making it depend on public DNS, Cloudflare and the proxy CT all being
+# healthy is a long chain for something whose whole job is to work when little
+# else does. One internal hop depends on the two CTs and nothing else. It also
+# means the token is not the only thing standing in front of an
+# internet-reachable endpoint.
+#
+# Derived from the inventory, not hardcoded — same idiom as this role's own
+# `corliss_database_url` (`hostvars['postgres']`) and open-webui's
+# `openwebui_openai_base_url` (`hostvars['litellm']`), so the CTID assignment
+# stays the single source. Deliberately unguarded, like both of those: a
+# happyview with no CTID assigned fails the play loudly rather than rendering a
+# blank URL that would look like a working config.
+#
+# The port is a LOCAL default rather than a reach into happyview's role defaults,
+# for the reason open-webui records: a role default isn't a reliable host fact
+# from another play. It must match the `view.<domain>` entry in
+# `caddy_proxy_hosts`.
+#
+# The address coupling is the one `CORLISS_PUSH_URL` already accepts in the other
+# direction, and degrades the same gentle way: a wrong address means
+# reconciliation reports a transport failure, visibly, while the registry and the
+# push keep working.
+corliss_membership_registry_url: "http://{{ hostvars['happyview'].ansible_host }}:{{ corliss_membership_registry_port }}"
+corliss_membership_registry_port: 3000

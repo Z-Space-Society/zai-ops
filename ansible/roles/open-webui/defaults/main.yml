@@ -132,23 +132,70 @@ openwebui_oidc_client_secret: "{{ corliss_oidc_client_secret }}"
 
 # How long OpenWebUI's OWN session JWT lives. It mints one after the OIDC
 # exchange and authenticates from it thereafter — corliss is not consulted
-# again until it expires — so this value is what bounds two things corliss
-# cannot reach from its side:
+# again until it expires.
 #
-#   1. **Revocation.** corliss enforces membership at /oidc/authorize, which is
-#      only reached when OpenWebUI has no valid session. Revoke a member and
-#      their chat access survives until this expires. At the 4w default that is
-#      a month; at 4h it is an afternoon.
-#   2. **Sign-out.** Signing out of corliss cannot end an OpenWebUI session,
-#      and without Redis OpenWebUI's own sign-out does not revoke its JWT
-#      either — the token stays usable until it expires.
+# Back-channel logout (below) now ends that session on sign-out and on
+# revocation, so this is no longer the *only* answer to either. **It stays 4h
+# anyway, deliberately.** Back-channel logout is a message corliss sends, so it
+# works exactly as well as delivery does, and this is the bound that still holds
+# on every path where delivery doesn't happen:
 #
-# 4h is what OpenWebUI's hardening guide recommends for deployments without
-# Redis, which is this one. The cost is near zero: while the corliss session is
-# alive (Django's 2w default) re-auth is a silent redirect, not a login prompt.
+#   1. **Redis is down.** The revocation marker cannot be written, so the JWT
+#      stays valid. (Chat is also broken outright in that state — see the redis
+#      block below — but a Redis that recovers after the marker was lost leaves
+#      a revoked member signed in.)
+#   2. **Redis restarted.** Nothing here is persisted, on purpose, so every
+#      in-flight revocation marker is gone and those sessions come back.
+#   3. **corliss cannot reach open-webui**, or open-webui cannot reach corliss's
+#      public JWKS to validate the token it was sent.
 #
-# **Keep this short even once Redis lands.** Redis plus back-channel logout
-# makes revocation immediate, but it puts a service on the chat login path, and
-# this is the bound that still holds if that service is unreachable.
+# The cost of keeping it short is near zero: while the corliss session is alive
+# (Django's 2w default) re-auth is a silent redirect, not a login prompt. 4h is
+# also what OpenWebUI's own hardening guide recommends.
 openwebui_jwt_expires_in: "4h"
+
+# --- Redis + OIDC back-channel logout ---------------------------------------
+# What this buys: corliss POSTs a signed logout_token to the endpoint below when
+# a member signs out or is revoked, and open-webui ends their session. Revocation
+# goes from "up to JWT_EXPIRES_IN" to seconds. Redis is the half that makes it
+# real — WITHOUT it open-webui can only delete stored OAuth sessions, which does
+# not invalidate the JWT the browser is actually authenticating with, so the
+# revoked member keeps chatting exactly as before.
+#
+# **Know what setting REDIS_URL commits this CT to.** It is not a cache that
+# degrades. Once configured, open-webui consults Redis inside get_current_user
+# on EVERY authenticated request (utils/auth.py, `is_valid_token`), the call is
+# unguarded, and the exception handler around it deletes the session cookie on
+# its way out. So an unreachable Redis does not slow chat down — it 500s every
+# request and logs the member out, and re-logging in loops. The trade was made
+# deliberately (a CT on the same host and the same bridge, so the added failure
+# modes are the CT not booting and the daemon crashing), not discovered.
+# See docs/roles/redis.md.
+openwebui_redis_port: 6379
+# Local default rather than reaching into the redis role's vars — a role default
+# isn't a reliable host fact from this play (same convention as
+# openwebui_litellm_port). Keep in sync with redis_port. The HOST is derived
+# from the redis CT's CTID via hostvars, never hardcoded; the password is the
+# single group_vars value both roles read, so they always agree.
+openwebui_redis_url: "redis://:{{ redis_auth_password }}@{{ hostvars['redis'].ansible_host }}:{{ openwebui_redis_port }}/0"
+
+# Namespace for open-webui's keys. Upstream's default, set explicitly so the
+# key shape an operator greps for (`open-webui:auth:user:<id>:revoked_at`) is
+# written down somewhere rather than inferred from upstream source.
+openwebui_redis_key_prefix: open-webui
+
+# **Load-bearing, not tuning.** Both default to UNSET upstream, which means no
+# timeout at all: against a CT that is down (SYN into the void, no RST) every
+# authenticated request blocks for the OS TCP timeout — around 130 seconds —
+# before failing. That turns a Redis outage from a fast, obvious failure into a
+# hung site. Two seconds is far above the sub-millisecond a healthy one-hop
+# round trip takes, and far below anything a person would wait through.
+openwebui_redis_socket_connect_timeout: 2
+openwebui_redis_socket_timeout: 2
+
+# Exposes POST /oauth/backchannel-logout, which validates the logout_token
+# against corliss's discovery document and JWKS before acting on it. corliss
+# must have OIDC_BACKCHANNEL_LOGOUT_URI pointing here (its corliss.env.j2 does,
+# at this CT's internal address) or nothing ever calls it.
+openwebui_enable_oauth_backchannel_logout: true
 

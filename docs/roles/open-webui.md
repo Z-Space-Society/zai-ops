@@ -94,29 +94,57 @@ Defined in [`defaults/main.yml`](../../ansible/roles/open-webui/defaults/main.ym
 | `openwebui_oidc_client_id` | `open-webui` | Local default (not read from the `corliss` role's vars); keep in sync with `corliss_oidc_client_id`. |
 | `openwebui_oidc_provider_url` | `https://{{ cluster_domain }}/.well-known/openid-configuration` | corliss's OIDC discovery document — at the **apex**, not a subdomain (ADR-0006). |
 | `openwebui_forward_user_info_headers` | `true` | Forwards each member's id/email/name to litellm as headers, so spend is attributed per person under the one shared key. See [`litellm`](litellm.md#two-key-management-paths-kept-deliberately-separate). |
-| `openwebui_jwt_expires_in` | `4h` | Lifetime of OpenWebUI's **own** session JWT. Bounds how long a revoked member keeps chat access — see [Sessions outlive corliss](#sessions-outlive-corliss). The upstream default is `4w`. |
+| `openwebui_jwt_expires_in` | `4h` | Lifetime of OpenWebUI's **own** session JWT. With back-channel logout wired, this is no longer the *only* bound on revocation — but it is the one that still holds when a logout token can't be delivered, so keep it short. See [Sessions outlive corliss](#sessions-outlive-corliss). The upstream default is `4w`. |
+| `openwebui_enable_oauth_backchannel_logout` | `true` | Exposes `POST /oauth/backchannel-logout`, which corliss calls on sign-out and on revocation. |
+| `openwebui_redis_url` | `redis://:<pw>@{{ hostvars['redis'].ansible_host }}:6379/0` | The [`redis`](redis.md) CT. Host derived from its CTID; password is the shared `redis_auth_password` group_var, so both roles agree by construction. **Setting this couples the whole chat surface to Redis, not just logout** — see below. |
+| `openwebui_redis_port` | `6379` | A local default (not read from the redis role's defaults); keep in sync with `redis_port`. |
+| `openwebui_redis_key_prefix` | `open-webui` | Upstream default, set explicitly so the key shape an operator greps for is written down. |
+| `openwebui_redis_socket_connect_timeout` / `openwebui_redis_socket_timeout` | `2` / `2` | **Load-bearing, not tuning.** Both are unset upstream = no timeout: against a dead redis CT every authenticated request blocks for the OS TCP timeout (~130 s) before failing. |
 
 ### Sessions outlive corliss
 
 OpenWebUI mints its own session JWT after the OIDC exchange and authenticates
 from it thereafter. **corliss is not consulted again until that token expires.**
-Two consequences, neither fixable from the corliss side alone:
+corliss enforces membership at `/oidc/authorize` (GATE, v0.5.0), which is
+reached only when OpenWebUI has no valid session of its own — so two things used
+to follow, neither fixable from the corliss side alone: revoking a member did
+not end their chat session, and signing out of corliss did not sign them out of
+chat.
 
-- **Revoking a member does not end their chat session.** corliss enforces
-  membership at `/oidc/authorize` (v0.5.0), which is reached only when OpenWebUI
-  has no valid session of its own. `openwebui_jwt_expires_in` is therefore the
-  real bound on revocation, which is why it is `4h` and not the `4w` default.
-- **Signing out of corliss does not sign you out of chat.** There is no
-  `end_session_endpoint` in corliss's discovery document and no back-channel
-  logout, so nothing tells OpenWebUI the session ended. Without Redis,
-  OpenWebUI's *own* sign-out does not revoke its JWT either — the token stays
-  usable until expiry.
+**Back-channel logout closes both (corliss v0.6.0).** corliss mints a signed
+`logout_token` and POSTs it to `POST /oauth/backchannel-logout` here, on three
+triggers: sign-out at `/auth/logout`, a revocation arriving from the registry,
+and a reconcile run deactivating someone. OpenWebUI validates the token against
+corliss's discovery document and JWKS, then ends the session. Revocation goes
+from "up to `JWT_EXPIRES_IN`" to seconds.
 
-The full fix is Redis plus `ENABLE_OAUTH_BACKCHANNEL_LOGOUT=true` here, and
-corliss POSTing a `logout_token` to `/oauth/backchannel-logout` on logout and on
-revocation. Not built. Keep the short expiry even after it is: back-channel
-logout puts Redis on the chat login path, and this is the bound that still holds
-when a service on that path is unreachable.
+**Redis is the half that makes it real, and it is not optional.** Without it
+this handler can only delete stored OAuth sessions — it cannot invalidate the
+JWT the browser is actually authenticating with, which is the only thing that
+matters. Redis is where it writes `open-webui:auth:user:<id>:revoked_at`, the
+marker that kills every token issued before that instant. See
+[`redis`](redis.md).
+
+**Keep `openwebui_jwt_expires_in` short anyway — it is now bounding different
+failures, not zero of them.** Immediate revocation depends on a message being
+delivered, so the expiry is what still holds on every path where it isn't:
+
+1. **Redis unreachable.** The revocation marker can't be written. (Chat is also
+   broken outright in that state — see [`redis`](redis.md#the-trade-this-role-makes-stated-deliberately)
+   — but a Redis that recovers *after* the marker was lost leaves a revoked
+   member signed in.)
+2. **Redis restarted.** Nothing there is persisted, on purpose, so in-flight
+   revocation markers are gone and those sessions come back.
+3. **The message doesn't get through** — corliss can't reach this CT, or this CT
+   can't reach corliss's *public* JWKS to validate what it was sent. That second
+   leg is unavoidably public: the OIDC issuer must be the public origin or the
+   token's `iss` won't match, so validation depends on the edge even though
+   corliss POSTs to this CT internally.
+
+There is still no `end_session_endpoint` in corliss's discovery document —
+front-channel/RP-initiated logout (the browser-redirect flavour) is a separate
+mechanism and isn't built. Back-channel logout covers the cases that matter
+here, since both triggers are server-side events.
 
 ### OIDC login: corliss is the only way in
 
@@ -199,6 +227,13 @@ generate, and the source of the hard provisioning dependency below.
   (missing-file error) if litellm has never successfully run. A full `provision.yml`
   run guarantees the order (litellm before open-webui); a `--limit open-webui` run
   needs litellm already provisioned at least once, not merely reachable.
+- **[`redis`](redis.md)** must be provisioned first, and this is the hardest
+  runtime dependency of the three. Provisioning needs the `redis` host merely
+  *assigned* (its `ansible_host` renders `REDIS_URL`), but at runtime OpenWebUI
+  consults Redis on **every authenticated request** — an unreachable Redis 500s
+  chat and deletes the session cookie rather than degrading. Read
+  [the trade](redis.md#the-trade-this-role-makes-stated-deliberately) before
+  touching either side.
 - **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts`
   (`chat.{{ cluster_domain }}`); set the domain once with `zai-set-domain`.
 

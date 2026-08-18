@@ -20,6 +20,16 @@
 # package metadata, unread by anything (Corliss sets `package = false`); this is
 # the git ref ansible.builtin.git checks out.
 corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
+# v0.5.0 enforces membership: /oidc/authorize, /api/ and the post-login resume
+# refuse anyone who is not a member, so signing in with an atproto handle no
+# longer reaches open-webui on its own. **This is the first pin whose safety
+# depends on the membership cache being complete** — replay it only against a
+# reconcile run reporting zero unresolved and zero orphans (the /manage/ Preview
+# button), because an unresolved DID is a real member who gets locked out the
+# moment this lands. Roster admins pass with no cache row at all, which is what
+# keeps a rebuilt cluster enterable, and /manage/ and /admin/login/ stay
+# ungated for the same reason — see the URL surface in docs/roles/corliss.md.
+#
 # v0.4.1 presents the registry's public Host when reaching it at its internal
 # address — without it every reconcile run fails with HTTP 421 "Unknown host",
 # so v0.4.0 is not usable with the internal MEMBERSHIP_REGISTRY_URL below.
@@ -52,7 +62,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # replace requirements.txt, Python 3.14, Django 6.1). This role's `uv sync
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
-corliss_version: v0.4.1
+corliss_version: v0.5.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

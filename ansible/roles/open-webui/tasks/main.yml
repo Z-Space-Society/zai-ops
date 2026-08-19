@@ -212,6 +212,57 @@
     group: "{{ openwebui_group }}"
     recurse: true
 
+# --- Loop the public origin back to the Caddy edge --------------------------------
+# Server-to-server OIDC calls (discovery, token exchange, and the JWKS fetch that
+# validates a logout_token) must NOT leave the cluster. Cloudflare's Browser
+# Integrity Check 403s known non-browser User-Agents, and PyJWT's PyJWKClient —
+# the one client on the back-channel-logout path — fetches with bare urllib
+# (`Python-urllib/3.x`), so it is refused with `error code: 1010` where authlib's
+# httpx sails through. That is why login worked while logout validation returned
+# 400 forever. Resolving the apex to the proxy CT fixes the JWKS fetch and, as a
+# bonus, takes the public edge out of the login token exchange too — the same
+# "service-to-service stays internal" rule MEMBERSHIP_REGISTRY_URL already follows.
+#
+# The issuer must REMAIN the public origin (the RP compares the token's `iss`), so
+# this is a resolution change only: same URL, internal route. Depends on the
+# ca-certificates package installed above.
+
+- name: Resolve the cluster domain to the proxy CT from this container
+  # The proxy CT's IP is derived from its CTID via hostvars, never hardcoded.
+  # The regexp is anchored at BOTH ends and must match the rendered line exactly:
+  # a regexp the line itself doesn't satisfy would append a duplicate on every
+  # run. Anchoring also keeps it from matching a subdomain entry
+  # (chat.{{ cluster_domain }}), which belongs to a different CT.
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ hostvars['proxy'].ansible_host }} {{ cluster_domain }}"
+    regexp: '^\S+\s+{{ cluster_domain | regex_escape }}\s*$'
+    owner: root
+    group: root
+    mode: "0644"
+  notify: restart open-webui
+
+- name: Trust the Cloudflare Origin CA roots
+  # Caddy serves a Cloudflare Origin CA cert, which is trusted ONLY by Cloudflare
+  # (docs/roles/proxy.md: origin TLS, no ACME) — so the moment the request stops
+  # going through Cloudflare, nothing here trusts it. Both roots are installed
+  # because either may have signed the deployed origin cert, and carrying the
+  # unused one costs nothing. They are committed to the repo rather than fetched:
+  # a public, static PEM is exactly the kind of artifact the blueprint should
+  # carry itself. Valid until 2029-08-15.
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: /usr/local/share/ca-certificates/{{ item }}
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - cloudflare-origin-ca-rsa.crt
+    - cloudflare-origin-ca-ecc.crt
+  notify:
+    - update ca trust
+    - restart open-webui
+
 # --- Secret env + unit ------------------------------------------------------------
 
 - name: Render the open-webui secret environment file

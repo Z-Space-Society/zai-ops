@@ -62,6 +62,8 @@ must:
 | Confirm the base interpreter is under the role tree | `command` → `sys._base_executable` (`failed_when`) | Guards the load-bearing placement above — fail loud at provision time if the managed interpreter ever lands outside `/opt/open-webui`. |
 | Install `open-webui` into the venv | `command` → `uv pip install` | pip runs *inside* the venv → PEP 668 doesn't apply. Pinned version. Notifies `restart open-webui`. |
 | Chown the home to `open-webui` | `ansible.builtin.file` (`recurse`) | venv/install ran as root; the daemon reads the interpreter, venv and `open-webui` console script. Runs *after* install so the whole tree (incl. the managed CPython) is covered. |
+| Resolve `{{ cluster_domain }}` to the proxy CT | `lineinfile` → `/etc/hosts` | Keeps server-side OIDC calls (discovery, token exchange, and the JWKS fetch that validates a `logout_token`) **inside the cluster** — Cloudflare 403s the `Python-urllib` User-Agent PyJWT fetches with, which is what left back-channel logout inert. See [The public origin is resolved internally](#the-public-origin-is-resolved-internally). The regexp is anchored at both ends: it matches its own rendered line (a regexp the line didn't satisfy would append a duplicate every run) and never the `chat.` subdomain, which is a different CT. |
+| Install both Cloudflare Origin CA roots | `copy` → `/usr/local/share/ca-certificates/` | Caddy serves a Cloudflare **Origin CA** cert, trusted only by Cloudflare — once the request stops going through Cloudflare, nothing here trusts it. Both roots are committed to the role's `files/` (public static PEMs; either may have signed the deployed cert). Notifies `update ca trust` + restart. |
 | Render the secret env file | `template` (`0600 root`, `no_log`) | `DATABASE_URL`, `WEBUI_SECRET_KEY`, the litellm backend `OPENAI_API_*` + `RAG_*`, the corliss OIDC block (`OAUTH_*`/`OPENID_PROVIDER_URL`, see below), `DATA_DIR`/`HF_HOME`, `HOST`/`PORT`, `WEBUI_URL`. Read by systemd via `EnvironmentFile`. Open WebUI has no config file — it's env-configured. Notifies restart. |
 | Install the systemd unit | `template` → `/etc/systemd/system/open-webui.service` | Hardened (`ProtectSystem=strict`, `ReadWritePaths={{ openwebui_data_dir }}`, `HOME` → DATA_DIR, `TimeoutStartSec=300`). Notifies reload + restart. |
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
@@ -73,6 +75,7 @@ must:
 | Handler | Action |
 | ------- | ------ |
 | `reload systemd` | `systemd: daemon_reload=true` |
+| `update ca trust` | `command: update-ca-certificates` — rebuilds `/etc/ssl/certs/ca-certificates.crt`, the merged bundle the unit points every HTTP client at. Defined **before** `restart open-webui` on purpose: handlers run in *definition* order, not notification order, so the bundle is rebuilt before the daemon re-reads it. |
 | `restart open-webui` | `service: name=open-webui state=restarted` |
 
 ## Variables
@@ -136,15 +139,72 @@ delivered, so the expiry is what still holds on every path where it isn't:
 2. **Redis restarted.** Nothing there is persisted, on purpose, so in-flight
    revocation markers are gone and those sessions come back.
 3. **The message doesn't get through** — corliss can't reach this CT, or this CT
-   can't reach corliss's *public* JWKS to validate what it was sent. That second
-   leg is unavoidably public: the OIDC issuer must be the public origin or the
-   token's `iss` won't match, so validation depends on the edge even though
-   corliss POSTs to this CT internally.
+   can't reach corliss's JWKS to validate what it was sent. Both legs are now
+   internal: corliss POSTs here directly, and the return leg resolves the public
+   origin to the [`proxy`](proxy.md) CT (below), so what this depends on is
+   **Caddy being up** — not public DNS, not Cloudflare. The URL stays public
+   because the OIDC issuer must be the public origin or the token's `iss` won't
+   match; only the *route* is internal.
 
 There is still no `end_session_endpoint` in corliss's discovery document —
 front-channel/RP-initiated logout (the browser-redirect flavour) is a separate
 mechanism and isn't built. Back-channel logout covers the cases that matter
 here, since both triggers are server-side events.
+
+### The public origin is resolved internally
+
+**Cloudflare 403s the HTTP client that validates logout tokens.** Open WebUI
+validates a `logout_token` by fetching corliss's JWKS with PyJWT's
+`PyJWKClient` (`utils/oauth.py::handle_backchannel_logout`), and `PyJWKClient`
+uses bare `urllib` — User-Agent `Python-urllib/3.x`. Cloudflare's [Browser
+Integrity Check](https://developers.cloudflare.com/waf/tools/browser-integrity-check/),
+on by default for every zone, refuses that UA with **`error code: 1010`**. It is
+purely UA-based — same URL, same moment, `curl`/Chrome/`httpx` all return 200:
+
+| Client | Result |
+| ------ | ------ |
+| `Python-urllib/3.12` | **403** |
+| `curl/8.4.0`, Chrome, `python-httpx/0.27.0` | 200 |
+
+That is why **login worked while logout was inert**: authlib fetches with
+`httpx` (200), PyJWT with `urllib` (403). corliss delivered a valid token, this
+CT couldn't validate it, and `POST /oauth/backchannel-logout` returned 400 on
+every attempt — leaving revocation bounded by `JWT_EXPIRES_IN` exactly as before
+the feature was built.
+
+**The fix is a route change, not a URL change.** Three pieces, all in this role:
+
+1. **`/etc/hosts`** maps `{{ cluster_domain }}` to the [`proxy`](proxy.md) CT, so
+   server-side calls to the apex go straight to Caddy over `vmbr1` instead of
+   out through the host's NAT to Cloudflare and back. Caddy serves every route
+   on all its interfaces (no `bind` in the Caddyfile), so **no proxy-role change
+   is needed**.
+2. **Both Cloudflare Origin CA roots** land in the CT's trust store. Caddy's cert
+   is an Origin CA cert — trusted by Cloudflare and nothing else (see
+   [`proxy`](proxy.md): origin TLS, no ACME) — so bypassing Cloudflare means
+   bypassing the only party that trusted it. The roots are valid until
+   **2029-08-15**; a rebuild after that needs fresh ones, if this shim still
+   exists.
+3. **`SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt`** in the unit points
+   *every* client at Debian's merged bundle. This is the load-bearing half:
+   `httpx` verifies against **certifi** by default and would reject the Origin CA
+   cert on the internal route — fixing logout by breaking login. urllib, httpx
+   and aiohttp all honour `SSL_CERT_FILE`, so one variable gives all three the
+   same trust story (verified against this release's pinned httpx 0.28.1 /
+   PyJWT 2.13.0, including that public TLS still verifies through the merged
+   bundle).
+
+**This is a Cloudflare shim, and it is meant to be deletable.** It follows the
+same rule as `MEMBERSHIP_REGISTRY_URL` — service-to-service traffic stays
+internal, so recovery doesn't depend on public DNS plus an edge — and it
+survives Cloudflare's removal gracefully: give Caddy a publicly-trusted cert and
+piece 2 and 3 become no-ops to delete, while piece 1 still earns its place. The
+one thing it does **not** fix is the same block hitting a *genuinely external*
+Python client: `/auth/client-metadata.json` is the atproto `client_id` document,
+fetched server-side by each member's PDS. Bluesky's PDS is Go/TS and passes
+today, but a Python-based PDS or authorization server would be 403'd, and
+nothing on this side can help. See the [Known
+gotchas](../README.md#known-gotchas) entry.
 
 ### OIDC login: corliss is the only way in
 
@@ -244,8 +304,19 @@ ssh root@10.1.1.<ctid> 'systemctl is-active open-webui'
 ssh root@10.1.1.<ctid> 'ss -ltnp | grep 8080'                            # listening?
 curl -fs http://10.1.1.<ctid>:8080/health                                # alive (from CT 100; curl isn't on the CT, but it binds 0.0.0.0)
 ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep openwebui     # DB present
+
+# The internal loop-back, exercised through the exact client that used to 403.
+# There is no curl on this CT — use the venv's python, which is the real path.
+ssh root@10.1.1.<ctid> 'getent hosts <domain>'                           # expect the proxy CT's IP
+ssh root@10.1.1.<ctid> 'SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+  /opt/open-webui/venv/bin/python -c "from jwt import PyJWKClient; \
+  PyJWKClient(\"https://<domain>/.well-known/jwks.json\").fetch_data(); print(\"jwks ok\")"'
+
 # end-to-end: browse https://chat.<domain>, create the first (admin) user,
 # confirm litellm's models appear, and upload a doc to exercise RAG.
+# Revocation: revoke a member in corliss, then expect a 200 (not 400) on
+# POST /oauth/backchannel-logout in `journalctl -u open-webui`, and the marker
+# `open-webui:auth:user:<id>:revoked_at` present on the redis CT.
 ```
 
 The **first** user to sign up becomes the admin; there's no seeded account.
@@ -284,6 +355,11 @@ The **first** user to sign up becomes the admin; there's no seeded account.
   through verbatim — so the *client* (Open WebUI's RAG pipeline) must add them. Noted
   so mediocre retrieval isn't re-debugged as a model fault (see the litellm floor
   embedder gotcha in the [main docs](../README.md#known-gotchas)).
+- **Don't "simplify" the trust setup to one CA file.** `SSL_CERT_FILE` must point
+  at the **merged** system bundle, not at an Origin CA root on its own — the app
+  also makes ordinary public HTTPS calls, and a single-CA bundle would break
+  every one of them. Adding the roots via `update-ca-certificates` and pointing
+  at the merged output is what keeps both working.
 - **Disk:** the venv pulls `torch` + `sentence-transformers` (multi-GB) even though
   embeddings are routed out to litellm, so the CT rootfs is sized at 16 GB (vs
   litellm's 8) — bump it if RAG uploads/vector data grow.

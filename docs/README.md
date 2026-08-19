@@ -471,6 +471,25 @@ by `bootstrap.sh` and re-asserted by the `control_node` role, *not* the 1.3.0
 bundled with Debian 13's `ansible` 12 (see the timeout lesson). These will recur
 on the remaining service CTs:
 
+- **Cloudflare 403s server-side Python fetches of our own public endpoints.**
+  Browser Integrity Check is on by default for the zone and refuses known
+  non-browser User-Agents with `error code: 1010` — `Python-urllib/3.x` among
+  them. It is UA-based only: `curl`, a browser and `httpx` all get 200 from the
+  same URL at the same moment. This is nasty precisely because it splits a
+  library ecosystem in half — OIDC **login** worked fine (authlib uses `httpx`)
+  while back-channel **logout** silently failed forever (PyJWT's `PyJWKClient`
+  uses bare `urllib` to fetch the JWKS, so validation 403'd and the endpoint
+  returned 400). Symptom to recognise: an inter-service call that works from the
+  shell but not from the app, or vice versa. Any service-to-service call must
+  resolve the public origin **internally** rather than traverse the edge — see
+  [`open-webui`](roles/open-webui.md#the-public-origin-is-resolved-internally)
+  for the pattern (`/etc/hosts` → proxy CT, Origin CA roots in the trust store,
+  `SSL_CERT_FILE` at the merged bundle). The **unfixable** cousin: our atproto
+  `client_id` document `/auth/client-metadata.json` is fetched server-side by
+  each member's PDS. Bluesky's is Go/TS and passes today, but a Python-based PDS
+  or authorization server would be refused, and no change on our side reaches
+  that client — it needs a Cloudflare rule, or no Cloudflare.
+
 - **A static Caddy route serves `index.html` for files that don't exist.** The
   SPA fallback the admin console needs (`try_files {path} /index.html`) is
   indiscriminate: a file the build *failed to emit* is served as HTML rather

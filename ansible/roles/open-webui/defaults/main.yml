@@ -147,7 +147,9 @@ openwebui_oidc_client_secret: "{{ corliss_oidc_client_secret }}"
 #   2. **Redis restarted.** Nothing here is persisted, on purpose, so every
 #      in-flight revocation marker is gone and those sessions come back.
 #   3. **corliss cannot reach open-webui**, or open-webui cannot reach corliss's
-#      public JWKS to validate the token it was sent.
+#      JWKS to validate the token it was sent. Both legs are internal — the
+#      return leg resolves the public origin to the proxy CT (see tasks) — so
+#      this is now "the proxy CT is down", not "the public edge is down".
 #
 # The cost of keeping it short is near zero: while the corliss session is alive
 # (Django's 2w default) re-auth is a silent redirect, not a login prompt. 4h is

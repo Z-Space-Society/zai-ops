@@ -11,6 +11,15 @@ EnvironmentFile={{ openwebui_env_file }}
 # HOME points at DATA_DIR so any library that writes under $HOME (a stray ~/.cache)
 # lands in the one writable path rather than failing under ProtectSystem=strict.
 Environment=HOME={{ openwebui_data_dir }}
+# Point EVERY HTTP client in the app at Debian's merged CA bundle (which the role
+# extends with the Cloudflare Origin CA roots), not at their own defaults. Without
+# this, httpx — which carries OIDC login and the token exchange — verifies against
+# certifi's bundle instead and would reject the origin cert Caddy serves on the
+# internal route, trading a broken logout for a broken login. urllib (the JWKS
+# fetch on the logout path) and aiohttp both honour the same variable, so one line
+# gives all three the same trust story. Verified against this release's pinned
+# httpx 0.28.1 / PyJWT 2.13.0.
+Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 # Run the venv's console script directly (absolute path — no PATH reliance under
 # systemd). HOST/PORT come from the EnvironmentFile but are passed explicitly too so
 # the bind is unambiguous. The venv's interpreter lives under {{ openwebui_home }}

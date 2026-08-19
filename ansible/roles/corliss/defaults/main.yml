@@ -90,6 +90,9 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.7.3 welcomes members on the home page and points them at chat and at their
+# own API keys. Copy only — no new env keys.
+#
 # v0.7.2 adds /systems/ (the stack, status stubbed), reorders the membership
 # console, and fills out the Manage menu: LiteLLM, HappyView and Proxmox admin
 # links. Needs `HAPPYVIEW_URL` and `PROXMOX_URL` in corliss.env.j2; both are
@@ -105,7 +108,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.7.2
+corliss_version: v0.7.3
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

@@ -105,7 +105,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/litellm/defaults/main.yml):
 | `llama_embed_dir` | `/opt/llama-embed` | Holds `dist/` (binary + libs) and `models/` (the GGUF). |
 | `llama_embed_model_repo` / `llama_embed_model_rev` / `llama_embed_model_file` | *(nomic GGUF)* | HF repo, pinned commit revision, and filename of the embedding GGUF. |
 | `llama_embed_ctx` | `8192` | `--ctx-size`/`--batch-size`; nomic's full context (needs the unit's yarn rope flags). |
-| `litellm_tiers` | *(level-0…2)* | One entry per SCN tier slug: `alias`, `max_budget`, `budget_duration`, `rpm_limit`, `tpm_limit`, `models`. Rendered as LiteLLM **teams**; Corliss resolves a member's tier to one by `team_alias`. A mirror of a vocabulary this repo does not own — see above. |
+| `litellm_tiers` | *(level-0…9)* | One entry per SCN tier slug: `alias`, `max_budget`, `budget_duration`, `rpm_limit`, `tpm_limit`, `models`. Rendered as LiteLLM **teams**; Corliss resolves a member's tier to one by `team_alias`. A mirror of a vocabulary this repo does not own — see above. |
 | `litellm_corliss_user_id` | `corliss-provisioner` | The `proxy_admin` LiteLLM user whose key Corliss provisions with. |
 
 ### Secrets (auto-generated — no manual step)

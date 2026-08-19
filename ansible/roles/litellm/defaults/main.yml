@@ -146,6 +146,17 @@ litellm_embedding_model_entry:
 # more access than they were granted. That trade is the reason tiers are teams
 # at all; see docs/roles/litellm.md.
 #
+# **Declare every slug the registry can issue, not just the ones in use.** All
+# ten are here for that reason: a member holding a tier with no team is refused
+# a key outright, and finding that out from a member's error message is not the
+# way to learn a tier exists. (That is exactly how level-8 was found missing on
+# 2026-08-19.)
+#
+# The budgets and rate limits below are a monotonic placeholder ladder, NOT a
+# policy decision — Phase F of the deploy plan is where real per-tier limits and
+# model access get set. Edit them here and re-run the role; the /team/update
+# pass makes the change stick.
+#
 # `models: []` grants access to every model on the proxy. Narrow a tier by
 # listing model names instead — that is the knob Phase F turns.
 litellm_tiers:
@@ -166,6 +177,48 @@ litellm_tiers:
     budget_duration: 30d
     rpm_limit: 60
     tpm_limit: 250000
+    models: []
+  - alias: level-3
+    max_budget: 100
+    budget_duration: 30d
+    rpm_limit: 90
+    tpm_limit: 400000
+    models: []
+  - alias: level-4
+    max_budget: 150
+    budget_duration: 30d
+    rpm_limit: 120
+    tpm_limit: 600000
+    models: []
+  - alias: level-5
+    max_budget: 200
+    budget_duration: 30d
+    rpm_limit: 150
+    tpm_limit: 800000
+    models: []
+  - alias: level-6
+    max_budget: 300
+    budget_duration: 30d
+    rpm_limit: 200
+    tpm_limit: 1000000
+    models: []
+  - alias: level-7
+    max_budget: 400
+    budget_duration: 30d
+    rpm_limit: 250
+    tpm_limit: 1500000
+    models: []
+  - alias: level-8
+    max_budget: 500
+    budget_duration: 30d
+    rpm_limit: 300
+    tpm_limit: 2000000
+    models: []
+  - alias: level-9
+    max_budget: 750
+    budget_duration: 30d
+    rpm_limit: 400
+    tpm_limit: 3000000
     models: []
 
 # --- The credential Corliss provisions with ---------------------------------

@@ -409,7 +409,17 @@ decision record.
   unlike every secret above, it isn't a `password`/`pipe` lookup: it can only
   be produced by calling litellm's live `/key/generate` API, so it's minted
   by an Ansible task, not a Jinja lookup. See
-  [`roles/litellm.md`](roles/litellm.md#two-key-management-paths-kept-deliberately-separate).
+  [`roles/litellm.md`](roles/litellm.md#three-key-management-paths-kept-deliberately-separate).
+- Corliss's LiteLLM provisioner key (`corliss_litellm_provisioner_key`) is
+  minted by an Ansible task the same way, at
+  `/root/.zai-secrets/corliss_litellm_provisioner_key`, and is the one place in
+  the cluster outside CT 100 that holds an **admin-scoped** LiteLLM credential —
+  Corliss mints and deletes members' API keys on their behalf, which `/key/*`
+  will not let a plain virtual key do. It belongs to a `proxy_admin` *user*
+  rather than being the master key, so a compromised Corliss costs one
+  revocation instead of a proxy-wide rotation. What makes that defensible is on
+  the Corliss side: no request ever chooses whose keys it acts on. See
+  [`roles/corliss.md`](roles/corliss.md#secrets).
 - CT 100 also holds `/etc/zai-litellm/admin.env` (`0600`, rendered by the
   `litellm` role) — the LiteLLM master key + API base that
   [`zai-litellm-key`](#operator-commands) uses to mint/list/revoke per-person
@@ -635,7 +645,7 @@ Lessons on the **`litellm` CT floor embedder** (the always-on CPU embedding mode
   8192 context also needs the unit's yarn rope flags (llama.cpp defaults to 2048).
 
 Lessons on **LiteLLM virtual-key management** (F1 fix — Open WebUI's key,
-`bin/zai-litellm-key`):
+`bin/zai-litellm-key`, and Corliss's provisioner key):
 
 - **`/key/generate` returns a brand-new key on every call — there's no
   "generate if absent" on litellm's side.** Any Ansible task that mints a key
@@ -658,6 +668,24 @@ Lessons on **LiteLLM virtual-key management** (F1 fix — Open WebUI's key,
   previously litellm being down only broke chat at *runtime*. A full
   `provision.yml` run satisfies the order; there's no path to provisioning
   open-webui before litellm has run at least once.
+- **That pattern now has a second instance, and it moved a play.**
+  `corliss_litellm_provisioner_key` is minted the same way, so
+  [`corliss`](roles/corliss.md) inherited the same hard dependency — and unlike
+  open-webui, corliss's play used to run *before* litellm's. It was moved below
+  it in [`provision.yml`](../ansible/provision.yml), which is safe because
+  litellm depends only on postgres. Worth knowing because the failure it
+  prevents is not loud on a rebuild of an existing cluster (the secrets file
+  survives in `/root/.zai-secrets`) but is total on a fresh one: an empty
+  `LITELLM_PROVISIONER_KEY` renders fine, boots fine, and leaves `/api/`
+  permanently unable to issue a key.
+- **Tiers are LiteLLM teams, and the team ids never leave the CT.** `/team/new`
+  mints a fresh `team_id` every call with no generate-if-absent, so the role
+  reads `/team/list` first and fills only the gaps — and Corliss resolves a
+  member's tier by `team_alias` at runtime rather than holding an id, precisely
+  so no generated identifier has to be carried out of Ansible by hand. Editing
+  a tier's budget in `litellm_tiers` is picked up by a separate `/team/update`
+  pass; creation alone would silently leave the numbers in git describing
+  whatever the first run happened to set.
 
 Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
 `ENABLE_SIGNUP`, and others):

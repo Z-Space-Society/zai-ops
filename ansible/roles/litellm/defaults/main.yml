@@ -131,3 +131,46 @@ litellm_embedding_model_entry:
       api_key: "none"
     model_info:
       mode: embedding
+
+# --- Membership tiers, as LiteLLM teams -------------------------------------
+# Corliss issues each member an API key scoped to their tier's team, and model
+# access plus per-member limits live on the team — so changing someone's tier is
+# a team move and nothing about the key material changes.
+#
+# The slugs are SCN vocabulary, owned by the registry: a grant carries
+# `tier: level-N` and Corliss resolves it here by `team_alias`. That means the
+# list below is a MIRROR of an upstream vocabulary, and the cost is explicit —
+# **a tier added upstream is inert until it gains an entry here.** Corliss fails
+# closed on the gap (it refuses to issue rather than mint an unscoped key), so
+# the symptom is a member told their tier is not configured, not a member handed
+# more access than they were granted. That trade is the reason tiers are teams
+# at all; see docs/roles/litellm.md.
+#
+# `models: []` grants access to every model on the proxy. Narrow a tier by
+# listing model names instead — that is the knob Phase F turns.
+litellm_tiers:
+  - alias: level-0
+    max_budget: 5
+    budget_duration: 30d
+    rpm_limit: 10
+    tpm_limit: 20000
+    models: []
+  - alias: level-1
+    max_budget: 20
+    budget_duration: 30d
+    rpm_limit: 30
+    tpm_limit: 100000
+    models: []
+  - alias: level-2
+    max_budget: 50
+    budget_duration: 30d
+    rpm_limit: 60
+    tpm_limit: 250000
+    models: []
+
+# --- The credential Corliss provisions with ---------------------------------
+# A virtual key owned by a `proxy_admin` service user, NOT the master key. It can
+# mint and delete keys for any member, so a Corliss compromise costs one
+# revocation rather than a proxy-wide rotation — and the master key stays with
+# CT 100 and the admin UI, which is the split docs/roles/litellm.md draws.
+litellm_corliss_user_id: corliss-provisioner

@@ -89,7 +89,13 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # replace requirements.txt, Python 3.14, Django 6.1). This role's `uv sync
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
-corliss_version: v0.6.1
+#
+# v0.7.0 — members issue their own LiteLLM API keys from /api/. Needs the three
+# `LITELLM_*` keys in corliss.env.j2 and the litellm role having run at least
+# once (it mints the provisioner key and creates the tier teams); a pin below
+# v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
+# saying it is not configured rather than failing.
+corliss_version: v0.7.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -219,6 +225,40 @@ corliss_oidc_backchannel_logout_uri: "http://{{ hostvars['open-webui'].ansible_h
 corliss_chat_url: "https://chat.{{ cluster_domain }}"     # nav "Chat" link
 corliss_api_url: "https://api.{{ cluster_domain }}"       # base URL shown on /api/
 corliss_manage_url: "https://manage.{{ cluster_domain }}"  # admin block's console link
+
+# --- LiteLLM: where Corliss issues members' API keys ------------------------
+# Deliberately NOT corliss_api_url above. That one is the public origin a MEMBER
+# points their client at; this is Corliss reaching the same service from the CT
+# next door, and the two must not be conflated:
+#
+# - **Server-side Python cannot fetch our own public origin.** Cloudflare's
+#   Browser Integrity Check refuses non-browser user agents with `error code:
+#   1010` — the trap that shipped back-channel logout fully built and inert.
+#   See docs/roles/open-webui.md, "the public origin is resolved internally".
+# - The provisioner key has no business crossing an edge to reach a neighbour.
+#
+# Unlike the registry there is no _host companion: LiteLLM does not route by
+# virtual host, so a bare-IP Host needs no compensating header (HappyView's
+# HTTP 421 problem does not exist here).
+#
+# The port is a LOCAL default rather than a reach into the litellm role's vars —
+# same convention as corliss_openwebui_port above. Keep in sync with litellm_port.
+corliss_litellm_port: 4000
+corliss_litellm_url: "http://{{ hostvars['litellm'].ansible_host }}:{{ corliss_litellm_port }}"
+
+# How many API keys one member may hold. LiteLLM enforces no per-user limit, so
+# this cap is ours or there is none.
+corliss_litellm_max_keys_per_member: 5
+
+# The provisioner key, MINTED BY THE litellm ROLE and read back from the control
+# node's secrets file — which is why the litellm play runs before this one in
+# provision.yml (see the comment on the corliss play there). A `proxy_admin`
+# virtual key, not the master key: it can mint and delete keys for any member,
+# so a compromised Corliss costs one revocation rather than a proxy-wide
+# rotation. DR-critical in the same way every other entry in .zai-secrets is —
+# lose the file and the next run mints a new key, leaving the old proxy_admin
+# key live and unused until it is deleted by hand.
+corliss_litellm_provisioner_key: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/corliss_litellm_provisioner_key') }}"
 
 # The HappyView instance corliss reads membership back out of, for reconciliation
 # (`manage.py reconcile_membership`, and the button on corliss's own /manage/).

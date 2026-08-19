@@ -381,6 +381,123 @@
   when: not openwebui_key_stat.stat.exists
   no_log: true
 
+# --- Membership tiers, as LiteLLM teams ------------------------------------
+# Corliss scopes each member's key to the team matching their tier slug, so
+# these must exist before a key can be issued. Created by alias rather than by
+# id: /team/new mints a fresh id every call and there is no generate-if-absent,
+# so the existing list is read first and only the gaps are filled. The id never
+# leaves this CT — Corliss resolves teams by `team_alias` at runtime precisely
+# so no generated identifier has to be carried out of Ansible by hand.
+
+- name: Read the teams LiteLLM already has
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ litellm_port }}/team/list"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ litellm_master_key }}"
+    status_code: 200
+  register: litellm_team_list
+  no_log: true
+
+- name: Index the existing teams by alias
+  # `default('')` is load-bearing: a team created by hand in the admin UI can
+  # have no alias at all, and a bare map(attribute=…) over one yields Undefined,
+  # which then raises on the membership tests below rather than simply not
+  # matching. Indexing once also keeps the two tasks that follow reading the
+  # same picture.
+  ansible.builtin.set_fact:
+    litellm_team_ids: >-
+      {{ dict(litellm_team_list.json
+              | map(attribute='team_alias', default='')
+              | zip(litellm_team_list.json | map(attribute='team_id', default=''))) }}
+
+- name: Create the tier teams that are missing
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ litellm_port }}/team/new"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ litellm_master_key }}"
+    body_format: json
+    body:
+      team_alias: "{{ item.alias }}"
+      max_budget: "{{ item.max_budget }}"
+      budget_duration: "{{ item.budget_duration }}"
+      rpm_limit: "{{ item.rpm_limit }}"
+      tpm_limit: "{{ item.tpm_limit }}"
+      models: "{{ item.models }}"
+    status_code: 200
+  loop: "{{ litellm_tiers }}"
+  loop_control:
+    label: "{{ item.alias }}"
+  when: item.alias not in litellm_team_ids
+  no_log: true
+
+- name: Keep the existing tier teams' limits declarative
+  # The budgets and rate limits are config, so editing the defaults and
+  # re-running must move them. Creation above cannot do this — it is skipped
+  # once the team exists — which would otherwise make the numbers in git a
+  # description of what the first run happened to set.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ litellm_port }}/team/update"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ litellm_master_key }}"
+    body_format: json
+    body:
+      team_id: "{{ litellm_team_ids[item.alias] }}"
+      max_budget: "{{ item.max_budget }}"
+      budget_duration: "{{ item.budget_duration }}"
+      rpm_limit: "{{ item.rpm_limit }}"
+      tpm_limit: "{{ item.tpm_limit }}"
+      models: "{{ item.models }}"
+    status_code: 200
+  loop: "{{ litellm_tiers }}"
+  loop_control:
+    label: "{{ item.alias }}"
+  when: item.alias in litellm_team_ids
+  no_log: true
+
+# --- Provisioner key for Corliss -------------------------------------------
+# Corliss mints and deletes members' keys, which needs admin scope — so unlike
+# Open WebUI's key above this is a key owned by a `proxy_admin` user, not a
+# plain virtual key. It is still NOT the master key: a compromised Corliss costs
+# one revocation here, where the master key would cost a proxy-wide rotation and
+# take the operator CLI with it.
+#
+# Generate-once by the same stat-first idiom, for the same reason: /user/new
+# with auto_create_key returns a brand-new secret every time it succeeds.
+
+- name: Check whether the Corliss provisioner key already exists
+  ansible.builtin.stat:
+    path: "{{ _zai_secrets_dir }}/corliss_litellm_provisioner_key"
+  delegate_to: localhost
+  register: corliss_provisioner_stat
+
+- name: Create the Corliss provisioner user and its key
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ litellm_port }}/user/new"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ litellm_master_key }}"
+    body_format: json
+    body:
+      user_id: "{{ litellm_corliss_user_id }}"
+      user_role: proxy_admin
+      auto_create_key: true
+    status_code: 200
+  register: corliss_provisioner_gen
+  when: not corliss_provisioner_stat.stat.exists
+  no_log: true
+
+- name: Persist the Corliss provisioner key
+  ansible.builtin.copy:
+    content: "{{ corliss_provisioner_gen.json.key }}"
+    dest: "{{ _zai_secrets_dir }}/corliss_litellm_provisioner_key"
+    mode: "0600"
+  delegate_to: localhost
+  when: not corliss_provisioner_stat.stat.exists
+  no_log: true
+
 # --- Admin-facing env for the zai-litellm-key operator CLI ------------------
 # Mirrors the backup role's /etc/zai-backup/restic.env: the role renders only
 # the secret/host-specific bits an in-git script (bin/zai-litellm-key) can't

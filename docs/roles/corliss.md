@@ -44,7 +44,7 @@ CT 100.
 | `/auth/client-metadata.json` | ATProto client metadata — **this URL is the `client_id`** |
 | `/.well-known/openid-configuration`, `/.well-known/jwks.json` | OIDC discovery + JWKS (root-scoped: issuer is the bare origin) |
 | `/oidc/authorize`, `/oidc/token` | OIDC provider endpoints (reached via discovery). **`authorize` is membership-gated** — it is the handoff into open-webui and is re-checked on every exchange, so a session that predates the gate, or a member revoked since signing in, is refused here rather than walking into chat |
-| `/api/` | direct API access (placeholder copy today). Membership-gated |
+| `/api/` | the member's own API keys — issue, list, revoke, and usage, read live from LiteLLM. Membership-gated, and *issuing* needs a real grant on top of that: a roster admin reaches the page but gets no key |
 | `/membership/events` | the SCN registry's membership push — bearer-authed, machine-to-machine (see [Secrets](#secrets)) |
 | `/manage/` | the cluster console — member roll, admin roster, and the reconcile button. Gated on the atproto roster (`is_cluster_admin`), **not** on any Django flag and **never on membership**, so it stays reachable on a rebuilt cluster with an empty membership cache. Supersedes [`manage_console`](manage_console.md) |
 | `/admin/` | Django admin (break-glass account). **Never membership-gated:** `did:local:admin` is not on the roster and will never have a cache row, so a gate here would lock out the recovery account |
@@ -95,7 +95,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `corliss_repo_url` | `https://github.com/Z-Space-Society/Corliss.git` | Upstream app repo (public — the clone needs no credentials). |
-| `corliss_version` | `v0.4.1` | The **pinned tag** cloned onto the CT (`v0.4.1` presents the registry's public Host on the internal call, without which every reconcile fails 421; `v0.4.0` reconciles membership from the registry and serves the console at `/manage/`, needing the `MEMBERSHIP_REGISTRY_*` keys; `v0.3.2` adds the home page, `/api/` and the nav's identity/admin menu, and reads the admin roster from `SCN_SERVICE_DID`; `v0.3.0` added atproto membership caching). Bumping this is how the app is upgraded — and since `v0.2.1` the deployed site's footer stamps the tag it's running (resolved by `git describe --tags` off the checkout), so the pin is verifiable from a browser. Floor is `v0.2.0`, the uv-project release (pyproject + `uv.lock`, Python 3.14, Django 6.1) this role's `uv sync --locked` requires. |
+| `corliss_version` | `v0.7.0` | The **pinned tag** cloned onto the CT. `v0.7.0` issues members' LiteLLM API keys from `/api/` and needs the three `LITELLM_*` keys in `corliss.env.j2`; a pin below it ignores them, and a pin at or above it with them unset leaves `/api/` saying it is not configured. `v0.6.1`/`v0.6.0` end the relying party's session on revocation (needs `OIDC_BACKCHANNEL_LOGOUT_URI` and the `redis` CT); `v0.5.0` closes GATE; `v0.4.1` presents the registry's public Host on the internal call, without which every reconcile fails 421; `v0.4.0` reconciles membership and serves `/manage/`, needing the `MEMBERSHIP_REGISTRY_*` keys; `v0.3.2` adds the home page, `/api/` and the nav's identity/admin menu, and reads the admin roster from `SCN_SERVICE_DID`; `v0.3.0` added atproto membership caching. Bumping this is how the app is upgraded — and since `v0.2.1` the deployed site's footer stamps the tag it's running (resolved by `git describe --tags` off the checkout), so the pin is verifiable from a browser. Floor is `v0.2.0`, the uv-project release (pyproject + `uv.lock`, Python 3.14, Django 6.1) this role's `uv sync --locked` requires. |
 | `corliss_port` / `corliss_host` | `8000` / `0.0.0.0` | gunicorn's bind; `0.0.0.0` so Caddy can reach it from the proxy CT. |
 | `corliss_gunicorn_workers` | `2` | gunicorn worker count. |
 | `corliss_home` / `corliss_src` / `corliss_venv` | `/opt/corliss[/src,/venv]` | Cloned source + venv, all under the chowned tree. `uv sync` is pointed at `corliss_venv` via `UV_PROJECT_ENVIRONMENT` — see [Notes](#notes). |
@@ -110,8 +110,12 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | `corliss_oidc_backchannel_logout_uri` | `http://{{ hostvars['open-webui'].ansible_host }}:8080/oauth/backchannel-logout` | Where corliss POSTs a signed `logout_token` on sign-out and on revocation — what makes revocation immediate instead of bounded by Open WebUI's own `JWT_EXPIRES_IN`. **Internal**, unlike the redirect URI above: that one is a URL a member's browser follows, this is a call between two CTs on one bridge (same distinction as `corliss_membership_registry_url`). Needs corliss ≥ v0.6.0 and the [`redis`](redis.md) CT, or Open WebUI cannot revoke the JWT it already issued. |
 | `corliss_openwebui_port` | `8080` | Open WebUI's listen port — a local default (not read from that role's defaults); keep in sync with `openwebui_port`. |
 | `corliss_chat_url` | `https://chat.{{ cluster_domain }}` | Drives the login/account pages' nav "Chat" link — same `cluster_domain` derivation as `corliss_url`, different subdomain. |
-| `corliss_api_url` | `https://api.{{ cluster_domain }}` | Shown on `/api/` as the base URL to point a client at — the same origin the `litellm` route serves. |
+| `corliss_api_url` | `https://api.{{ cluster_domain }}` | Shown on `/api/` as the base URL for a **member** to point their client at — the same origin the `litellm` route serves. Not what Corliss itself calls; that is `corliss_litellm_url` below, and conflating them breaks key issuing silently. |
 | `corliss_manage_url` | `https://manage.{{ cluster_domain }}` | The home page's "Manage Console" link (admins only) — the same origin the [`manage_console`](manage_console.md) route serves. |
+| `corliss_litellm_url` | `http://{{ hostvars['litellm'].ansible_host }}:4000` | Where **Corliss** reaches LiteLLM to provision members and mint their keys. Deliberately the **internal** address, not `corliss_api_url` — see below. |
+| `corliss_litellm_port` | `4000` | Local mirror of `litellm_port`, not a reach into that role's vars (same convention as `corliss_openwebui_port`). Keep the two in sync. |
+| `corliss_litellm_max_keys_per_member` | `5` | How many API keys one member may hold. LiteLLM enforces no per-user limit, so this cap is ours or there is none. |
+| `corliss_litellm_provisioner_key` | *(file lookup)* | The `proxy_admin` virtual key minted by the [`litellm`](litellm.md) role, read from `/root/.zai-secrets/corliss_litellm_provisioner_key`. |
 | `scn_service_did` | `""` | The SCN service DID whose repo holds the public admin roster; corliss reads it to decide who sees the admin block. **Not** a `corliss_*` var — it's the registry's identity, shared verbatim with `manage_console`, recorded once by `zai-set-console service_did <did>`. Blank is a working state (empty roster, nobody elevated). |
 | `corliss_membership_registry_url` | `http://{{ hostvars['happyview'].ansible_host }}:3000` | The HappyView instance corliss reads membership back out of, for reconciliation. **Internal, over `vmbr1`** — not the public `view.<domain>` origin, which would route out through the host's NAT, across Cloudflare and back in via the proxy. This is the *recovery* path (it refills an empty cache at boot), so it must not depend on public DNS, Cloudflare and the proxy CT all being up. Derived from the inventory with the same `hostvars[...]` expression the Caddyfile routes with, so the CTID assignment stays the single source; same coupling `CORLISS_PUSH_URL` already accepts, degrading the same way. |
 | `corliss_membership_registry_port` | `3000` | HappyView's listen port, matching the `view.<domain>` entry in `caddy_proxy_hosts`. |
@@ -184,12 +188,37 @@ deployment-spec decision." Caching them on the control node means they ride
 the *existing* Tier-1 control-node backup for free, rather than needing a new
 per-CT backup path.
 
+`corliss_litellm_provisioner_key` is different in kind from the two above: it
+does **not** travel outward and it is not generated by a lookup here. The
+[`litellm`](litellm.md) role mints it — a `proxy_admin` virtual key belonging to
+the `corliss-provisioner` LiteLLM user — and persists it to
+`/root/.zai-secrets/corliss_litellm_provisioner_key`; this role reads it with a
+file lookup. **That is why the litellm play runs before the corliss play** in
+[`provision.yml`](../../ansible/provision.yml): on a fresh cluster the file does
+not exist until litellm has run once, and the reverse order renders an empty
+`LITELLM_PROVISIONER_KEY`, leaving `/api/` permanently unable to issue anything.
+
+```bash
+cat /root/.zai-secrets/corliss_litellm_provisioner_key
+```
+
+Not the master key, deliberately — a compromised Corliss costs one revocation
+rather than a proxy-wide rotation. Not DR-critical: losing the file makes the
+next run mint a replacement, though the old `proxy_admin` key stays live in
+LiteLLM until deleted by hand, so it is worth pruning when that happens.
+
 ## Dependencies
 
 - **[`postgres`](postgres.md)** must be provisioned first — this role connects
   to the postgres CT (`delegate_to: postgres`) to create its role+database. A
   full [`provision.yml`](../../ansible/provision.yml) run guarantees the
   order; a `--limit corliss` run still needs postgres already up.
+- **[`litellm`](litellm.md)** must have run at least once — this role reads the
+  provisioner key that role mints, and the tier teams it creates are what
+  Corliss scopes members' keys to. A full `provision.yml` run guarantees the
+  order (the litellm play sits immediately above this one); a `--limit corliss`
+  run on a cluster where litellm has never run fails the file lookup outright,
+  which is the loud failure and the right one.
 - **Outbound HTTPS from the CT** — the clone reaches github.com through the
   host's NAT (`gw=10.1.1.1`), like every other role's package downloads.
 - **[`open-webui`](open-webui.md)** is the one OIDC relying party today. It
@@ -212,6 +241,18 @@ ssh root@10.1.1.<ctid> 'git -C /opt/corliss/src describe --tags'          # depl
 curl -s https://<domain>/ | grep -o 'Corliss v[^<]*'                       # same, from the footer
 curl -s https://<domain>/.well-known/openid-configuration | grep issuer    # issuer == bare apex
 curl -s https://<domain>/auth/client-metadata.json | grep client_id        # client_id on /auth/
+
+# The LiteLLM leg — the one most likely to be built and inert. Run FROM the
+# corliss CT, because that is the only place the internal route and the
+# provisioner key are both true. 200 required; anything else and /api/ renders
+# but can never issue a key:
+ssh root@10.1.1.<ctid> 'curl -s -o /dev/null -w "%{http_code}\n" \
+  "$(grep ^LITELLM_URL /etc/corliss/corliss.env | cut -d= -f2)/key/list" \
+  -H "Authorization: Bearer $(grep ^LITELLM_PROVISIONER_KEY /etc/corliss/corliss.env | cut -d= -f2)"'
+
+# LiteLLM's picture of membership matches the cache (and the repair if not):
+ssh root@10.1.1.<ctid> 'cd /opt/corliss/src && \
+  /opt/corliss/venv/bin/python manage.py sync_litellm --dry-run'
 # end-to-end: browse https://chat.<domain>, click the ZAI OAuth button,
 # log in with an ATProto handle, confirm sub/handle/email land in Open WebUI
 # and that local signup/login are gone.

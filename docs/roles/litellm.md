@@ -69,6 +69,10 @@ source build) so the lean proxy CT never grows a C++ toolchain; the GGUF is smal
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config *before* the smoke test. By now the client is generated and the schema migrated, so startup connects to a ready DB. |
 | Wait for the port + health check | `wait_for` (`127.0.0.1:4000`) + `uri` (`/health/liveliness`) | Liveness proves the app booted and reached the migrated DB — not merely that the port is open. |
 | Mint the Open WebUI virtual key | `stat` + `uri` (POST `/key/generate`) + `copy`, all `delegate_to: localhost` | **F1 fix.** Open WebUI must never hold the master key. `/key/generate` returns a NEW key every call, so this is generate-once guarded: `stat` the control node's secrets file first, only call the API and persist a result when it's absent. `uri` (not a shelled-out `curl`) keeps the master key off argv. `models: []` grants full model access without admin scope. |
+| Read the teams LiteLLM already has | `ansible.builtin.uri` (GET `/team/list`) | The idempotency read for the two rows below. `/team/new` has no generate-if-absent and mints a fresh `team_id` every call, so the existing aliases have to be known before anything is created. |
+| Create the tier teams that are missing | `ansible.builtin.uri` (POST `/team/new`), looped over `litellm_tiers` | One team per SCN tier slug. Corliss scopes members' keys to these by `team_alias`, so a missing team is what stops a tier's members getting keys. |
+| Keep the existing tier teams' limits declarative | `ansible.builtin.uri` (POST `/team/update`), looped | Budgets and rate limits are config: editing `litellm_tiers` and re-running must move them. Creation alone can't — it's skipped once the team exists — which would make the numbers in git a description of whatever the first run happened to set. |
+| Mint the Corliss provisioner key | `stat` + `uri` (POST `/user/new`, `user_role: proxy_admin`, `auto_create_key: true`) + `copy`, all `delegate_to: localhost` | Corliss issues members' keys, which needs admin scope — so unlike Open WebUI's key this belongs to a `proxy_admin` user. Still not the master key. Generate-once by the same `stat`-first guard, for the same reason: a successful call returns a brand-new secret every time. |
 | Render the `zai-litellm-key` admin env | `file` + `copy`, `delegate_to: localhost` | Writes `/etc/zai-litellm/admin.env` (`0600`) on the control node — `LITELLM_API_BASE` + `LITELLM_MASTER_KEY`, the bits [`bin/zai-litellm-key`](../../bin/zai-litellm-key) can't carry in git. Same idiom as the backup role's `/etc/zai-backup/restic.env`. Re-rendered every run (not generate-once — it's just the current master key + address, not a secret with its own lifecycle). |
 | *(floor embedder)* Wait + embedding smoke test | `wait_for` + `uri` (POST `/v1/embeddings`) | Runs after the flush (so a changed unit is restarted). A returned vector proves the server booted in embeddings mode and the model loaded. |
 
@@ -101,6 +105,8 @@ Defined in [`defaults/main.yml`](../../ansible/roles/litellm/defaults/main.yml):
 | `llama_embed_dir` | `/opt/llama-embed` | Holds `dist/` (binary + libs) and `models/` (the GGUF). |
 | `llama_embed_model_repo` / `llama_embed_model_rev` / `llama_embed_model_file` | *(nomic GGUF)* | HF repo, pinned commit revision, and filename of the embedding GGUF. |
 | `llama_embed_ctx` | `8192` | `--ctx-size`/`--batch-size`; nomic's full context (needs the unit's yarn rope flags). |
+| `litellm_tiers` | *(level-0…2)* | One entry per SCN tier slug: `alias`, `max_budget`, `budget_duration`, `rpm_limit`, `tpm_limit`, `models`. Rendered as LiteLLM **teams**; Corliss resolves a member's tier to one by `team_alias`. A mirror of a vocabulary this repo does not own — see above. |
+| `litellm_corliss_user_id` | `corliss-provisioner` | The `proxy_admin` LiteLLM user whose key Corliss provisions with. |
 
 ### Secrets (auto-generated — no manual step)
 
@@ -126,10 +132,18 @@ ssh root@10.1.1.<ctid> 'grep MASTER_KEY /etc/litellm/litellm.env'
 
 The admin UI login is username `admin`, password = that full `sk-…` master key.
 
-### Two key-management paths, kept deliberately separate
+Two further secrets are minted by *tasks* rather than by a lookup, because
+LiteLLM has to generate them: `openwebui_litellm_key` and
+`corliss_litellm_provisioner_key`, both persisted `0600` under `/root/.zai-secrets`
+on CT 100 and both guarded generate-once by a `stat` (the API mints a new secret
+on every successful call). Losing either file is not destructive but is not free:
+the next run mints a replacement and leaves the old key live and unused in
+LiteLLM until it is deleted by hand.
+
+### Three key-management paths, kept deliberately separate
 
 The master key above should only ever be used by CT 100 (Ansible + the
-`zai-litellm-key` CLI) and the admin UI. Everything else gets one of two
+`zai-litellm-key` CLI) and the admin UI. Everything else gets one of three
 narrower things, matching how each consumer actually authenticates:
 
 - **Open WebUI (chat)** gets one scoped, non-admin **virtual key**
@@ -158,6 +172,56 @@ narrower things, matching how each consumer actually authenticates:
 must guard reuse itself (as the Ansible task above does for
 `openwebui_litellm_key`) or accept that repeat calls mint distinct keys (as
 `zai-litellm-key create` deliberately does — see its own header comment).
+
+- **Corliss (members' self-service keys)** gets a **provisioner key** —
+  `corliss_litellm_provisioner_key`, minted by the task above and persisted at
+  `/root/.zai-secrets/corliss_litellm_provisioner_key`. This one is *admin*
+  scope, unlike Open WebUI's, because Corliss mints and deletes members' keys on
+  their behalf and `/key/*` management is admin-only. It is still **not the
+  master key**: it belongs to a `proxy_admin` *user* (`corliss-provisioner`), so
+  a compromised Corliss costs one revocation, where the master key would cost a
+  proxy-wide rotation and take `zai-litellm-key` and the admin UI down with it.
+
+  **What makes handing a web app an admin credential defensible is that Corliss
+  never lets a request aim it.** Every operation re-establishes server-side who
+  is asking: issuing proves an active grant in `MembershipCache`, revoking proves
+  the key belongs to the caller, and the LiteLLM `user_id` is the member's DID
+  rather than anything the client sent. See Corliss's README, "API keys".
+
+  This is the credential the SCN registry deliberately gave up. It held one, in
+  a HappyView Lua script env, until scn-ops `ad9b424` removed the gateway
+  integration; a registry that provisions nothing needs no credential that can
+  act on anyone's behalf. It now lives in the one place that does provision.
+
+### Membership tiers are LiteLLM teams
+
+`litellm_tiers` declares one team per SCN tier slug (`level-0` … `level-9`), and
+the role creates any that are missing and keeps the existing ones' budgets and
+rate limits declarative via `/team/update`. Corliss scopes each member's key to
+the team whose `team_alias` matches their grant's tier, so model access and
+per-member limits live on the team and changing someone's tier is a team move.
+
+**A tier change also ends that member's existing keys**, because LiteLLM will
+not re-team a key: `/key/update` with a new `team_id` answers **403** and the
+key stays put (probed against this proxy, 2026-08-19). A key's access is fixed
+at the team it was minted against, so Corliss deletes the keys that predate the
+change rather than leave a downgraded member holding the access they just lost.
+Members re-issue from `/api/`, which says so.
+
+Two things about this are worth knowing before editing the list:
+
+- **It is a mirror of a vocabulary this repo does not own.** The slugs come from
+  the registry's grant records. A tier added upstream is inert until it gains an
+  entry here — Corliss fails closed on the gap, refusing to issue rather than
+  minting an unscoped key, so the symptom is "your tier is not configured" and
+  never a member handed more access than they were granted.
+- **Corliss resolves teams by alias, never by id.** `/team/new` mints a fresh
+  `team_id` on every call, so an id would have to be carried out of Ansible by
+  hand — exactly the manual step the prime directive exists to delete. Creation
+  is therefore guarded by reading `/team/list` first and filling only the gaps.
+
+`models: []` on a tier grants every model on the proxy. Narrowing a tier to a
+model list is the knob Phase F of the deploy plan turns.
 
 ## Dependencies
 
@@ -204,6 +268,20 @@ curl -s -o /dev/null -w '%{http_code}\n' http://10.1.1.<ctid>:4000/v1/models \
 curl -s -o /dev/null -w '%{http_code}\n' http://10.1.1.<ctid>:4000/key/generate \
   -X POST -H "Authorization: Bearer $(cat /root/.zai-secrets/openwebui_litellm_key)" \
   -H 'Content-Type: application/json' -d '{}'
+
+# The tier teams Corliss resolves by alias exist:
+curl -s http://10.1.1.<ctid>:4000/team/list \
+  -H "Authorization: Bearer $(echo sk-$(cat /root/.zai-secrets/litellm_master_key))" \
+  | jq -r '.[].team_alias'          # expect level-0, level-1, level-2
+
+# Corliss's provisioner key exists, is distinct from the master key, and CAN do
+# admin work — the opposite of the Open WebUI assertion above, and the whole
+# premise of not handing Corliss the master key. Expect 200, not 401:
+diff <(cat /root/.zai-secrets/corliss_litellm_provisioner_key) \
+     <(echo "sk-$(cat /root/.zai-secrets/litellm_master_key)") \
+  && echo "BAD: same as master key" || echo "OK: distinct key"
+curl -s -o /dev/null -w '%{http_code}\n' http://10.1.1.<ctid>:4000/key/list \
+  -H "Authorization: Bearer $(cat /root/.zai-secrets/corliss_litellm_provisioner_key)"
 
 # zai-litellm-key's admin env is present and usable from CT 100:
 zai-litellm-key list

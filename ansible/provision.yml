@@ -152,16 +152,6 @@
   roles:
     - redis
 
-# corliss runs AFTER postgres: its role creates the corliss role + database ON
-# the postgres CT (delegate_to: postgres), and clones the app source from
-# Z-Space-Society/Corliss at its pinned ref. A --limit corliss run still needs
-# postgres already provisioned.
-- name: Configure Corliss (ATProto -> OIDC login bridge)
-  hosts: corliss
-  gather_facts: true
-  roles:
-    - corliss
-
 # litellm runs AFTER postgres: its role creates the litellm role + database ON the
 # postgres CT (delegate_to: postgres) and the server must already be up with
 # scram-sha-256 in effect so the role password hashes correctly. A full
@@ -173,6 +163,25 @@
   gather_facts: true
   roles:
     - litellm
+
+# corliss runs AFTER postgres: its role creates the corliss role + database ON
+# the postgres CT (delegate_to: postgres), and clones the app source from
+# Z-Space-Society/Corliss at its pinned ref. A --limit corliss run still needs
+# postgres already provisioned.
+#
+# It also runs AFTER litellm, which is why litellm's play was moved above this
+# one. Corliss issues members' API keys, and the credential it does that with is
+# a provisioner key the litellm role MINTS — read here by a file lookup of
+# /root/.zai-secrets/corliss_litellm_provisioner_key. On a fresh cluster that
+# file does not exist until litellm has run once, so the reverse order renders
+# an empty LITELLM_PROVISIONER_KEY and /api/ comes up permanently unable to
+# issue anything. Same class of ordering dependency open-webui already has, and
+# safe to satisfy this way because litellm depends only on postgres.
+- name: Configure Corliss (ATProto -> OIDC login bridge)
+  hosts: corliss
+  gather_facts: true
+  roles:
+    - corliss
 
 # open-webui runs AFTER postgres (its role creates the openwebui role + database ON
 # the postgres CT, delegate_to: postgres) and conceptually after litellm (it talks to

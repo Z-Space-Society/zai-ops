@@ -21,7 +21,7 @@ the CT itself holds nothing unreproducible.
 [`litellm`](litellm.md) CT as its OpenAI-compatible upstream
 (`OPENAI_API_BASE_URL → http://litellm:4000/v1`, key = a scoped, non-admin
 litellm virtual key — **never the master key**, see litellm's
-[key-management notes](litellm.md#two-key-management-paths-kept-deliberately-separate));
+[key-management notes](litellm.md#three-key-management-paths-kept-deliberately-separate));
 Ollama probing is off. Every member's request also carries their id/email/name
 as forwarded headers (`ENABLE_FORWARD_USER_INFO_HEADERS=true`), so litellm can
 attribute spend per person even though everyone shares this one key. **RAG
@@ -96,7 +96,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/open-webui/defaults/main.ym
 | `openwebui_rag_embedding_model` | `nomic-embed-text` | The embedding model litellm serves; keep in sync with `litellm_embedding_model_name`. |
 | `openwebui_oidc_client_id` | `open-webui` | Local default (not read from the `corliss` role's vars); keep in sync with `corliss_oidc_client_id`. |
 | `openwebui_oidc_provider_url` | `https://{{ cluster_domain }}/.well-known/openid-configuration` | corliss's OIDC discovery document — at the **apex**, not a subdomain (ADR-0006). |
-| `openwebui_forward_user_info_headers` | `true` | Forwards each member's id/email/name to litellm as headers, so spend is attributed per person under the one shared key. See [`litellm`](litellm.md#two-key-management-paths-kept-deliberately-separate). |
+| `openwebui_forward_user_info_headers` | `true` | Forwards each member's id/email/name to litellm as headers, so spend is attributed per person under the one shared key. See [`litellm`](litellm.md#three-key-management-paths-kept-deliberately-separate). |
 | `openwebui_jwt_expires_in` | `4h` | Lifetime of OpenWebUI's **own** session JWT. With back-channel logout wired, this is no longer the *only* bound on revocation — but it is the one that still holds when a logout token can't be delivered, so keep it short. See [Sessions outlive corliss](#sessions-outlive-corliss). The upstream default is `4w`. |
 | `openwebui_enable_oauth_backchannel_logout` | `true` | Exposes `POST /oauth/backchannel-logout`, which corliss calls on sign-out and on revocation. |
 | `openwebui_redis_url` | `redis://:<pw>@{{ hostvars['redis'].ansible_host }}:6379/0` | The [`redis`](redis.md) CT. Host derived from its CTID; password is the shared `redis_auth_password` group_var, so both roles agree by construction. **Setting this couples the whole chat surface to Redis, not just logout** — see below. |

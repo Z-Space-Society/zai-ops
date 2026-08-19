@@ -90,12 +90,16 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.7.1 adds an "API admin" entry to the nav's Manage menu, linking LiteLLM's
+# own admin UI at `API_URL` + /ui/ for cluster admins. No new env keys — it is
+# derived from `corliss_api_url`, which already exists.
+#
 # v0.7.0 — members issue their own LiteLLM API keys from /api/. Needs the three
 # `LITELLM_*` keys in corliss.env.j2 and the litellm role having run at least
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.7.0
+corliss_version: v0.7.1
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

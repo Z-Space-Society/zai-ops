@@ -47,6 +47,7 @@ CT 100.
 | `/api/` | the member's own API keys — issue, list, revoke, and usage, read live from LiteLLM. Membership-gated, and *issuing* needs a real grant on top of that: a roster admin reaches the page but gets no key |
 | `/membership/events` | the SCN registry's membership push — bearer-authed, machine-to-machine (see [Secrets](#secrets)) |
 | `/manage/` | the cluster console — member roll, admin roster, and the reconcile button. Gated on the atproto roster (`is_cluster_admin`), **not** on any Django flag and **never on membership**, so it stays reachable on a rebuilt cluster with an empty membership cache. Supersedes [`manage_console`](manage_console.md) |
+| `/systems/` | the stack, and (eventually) whether it is up. A stub: it lists the services and reports "unknown" rather than guessing. Cluster-admin gated, 404 otherwise |
 | `/admin/` | Django admin (break-glass account). **Never membership-gated:** `did:local:admin` is not on the roster and will never have a cache row, so a gate here would lock out the recovery account |
 
 Membership enforcement is a per-view check in corliss, deliberately not
@@ -112,6 +113,8 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | `corliss_chat_url` | `https://chat.{{ cluster_domain }}` | Drives the login/account pages' nav "Chat" link — same `cluster_domain` derivation as `corliss_url`, different subdomain. |
 | `corliss_api_url` | `https://api.{{ cluster_domain }}` | Shown on `/api/` as the base URL for a **member** to point their client at — the same origin the `litellm` route serves. Not what Corliss itself calls; that is `corliss_litellm_url` below, and conflating them breaks key issuing silently. |
 | `corliss_manage_url` | `https://manage.{{ cluster_domain }}` | The home page's "Manage Console" link (admins only) — the same origin the [`manage_console`](manage_console.md) route serves. |
+| `corliss_happyview_url` | `https://view.{{ cluster_domain }}` | The Manage menu's "HappyView Admin" link (admins only). A browser href, so the public origin — **not** `corliss_membership_registry_url`, which is the internal address Corliss calls. |
+| `corliss_proxmox_url` | `https://{{ proxmox_api_host }}:8006` | The Manage menu's "Proxmox Admin" link. Derived from the host's LAN address in the **vault** (recorded by `bootstrap.sh`), not from `cluster_domain`: the Proxmox UI runs on the host, not a CT, so it is not a `caddy_proxy_hosts` route and has no subdomain. The one admin link that points at the LAN rather than through the edge — expect a self-signed-cert warning, and no reachability from outside. Blank hides it. |
 | `corliss_litellm_url` | `http://{{ hostvars['litellm'].ansible_host }}:4000` | Where **Corliss** reaches LiteLLM to provision members and mint their keys. Deliberately the **internal** address, not `corliss_api_url` — see below. |
 | `corliss_litellm_port` | `4000` | Local mirror of `litellm_port`, not a reach into that role's vars (same convention as `corliss_openwebui_port`). Keep the two in sync. |
 | `corliss_litellm_max_keys_per_member` | `5` | How many API keys one member may hold. LiteLLM enforces no per-user limit, so this cap is ours or there is none. |

@@ -90,6 +90,12 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.7.2 adds /systems/ (the stack, status stubbed), reorders the membership
+# console, and fills out the Manage menu: LiteLLM, HappyView and Proxmox admin
+# links. Needs `HAPPYVIEW_URL` and `PROXMOX_URL` in corliss.env.j2; both are
+# derived here (view.<domain>, and the host's LAN address from the vault), and
+# a pin below v0.7.2 ignores them.
+#
 # v0.7.1 adds an "API admin" entry to the nav's Manage menu, linking LiteLLM's
 # own admin UI at `API_URL` + /ui/ for cluster admins. No new env keys — it is
 # derived from `corliss_api_url`, which already exists.
@@ -99,7 +105,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.7.1
+corliss_version: v0.7.2
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -229,6 +235,26 @@ corliss_oidc_backchannel_logout_uri: "http://{{ hostvars['open-webui'].ansible_h
 corliss_chat_url: "https://chat.{{ cluster_domain }}"     # nav "Chat" link
 corliss_api_url: "https://api.{{ cluster_domain }}"       # base URL shown on /api/
 corliss_manage_url: "https://manage.{{ cluster_domain }}"  # admin block's console link
+corliss_happyview_url: "https://view.{{ cluster_domain }}"  # Manage menu, admins only
+
+# The Proxmox host's own web UI, linked from the Manage menu for cluster admins.
+#
+# Derived from `proxmox_api_host` — the host's LAN address, recorded by
+# bootstrap.sh and held in the vault — rather than from `cluster_domain` like
+# every other link here. It has to be: the Proxmox UI runs on the HOST, not a
+# CT, so it is not one of `caddy_proxy_hosts` and there is no subdomain to
+# derive. This is the one admin link that points off the edge entirely, at the
+# LAN, which is also why it needs no route and no cert of ours.
+#
+# Two consequences to expect rather than debug: the host serves a self-signed
+# cert on 8006, so browsers warn; and this is reachable only from the LAN or a
+# VPN, unlike the rest of the Manage menu.
+#
+# Putting Proxmox behind the Caddy edge (`ops.<domain>`) would fix both, and is
+# deliberately not done here — exposing the hypervisor's admin UI publicly is a
+# trust-model decision, not a config one. If that lands, this becomes
+# `https://ops.{{ cluster_domain }}` and Corliss needs no change.
+corliss_proxmox_url: "https://{{ proxmox_api_host }}:8006"
 
 # --- LiteLLM: where Corliss issues members' API keys ------------------------
 # Deliberately NOT corliss_api_url above. That one is the public origin a MEMBER

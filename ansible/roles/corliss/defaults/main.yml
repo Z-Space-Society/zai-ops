@@ -90,6 +90,13 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.8.3 fixes v0.8.2: every approve came back 401 "DPoP proof htu mismatch",
+# so no admin could actually decide anything. The proof named corliss's
+# INTERNAL address for the registry while the registry reconstructs the request
+# URI from the public `Host` corliss presents — the same
+# internal-address-with-a-public-name trap as the HTTP 421 that v0.4.1 fixed,
+# one layer up. Pin v0.8.2 and the buttons are there and refuse to work.
+#
 # v0.8.2 lets an admin answer an application without leaving Corliss: approve,
 # change a tier, and revoke, from `/manage/`. This is the write half of the
 # membership loop, and it retires the Manage Console for everything except
@@ -168,7 +175,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.8.2
+corliss_version: v0.8.3
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

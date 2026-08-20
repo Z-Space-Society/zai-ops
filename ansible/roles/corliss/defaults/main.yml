@@ -90,6 +90,29 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.8.0 closes the membership loop from both ends: /manage/ lists everyone who
+# has applied, and the home page's apply button now works. Applying writes a
+# `membership.request` record into the APPLICANT'S OWN PDS — corliss already
+# holds their tokens from login, so it writes there directly and needs no
+# HappyView session for it. No new env keys, and no migration. The console
+# panel reads the registry's `listRequests`, which needs only
+# `MEMBERSHIP_REGISTRY_URL` and deliberately not the reconcile token.
+#
+# Two operational consequences, neither a fault:
+#
+# - **Every existing member re-consents on their next sign-in.** The OAuth
+#   scope narrowed from `transition:generic` (write any record type in the
+#   member's repo) to `repo:network.sharedcomputer.membership.request` with
+#   create/update/delete, so stored tokens no longer carry what corliss now
+#   asks for. Old tokens still read; a member who applies before re-authorising
+#   takes the new refresh path, and is told to sign in again if that fails.
+# - **A pin below v0.8.0 leaves the apply button inert**, as it was — the stub
+#   says so on the page rather than failing.
+#
+# Nothing changes in scn-ops or happyview for this: the request lexicon is
+# already published and indexed, so there is no Lua to deploy and no script
+# variable to set.
+#
 # v0.7.3 welcomes members on the home page and points them at chat and at their
 # own API keys. Copy only — no new env keys.
 #
@@ -108,7 +131,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.7.3
+corliss_version: v0.8.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

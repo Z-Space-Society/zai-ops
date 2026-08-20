@@ -90,6 +90,14 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.8.1 tightens what v0.8.0 shipped, from testing it on the cluster. The
+# applications panel lists only what is still awaiting a decision — it was
+# listing every application ever made, which made it a second copy of the
+# member table. And the nav now shows a signed-in non-member the Chat and API
+# entries as disabled rather than telling them the opposite of the truth in
+# both directions: Chat was a live link that GATE would refuse, API was absent.
+# Copy, template and CSS only — no new env keys, no migration.
+#
 # v0.8.0 closes the membership loop from both ends: /manage/ lists everyone who
 # has applied, and the home page's apply button now works. Applying writes a
 # `membership.request` record into the APPLICANT'S OWN PDS — corliss already
@@ -131,7 +139,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.8.0
+corliss_version: v0.8.1
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

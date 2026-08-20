@@ -90,6 +90,35 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.8.2 lets an admin answer an application without leaving Corliss: approve,
+# change a tier, and revoke, from `/manage/`. This is the write half of the
+# membership loop, and it retires the Manage Console for everything except
+# roster editing.
+#
+# **It needs `MEMBERSHIP_REGISTRY_CLIENT_KEY` set, which reads and reconciles
+# never did.** A grant is a write to the registry space, and the registry takes
+# one only from the approving admin's own DPoP-authenticated session — no
+# shared token can produce a proof, which is exactly what stops one authoring
+# a grant. Corliss gets that session by asking the registry to provision a DPoP
+# key during an **admin's** login and running the atproto handshake with it, so
+# nothing new is stored beyond a timestamp saying the session exists.
+#
+# Three operational consequences:
+#
+# - **Admins must sign out and in again** after this deploys. A session
+#   established before it has no registry session, and `/manage/` says so with
+#   its buttons disabled rather than failing at the click.
+# - **A registry outage degrades to "no approvals", never to "no login".** If
+#   provisioning fails the login falls back to Corliss's own key and completes;
+#   the failure is a `registry key provision failed` line in the journal.
+# - **One migration** (`0004_registry_session`) adds a nullable timestamp to
+#   the token table. It must run before the new code serves traffic, which the
+#   migrate task below already guarantees.
+#
+# Non-admin logins are untouched, and the registry never sees a non-admin's
+# tokens. Nothing changes in scn-ops or happyview: the lexicons and the Lua
+# that enforce the roster check are already deployed and unmodified.
+#
 # v0.8.1 tightens what v0.8.0 shipped, from testing it on the cluster. The
 # applications panel lists only what is still awaiting a decision — it was
 # listing every application ever made, which made it a second copy of the
@@ -139,7 +168,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.8.1
+corliss_version: v0.8.2
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

@@ -19,8 +19,9 @@
 
 - name: Configure listen addresses and password encryption
   # conf.d drop-in, not an edit of the stock postgresql.conf — survives a cluster
-  # rebuild. zz- prefix so it's read last and wins. listen_addresses needs a full
-  # restart (not just a reload), hence the restart handler.
+  # rebuild. zz- prefix so it's read last and wins. listen_addresses is
+  # postmaster-context: a reload parses it and ignores it, so this must notify the
+  # RESTART handler, never the reload one below.
   ansible.builtin.template:
     src: zz-zai.conf.j2
     dest: "/etc/postgresql/{{ postgres_version }}/main/conf.d/zz-zai.conf"

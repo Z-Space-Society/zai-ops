@@ -4,11 +4,11 @@
 # PGDG repo, which sidesteps the Sequoia/gpgv apt gotcha (see docs/README.md).
 postgres_version: 17
 
-# Addresses the server listens on. localhost for local tooling/peer auth, plus the
-# CT's internal IP (derived from its CTID in group_vars/service_containers.yml) so
-# other CTs on vmbr1 can connect. The CT is internal-only, so there's no LAN to
-# expose to.
-postgres_listen_addresses: "localhost,{{ ansible_host }}"
+# Addresses the server listens on. The WILDCARD, deliberately — see the comment
+# in templates/zz-zai.conf.j2 for the boot race that naming the internal IP
+# literally caused. The CT is vmbr1-only on a no-uplink NAT bridge, so "every
+# interface" IS the internal network; pg_hba.conf is the access control.
+postgres_listen_addresses: "*"
 
 # Subnet allowed to authenticate over TCP with scram-sha-256 — the internal
 # network. No role has a password yet (bare server), so remote auth is inert until

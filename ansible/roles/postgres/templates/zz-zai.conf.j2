@@ -1,6 +1,23 @@
 # {{ ansible_managed }}
 # Read last (zz- prefix) from conf.d, so these win over the stock postgresql.conf.
 
+# DO NOT "tighten" this back to the literal internal IP. It caused a production
+# outage: on a cold boot Postgres starts before systemd-networkd has assigned
+# 10.1.1.<ctid> to the interface, fails to bind it, and — because a bind failure
+# on a listed address is a WARNING, not FATAL — comes up serving loopback only.
+# systemd reports a clean start and `systemctl --failed` stays empty, so the
+# whole cluster's databases are unreachable with nothing anywhere saying so.
+# Everything behind it (happyview, open-webui, litellm, corliss) went down.
+#
+# The wildcard binds whatever exists whenever it exists, so there is no ordering
+# dependency left to lose. Preferred over an After=network-online.target override
+# precisely because it removes the race rather than sequencing around it.
+#
+# This is not a loosening: the CT is vmbr1-only on a no-uplink NAT bridge with no
+# LAN NIC, so there is no interface here for '*' to reach that the literal IP
+# didn't. pg_hba.conf is the real access control (host all all 10.1.1.0/24
+# scram-sha-256) — that restriction is what makes the wildcard safe, so if it
+# ever changes, revisit this line.
 listen_addresses = '{{ postgres_listen_addresses }}'
 
 # scram-sha-256 is PG 17's default, but pin it so any role password set after this

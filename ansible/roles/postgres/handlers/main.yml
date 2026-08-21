@@ -1,9 +1,14 @@
 ---
-# A listen_addresses change needs a full restart. The `postgresql` wrapper unit
-# fans a restart out to the instance, so it's fine here.
+# A listen_addresses change needs a full restart — it is postmaster-context, so a
+# SIGHUP reload parses the new value and then ignores it until the next restart.
+# Target the INSTANCE unit, not the `postgresql` wrapper: the wrapper does fan a
+# restart out (the instance is `PartOf=` it), but that propagation is the only
+# thing making it work, and the reload handler below already had to stop trusting
+# the wrapper for exactly that kind of reason. Name the unit that must actually
+# cycle.
 - name: restart postgresql
   ansible.builtin.service:
-    name: postgresql
+    name: "postgresql@{{ postgres_version }}-main"
     state: restarted
 
 # A pg_hba change only needs a SIGHUP. Reload the INSTANCE unit, not the

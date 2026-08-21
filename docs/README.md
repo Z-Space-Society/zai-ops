@@ -765,6 +765,38 @@ ship, so uv fetches a managed CPython:
   sync without that variable puts the environment somewhere none of them look
   while still exiting 0.
 
+Hard-won lessons about **binding a listen socket at boot**:
+
+- **A service that binds a literal `10.1.1.x` loses a race with
+  `systemd-networkd` on a cold boot.** The address doesn't exist yet when the
+  daemon starts, the bind fails, and what happens next is the daemon's choice —
+  which is the whole problem, because the quiet choice is the common one.
+  **Postgres logs a `WARNING` and keeps running on loopback alone**: systemd sees
+  a clean start, `systemctl --failed` stays empty, and the only symptom is that
+  four downstream services can't reach their database. This caused a production
+  outage. The fix is to bind the **wildcard** rather than to order the unit
+  `After=network-online.target` — the wildcard binds whatever exists whenever it
+  exists, so there is no ordering dependency left to get lost in a future unit
+  edit, a `Type=` change, or a distro's own ordering. It costs nothing here
+  because every service CT is `vmbr1`-only on a no-uplink NAT bridge: "all
+  interfaces" *is* the internal network, and the app's own auth (Postgres's
+  `pg_hba.conf`, Redis's `requirepass`) is the actual access control. Reach for a
+  literal bind only where the box is multi-homed and the bind is the boundary —
+  and `proxy` is the one dual-homed CT.
+- **Anything postmaster-context needs a *restart*, and a reload will lie about
+  it.** `listen_addresses` is the case in point: on SIGHUP Postgres parses the new
+  value, reports success, and goes on using the old one until the process cycles.
+  An Ansible template that notifies a `reload` handler for such a setting is
+  therefore green on every run while never taking effect — the config on disk and
+  the running server disagree indefinitely, and the divergence only surfaces at
+  the next reboot. Check which handler a template notifies, not just that it
+  notifies one.
+- **Corollary — `systemctl --failed` is not a health check.** Both failure modes
+  above leave systemd perfectly happy. Roles assert the *feature*, not the unit:
+  the postgres role's `pg_isready -h {{ ansible_host }}` passes only if the
+  listener really came up on the internal IP, which a `systemctl is-active` or a
+  local-socket check would not have caught. Prefer that shape of verify.
+
 Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
 
 - **The atproto `client_id` IS a URL** — specifically

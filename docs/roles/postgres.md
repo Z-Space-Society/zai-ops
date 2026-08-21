@@ -27,7 +27,7 @@ third-party apt repo hits on Debian 13 (see
 | Task | Module | Why |
 | ---- | ------ | --- |
 | Install PostgreSQL | `apt` | `postgresql-{{ postgres_version }}` from Debian; auto-creates the `main` cluster and a stock `postgresql.conf` that already has `include_dir = 'conf.d'`. |
-| Configure listen + encryption | `template` → `conf.d/zz-zai.conf` | `listen_addresses` (internal IP) + `password_encryption`. `zz-` prefix wins over the stock file. Notifies **restart** (listen change needs a full restart). |
+| Configure listen + encryption | `template` → `conf.d/zz-zai.conf` | `listen_addresses` (**wildcard** — see [Notes](#notes)) + `password_encryption`. `zz-` prefix wins over the stock file. Notifies **restart**: `listen_addresses` is postmaster-context, so a reload would parse it and ignore it. |
 | Deploy `pg_hba.conf` | `template` (`0640 postgres:postgres`) | Full-file auth policy — keeps the local `peer` lines and adds the internal-subnet `scram-sha-256` rule. Notifies **reload** (SIGHUP). |
 | Start + enable | `ansible.builtin.service` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the server up with the final config *before* validating. |
@@ -38,7 +38,7 @@ third-party apt repo hits on Debian 13 (see
 
 | Handler | Action |
 | ------- | ------ |
-| `restart postgresql` | `service: name=postgresql state=restarted` (for `listen_addresses`). |
+| `restart postgresql` | `service: name=postgresql@{{ postgres_version }}-main state=restarted` — the **instance** unit, for `listen_addresses` (postmaster-context: a reload can't apply it). |
 | `reload postgresql` | `service: name=postgresql@{{ postgres_version }}-main state=reloaded` — the **instance** unit, not the `postgresql` wrapper (a oneshot whose reload is a no-op, which would silently skip the `pg_hba.conf` reload). |
 
 ## Variables
@@ -48,7 +48,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/postgres/defaults/main.yml)
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `postgres_version` | `17` | PG major. Matches Debian 13's repo, so no PGDG repo needed. |
-| `postgres_listen_addresses` | `localhost,{{ ansible_host }}` | `ansible_host` is the derived `10.1.1.{ctid}`. The CT has no LAN NIC, so nothing leaks to the LAN. |
+| `postgres_listen_addresses` | `*` | Wildcard **on purpose** — see [Notes](#notes). The CT has no LAN NIC, so "every interface" is just `vmbr1`; `pg_hba.conf` is the access control. |
 | `postgres_hba_subnet` | `10.1.1.0/24` | Internal subnet allowed SCRAM TCP auth. |
 
 ## Verify
@@ -61,6 +61,18 @@ ssh root@10.1.1.<ctid> "su - postgres -c \"psql -c 'SELECT version()'\""
 
 ## Notes
 
+- **`listen_addresses` is the wildcard, and must stay that way.** Naming the
+  internal IP literally caused a production outage: on a cold boot Postgres starts
+  before `systemd-networkd` has assigned `10.1.1.<ctid>`, fails to bind it, and —
+  because a failed bind on a *listed* address is a `WARNING`, not `FATAL` — comes
+  up serving loopback only. systemd calls that a clean start and `systemctl
+  --failed` stays empty, so every dependent service (happyview, open-webui,
+  litellm, corliss) goes down with nothing anywhere reporting a fault. `'*'` binds
+  whatever exists whenever it exists, which deletes the ordering dependency rather
+  than sequencing around it with `After=network-online.target`. It is safe *only*
+  because the CT is `vmbr1`-only with no LAN NIC and `pg_hba.conf` restricts TCP
+  to `10.1.1.0/24` under `scram-sha-256` — if either changes, revisit the bind.
+  See [Known gotchas](../README.md#known-gotchas).
 - **Remote auth is inert on a fresh server.** No role has a password yet, so the
   internal-subnet HBA rule has nothing to authenticate until an app role creates
   a password-bearing role. The `pg_isready` verify confirms the listener is up,

@@ -143,9 +143,9 @@ any escrow checklist.
 **outward**, and it is the only reason a deploy of this role is not
 self-sufficient. It authenticates the SCN registry's push to
 `/membership/events`, so the identical value must also be set as
-`CORLISS_PUSH_TOKEN` in the scn-ops checkout's `.env` on whichever machine
-runs `npm run deploy` — that script, not Ansible, installs it as a HappyView
-script variable. Read it off the control node with:
+`CORLISS_PUSH_TOKEN` in the member-registry checkout's `.env` on whichever
+machine runs `npm run deploy` — that script, not Ansible, installs it as a
+HappyView script variable. Read it off the control node with:
 
 ```bash
 cat /root/.zai-secrets/corliss_membership_push_token
@@ -158,7 +158,7 @@ the approval anyway, because the space record is the membership event and
 corliss only holds a cache of it.
 
 `corliss_membership_registry_token` travels **outward** the same way, to the
-same place, and is set as `RECONCILE_TOKEN` in scn-ops' `.env` before
+same place, and is set as `RECONCILE_TOKEN` in member-registry's `.env` before
 `npm run deploy`:
 
 ```bash

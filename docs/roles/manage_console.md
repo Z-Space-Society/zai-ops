@@ -10,12 +10,12 @@ the roster — at `manage.<cluster_domain>`.
   [Placement, and how to remove this cleanly](#placement-and-how-to-remove-this-cleanly)
 - **Target:** the `proxy` service CT, over SSH — with every build task delegated
   to the control node (CT 100)
-- **Upstream app:** [Z-Space-Society/scn-ops](https://github.com/Z-Space-Society/scn-ops)
+- **Upstream app:** [Z-Space-Society/member-registry](https://github.com/Z-Space-Society/member-registry)
   at a pinned tag
 
-Named for the **surface**, not the repo: the app lives in `scn-ops` today and
-that repo is expected to be renamed, but the thing an operator points a browser
-at is "the manage console" either way.
+Named for the **surface**, not the repo: the app lives in `member-registry`
+(named `scn-ops` until the repo rename), but the thing an operator points a
+browser at is "the manage console" either way.
 
 ## Purpose
 
@@ -44,7 +44,7 @@ atproto session, obtained in the browser at sign-in — which is what lets it be
 static bundle, and what keeps grants admin-authored (see
 [`Cluster Access Use Cases`]). Nothing in the bundle is a secret.
 
-[`Cluster Access Use Cases`]: https://github.com/Z-Space-Society/scn-ops
+[`Cluster Access Use Cases`]: https://github.com/Z-Space-Society/member-registry
 
 ## Tasks
 
@@ -77,7 +77,7 @@ redeploy.
 
 | Variable | Default | Notes |
 | -------- | ------- | ----- |
-| `manage_console_repo_url` | `…/scn-ops.git` | Public repo; the clone needs no credentials (CT 100 reaches GitHub over the host's NAT). |
+| `manage_console_repo_url` | `…/member-registry.git` | Public repo; the clone needs no credentials (CT 100 reaches GitHub over the host's NAT). |
 | `manage_console_version` | `v0.1.0` | **A tag, never a branch** — same rule as `corliss_version`. Bumping it is a reviewable commit. |
 | `manage_console_src` | `/opt/manage-console-src` | On the **control** node, never the proxy. |
 | `manage_console_build_host` | `groups['control_node'][0]` | Resolved from the group so the blueprint survives a rename. |
@@ -108,10 +108,10 @@ and one identity should not be recorded twice under two names in the same file.
 ## Placement, and how to remove this cleanly
 
 **This console is expected to be stripped out**, whether because the admin
-surface moves into Corliss as Django views or because `scn-ops` is replaced. The
-placement below was chosen for speed of landing it, not because it is the right
-long-term shape — recorded here so the decision is visible rather than
-archaeology, and so the removal is a checklist rather than a hunt.
+surface moves into Corliss as Django views or because `member-registry` is
+replaced. The placement below was chosen for speed of landing it, not because
+it is the right long-term shape — recorded here so the decision is visible
+rather than archaeology, and so the removal is a checklist rather than a hunt.
 
 > [!important] Decided 2026-08-18 — the first of those two reasons happened
 > Corliss now serves its own console at `/manage/`, and it **supersedes this

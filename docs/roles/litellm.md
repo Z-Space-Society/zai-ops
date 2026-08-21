@@ -189,9 +189,10 @@ must guard reuse itself (as the Ansible task above does for
   rather than anything the client sent. See Corliss's README, "API keys".
 
   This is the credential the SCN registry deliberately gave up. It held one, in
-  a HappyView Lua script env, until scn-ops `ad9b424` removed the gateway
-  integration; a registry that provisions nothing needs no credential that can
-  act on anyone's behalf. It now lives in the one place that does provision.
+  a HappyView Lua script env, until member-registry `ad9b424` removed the
+  gateway integration; a registry that provisions nothing needs no credential
+  that can act on anyone's behalf. It now lives in the one place that does
+  provision.
 
 ### Membership tiers are LiteLLM teams
 

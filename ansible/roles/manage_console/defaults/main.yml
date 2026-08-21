@@ -2,9 +2,9 @@
 # manage_console — the SCN admin console (approve, revoke, set tier, manage the
 # roster) served at manage.{{ cluster_domain }}.
 #
-# Named for the SURFACE, not the repo: the app lives in Z-Space-Society/scn-ops
-# today and that repo is expected to be renamed, but the thing an operator
-# points a browser at is "the manage console" either way.
+# Named for the SURFACE, not the repo: the app lives in
+# Z-Space-Society/member-registry (named scn-ops until the repo rename), but
+# the thing an operator points a browser at is "the manage console" either way.
 #
 # Two things make this role shaped unlike every other app role here:
 #
@@ -30,13 +30,11 @@
 # blueprint, but the app's version is this value, and bumping it is a reviewable
 # commit like any other version pin here. A branch would make replays silently
 # pick up whatever moved upstream in between.
-manage_console_repo_url: https://github.com/Z-Space-Society/scn-ops.git
-# NOTE: scn-ops carries no tags yet, and its `main` is PRE-E0 — the LiteLLM
-# vocabulary is still in the grant shape there, so a console built from `main`
-# renders the old shape. The E0 strip and the membership push both live on the
-# unmerged `membership-push` branch. Merging that and cutting a tag is the one
-# upstream prerequisite this role has; until then a replay will fail at the
-# checkout with "Failed to checkout branch", which is the correct loud failure.
+manage_console_repo_url: https://github.com/Z-Space-Society/member-registry.git
+# v0.1.0 is the E0 strip plus the membership push (`membership-push` merged),
+# and it sits on `main`. Upstream `main` has since moved ahead with the
+# syncMembers service read door — bumping to a tag that carries it is a
+# deliberate edit here, not something a replay should pick up on its own.
 manage_console_version: v0.1.0
 
 # Where the source is cloned and built, on the CONTROL node (never the proxy).

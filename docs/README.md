@@ -359,7 +359,7 @@ command. Only control-node operator commands belong in `bin/`.
 | ------------------------------------------ | ---------- | ------------------------------------------------------- |
 | [`control_node`](roles/control_node.md)    | CT 100     | Base config for the Ansible control node                |
 | [`proxy`](roles/proxy.md)                  | `proxy`    | Caddy reverse proxy — the LAN-facing edge; single apt package, git-tracked routes |
-| [`manage_console`](roles/manage_console.md) | `proxy` (built on CT 100) | SCN admin console — a static browser bundle built from [Z-Space-Society/scn-ops](https://github.com/Z-Space-Society/scn-ops) at a pinned tag on the control node, served by Caddy's `file_server` at `manage.<domain>`; **no container of its own** |
+| [`manage_console`](roles/manage_console.md) | `proxy` (built on CT 100) | SCN admin console — a static browser bundle built from [Z-Space-Society/member-registry](https://github.com/Z-Space-Society/member-registry) at a pinned tag on the control node, served by Caddy's `file_server` at `manage.<domain>`; **no container of its own** |
 | [`nvidia_cuda`](roles/nvidia_cuda.md)      | inference nodes | NVIDIA driver + CUDA toolkit (bare-metal Debian 13) |
 | [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
@@ -504,8 +504,8 @@ on the remaining service CTs:
   SPA fallback the admin console needs (`try_files {path} /index.html`) is
   indiscriminate: a file the build *failed to emit* is served as HTML rather
   than 404ing. The concrete case is `client-metadata.json` — with
-  `VITE_OAUTH_CLIENT_ID` unset, scn-ops' `prebuild` hook prints a note and
-  **exits 0**, so the build succeeds, the file is absent, the member's PDS
+  `VITE_OAUTH_CLIENT_ID` unset, member-registry's `prebuild` hook prints a note
+  and **exits 0**, so the build succeeds, the file is absent, the member's PDS
   fetches HTML where it expects JSON, and sign-in dies at the consent screen
   with nothing in any log pointing at the cause. Assert the file exists after
   any static deploy; don't wait for a 404 that will never come. See

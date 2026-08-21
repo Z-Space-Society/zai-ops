@@ -7,8 +7,14 @@
 # Pinned release. LiteLLM moves fast and its DB schema (Prisma) is version-coupled,
 # so pin it and bump deliberately. Installed into the venv below as
 # `litellm[proxy]=={{ litellm_version }}`.
+#
+# Upstream maintains a `stable/1.89.x` branch that backports security fixes with
+# NO schema change (1.89.4 and 1.89.7 ship the identical 128 migrations), so a
+# patch bump inside this line is a re-run of the role and nothing else. Crossing
+# a MINOR (1.90+) is the different move: 1.90→1.97 adds 19 additive migrations,
+# and `prisma migrate deploy` has no down — pg_dump the litellm DB first.
 # Releases: https://github.com/BerriAI/litellm/releases
-litellm_version: "1.89.4"
+litellm_version: "1.89.7"
 
 # Prisma client (prisma-client-py). LiteLLM uses Prisma for its Postgres store but
 # `litellm[proxy]` does NOT pull it — prisma lives in the `extra_proxy` extra, and

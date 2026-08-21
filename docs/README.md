@@ -774,7 +774,10 @@ Hard-won lessons about **binding a listen socket at boot**:
   **Postgres logs a `WARNING` and keeps running on loopback alone**: systemd sees
   a clean start, `systemctl --failed` stays empty, and the only symptom is that
   four downstream services can't reach their database. This caused a production
-  outage. The fix is to bind the **wildcard** rather than to order the unit
+  outage. **Redis, given the same bad config, refuses to start outright** — the
+  loud version of the identical race, and the reason to fix a literal bind
+  wherever it appears rather than only where it happened to fail quietly. The fix
+  in both cases is to bind the **wildcard** rather than to order the unit
   `After=network-online.target` — the wildcard binds whatever exists whenever it
   exists, so there is no ordering dependency left to get lost in a future unit
   edit, a `Type=` change, or a distro's own ordering. It costs nothing here
@@ -782,7 +785,10 @@ Hard-won lessons about **binding a listen socket at boot**:
   interfaces" *is* the internal network, and the app's own auth (Postgres's
   `pg_hba.conf`, Redis's `requirepass`) is the actual access control. Reach for a
   literal bind only where the box is multi-homed and the bind is the boundary —
-  and `proxy` is the one dual-homed CT.
+  and `proxy` is the one dual-homed CT. **Spell the wildcard the daemon's way:**
+  Postgres wants `'*'`, Redis wants `* -::*` (all IPv4 plus *optional* IPv6 — a
+  bare `*` makes a failed IPv6 bind fatal and reintroduces a startup failure on
+  an IPv4-only CT, which all of these are).
 - **Anything postmaster-context needs a *restart*, and a reload will lie about
   it.** `listen_addresses` is the case in point: on SIGHUP Postgres parses the new
   value, reports success, and goes on using the old one until the process cycles.

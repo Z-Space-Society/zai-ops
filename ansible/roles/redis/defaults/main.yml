@@ -16,13 +16,13 @@
 # It holds a few kilobytes of TTL'd revocation markers. It is not a cache in
 # front of anything, and nothing else consumes it today.
 
-# Listen socket. Bind the CT's own internal address (DERIVED from its CTID via
-# ansible_host, never hardcoded) plus loopback so redis-cli works on the box for
-# the role's own verify step. The security boundary is the vmbr1-only NAT
-# network with no LAN route — same posture as postgres, which also listens on
-# its internal address — reinforced by requirepass below.
+# Listen socket. The WILDCARD, deliberately — see the comment in
+# templates/redis.conf.j2 for the cold-boot race that naming the CT's internal
+# address literally created. The security boundary is the vmbr1-only NAT network
+# with no LAN route — same posture as postgres, which binds '*' for the same
+# reason — reinforced by requirepass below.
 redis_port: 6379
-redis_bind: "{{ ansible_host }} 127.0.0.1"
+redis_bind: "* -::*"
 
 # Debian's package name, unit name, and the config file its unit passes to the
 # daemon. Named rather than inlined so the tasks read as intent and a future

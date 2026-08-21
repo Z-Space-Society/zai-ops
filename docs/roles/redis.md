@@ -75,7 +75,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/redis/defaults/main.yml):
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `redis_port` | `6379` | Listen port. |
-| `redis_bind` | `{{ ansible_host }} 127.0.0.1` | The CT's internal address (derived from its CTID, never hardcoded) plus loopback for the role's own verify step. |
+| `redis_bind` | `* -::*` | Wildcard **on purpose** — see [Notes](#notes). Redis's all-interfaces form: all IPv4, IPv6 optional (the `-` prefix), which matters on this IPv4-only CT. |
 | `redis_package` / `redis_service` / `redis_config_file` | `redis-server` / `redis-server` / `/etc/redis/redis.conf` | Debian's names, held in variables so the tasks read as intent. |
 | `redis_maxmemory` | `64mb` | Two orders of magnitude above what actually lives here — a guard against a runaway, not a capacity plan. |
 | `redis_maxmemory_policy` | `noeviction` | **Load-bearing. Do not change to an LRU/TTL policy** — see below. |
@@ -212,10 +212,24 @@ ssh root@<open-webui-ip> "journalctl -u open-webui --since '1 hour ago' | grep -
   Caddyfile). The cost is real: anything the template doesn't say takes
   **Redis's own built-in default**, not the distro's, so add settings there
   rather than assuming Debian's are in force.
+- **`bind` is the wildcard, and must stay that way.** Naming the CT's internal
+  address literally loses a race with `systemd-networkd` on a cold boot: the
+  address doesn't exist yet, and Redis treats a failed bind as **fatal** and
+  refuses to start. That's the loud version of the race — it lands in `systemctl
+  --failed`, unlike [`postgres`](postgres.md#notes), which hit the identical race
+  and merely warned before serving loopback only. Loud is not harmless, though:
+  a missing revocation store fails in the direction that *resurrects* revoked
+  members' sessions (see the persistence trade above). `* -::*` binds whatever
+  exists whenever it exists, deleting the ordering dependency rather than
+  sequencing around it with `After=network-online.target`. Use that exact form,
+  not a bare `*`: the `-` prefix makes a failed IPv6 bind non-fatal, and this CT
+  is IPv4-only. See [Known gotchas](../README.md#known-gotchas).
 - **`protected-mode yes` is not what's protecting this.** With an explicit
   `bind` and a `requirepass`, protected mode never comes into play — the actual
   boundary is the `vmbr1`-only NAT network with no LAN route, reinforced by the
-  password. Same posture as [`postgres`](postgres.md).
+  password. Same posture as [`postgres`](postgres.md). The wildcard `bind`
+  doesn't change that: protected mode only engages when there is *no* password,
+  and there is one.
 - **Nothing else should be pointed at this without re-reading the trade above.**
   It is sized and configured for one job. In particular, don't set
   `WEBSOCKET_MANAGER=redis` on open-webui casually — that widens the runtime

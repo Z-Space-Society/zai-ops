@@ -11,8 +11,25 @@
 # default, not the distro's, so add settings here rather than assuming.
 
 # --- Network ---------------------------------------------------------------
-# The CT's internal address (derived from its CTID) plus loopback. Reachable
-# from the open-webui CT over vmbr1; not routable from the LAN.
+# DO NOT "tighten" this back to the CT's literal internal address. On a cold boot
+# Redis starts before systemd-networkd has assigned 10.1.1.<ctid>, cannot bind an
+# address that does not exist yet, and — unlike Postgres, which hit the same race
+# and merely warned — treats it as FATAL and refuses to start. Loud rather than
+# silent, but the outcome is still that open-webui's revocation store is missing,
+# which fails in the direction that RESURRECTS revoked members' sessions (see the
+# persistence note below). The wildcard binds whatever exists whenever it exists,
+# so there is no ordering dependency left to lose; preferred over an
+# After=network-online.target override for the same reason as in the postgres
+# role's zz-zai.conf.j2.
+#
+# `* -::*` is Redis's own all-interfaces form: all IPv4, plus IPv6 if present —
+# the `-` prefix makes a failed IPv6 bind non-fatal, which matters because this
+# CT is IPv4-only on vmbr1. Plain `*` would reintroduce a startup failure on a
+# host without IPv6.
+#
+# Not a loosening: the CT is vmbr1-only on a no-uplink NAT bridge with no LAN
+# NIC, so '*' reaches no interface the literal address didn't, and requirepass
+# below is the real access control — if that ever goes away, revisit this line.
 bind {{ redis_bind }}
 port {{ redis_port }}
 protected-mode yes

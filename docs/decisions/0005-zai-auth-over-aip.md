@@ -3,6 +3,14 @@
 Status: Accepted
 Date: 2026-07-09
 
+> **The choice stands; one premise behind it does not.** Reason 1 below argues
+> partly from zai-auth being "the first feature of a broader control app this
+> repo is expected to grow." That expectation was reversed on 2026-08-11: the
+> app left this repo to become [Corliss](https://github.com/Z-Space-Society/Corliss),
+> per [ADR-0006](0006-corliss-standalone-apex.md) here and the project vault's
+> rewritten ADR-002. Not-AIP is unchanged and still in force — the vault's
+> ADR-004 records the same rejection in current terms.
+
 ## Context
 
 Open WebUI (and every future cluster app) needs members to sign in with their
@@ -47,8 +55,9 @@ Reasons, in order of weight:
    role, adding a language/toolchain to the operational surface for no gain
    proportional to the cost. zai-auth is Python — the same runtime as the
    rest of the identity-adjacent stack (Open WebUI) and the eventual control
-   app (`apps/zai-auth/` is the first feature of a broader control app this
-   repo is expected to grow — see the project vault's ADR-002).
+   app (`apps/zai-auth/` was, at the time, the first feature of a broader
+   control app this repo was expected to grow — an expectation since reversed;
+   see the note at the top).
 2. **Everything rebuilds from this repo, with nothing to fetch and pin from
    elsewhere.** The prime directive (`CLAUDE.md`) is "flash Proxmox, run one
    script, and the stack rebuilds itself from this repo." zai-auth already
@@ -110,11 +119,12 @@ Negative / tradeoffs:
 
 - [`docs/specs/0002-spec-atproto-login/`](../specs/0002-spec-atproto-login/) — the
   zai-auth spec and its proof artifacts.
-- [`docs/roles/zai-auth.md`](../roles/zai-auth.md) — the deployment role this
-  decision unblocks.
+- [`docs/roles/corliss.md`](../roles/corliss.md) — the deployment role this
+  decision unblocks (named `zai-auth` until the app moved to its own repo).
 - Fable Security Review 2, finding F7 (project vault,
-  `03_Projects/Z-Space AI/ZAI-Ops/Fable Security Review 2`) — flagged this ADR
-  as outstanding.
-- Project vault: `Research/AIP as Auth Layer`, `Research/Identity & Auth
-  Stack`, `Research/AIP Deployment Reference` — the full comparative research
-  this decision is drawn from.
+  `03_Projects/Shared Computer Network/Repos/Archive/Fable Security Review 2`)
+  — flagged this ADR as outstanding.
+- Project vault: `Decisions/ADR-004 Corliss is the cluster session broker` —
+  carries the AIP rejection in current terms. The standalone AIP research notes
+  this decision was originally drawn from have been folded into that ADR and
+  `Research/Graveyard`.

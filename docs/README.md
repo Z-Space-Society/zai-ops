@@ -266,8 +266,8 @@ later proxy routes build on it (e.g. `api.{{ cluster_domain }}`).
 
 The inference nodes (salmon, orca, …) are **bare-metal Debian 13 machines** with
 NVIDIA GPUs, sitting on the LAN/tailnet *outside* the Proxmox host. They run
-`llama-server` only — no double duty — and are reached for inference by the
-LiteLLM gateway (addressing per the vault's ADR-002). They serve the chat (and
+`llama-server` only — no double duty, which is the vault's ADR-001 — and are
+reached for inference by the LiteLLM gateway. They serve the chat (and
 GPU-class) models; the *baseline embedding* model is **not** one of them — it runs
 as an always-on CPU `llama-server` co-located in the `litellm` CT (see
 [`litellm`](roles/litellm.md)), so embeddings survive any inference node being down.

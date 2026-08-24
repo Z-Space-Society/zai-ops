@@ -75,4 +75,4 @@ Negative / tradeoffs:
 - `ansible/roles/control_node` — the `0600`/root assertion on `/root/.vault_pass`
 - `ansible/ansible.cfg` — `vault_password_file` setting
 - Fable Security Review, Issue 3 (Obsidian:
-  `03_Projects/Z-Space AI/ZAI-Ops/Fable Security Review`)
+  `03_Projects/Shared Computer Network/Repos/Archive/Fable Security Review`)

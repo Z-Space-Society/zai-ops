@@ -9,9 +9,28 @@
 
 # Pinned release. OpenWebUI moves fast and runs DB migrations on startup, so pin it
 # and bump deliberately. Releases: https://github.com/open-webui/open-webui/releases
-openwebui_version: "0.11.0"
+#
+# 0.11.1 is a large release for a patch number — 462 commits over 0.11.0 — and it
+# carries **four migrations**, so this bump is ONE-WAY: re-pinning to 0.11.0 after
+# it has started once does not undo them. Back the DB up first (zai-backup), which
+# is the only rollback there is.
+#
+# Two of the four matter to this cluster specifically. `repair_double_encoded_user_oauth`
+# rewrites the `user.oauth` JSON column, which every user here has — nobody signs in
+# any other way, the login path is corliss → rauthy → OIDC. `update_user_table` and the
+# two index migrations touch the same table and the chat timers. The rest of the release
+# is mostly throughput work that this deployment is positioned to get: streaming was
+# rebuilt to send deltas instead of resending the whole message (Redis-backed installs
+# also recover an in-flight reply across a refresh), and an idle instance no longer
+# scans every chat once a second looking for due timers.
+#
+# Checked before bumping: the supported Python window (`>= 3.11, < 3.13.0a1`) and the
+# psycopg pin (3.3.4) are both unchanged from 0.11.0, so openwebui_python_version below
+# and the client_encoding workaround in the DSN still hold.
+openwebui_version: "0.11.1"
 
-# OpenWebUI 0.10.x requires Python >=3.11,<3.13 — but the Debian 13 CT template ships
+# OpenWebUI requires Python >=3.11,<3.13 (still the window at 0.11.1) — but the Debian
+# 13 CT template ships
 # Python 3.13, which it REFUSES. So unlike the litellm role we can NOT build the venv
 # from the system interpreter (`python3 -m venv`). We use uv to fetch a managed,
 # self-contained CPython of this version instead (see tasks). Bump only within the
@@ -72,7 +91,7 @@ openwebui_env_file: /etc/open-webui/open-webui.env
 # DB IP is derived from its CTID, never hardcoded.
 #
 # ?client_encoding=utf8 is load-bearing, not cosmetic: OpenWebUI's async engine uses
-# the psycopg v3 driver, and with psycopg 3.3 (pinned by 0.10.x) `pg_catalog.version()`
+# the psycopg v3 driver, and with psycopg 3.3 (pinned at 3.3.4 through 0.11.1) `pg_catalog.version()`
 # comes back as BYTES unless the client encoding is pinned — SQLAlchemy then throws
 # "cannot use a string pattern on a bytes-like object" parsing the server version, and
 # the app crash-loops at startup. Pinning the encoding makes psycopg return str.

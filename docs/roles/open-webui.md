@@ -350,6 +350,12 @@ The **first** user to sign up becomes the admin; there's no seeded account.
   so `/health` can return 200 over a half-migrated DB. Unlike litellm there's no
   provision-time migration gate; on a major version bump, watch
   `journalctl -u open-webui` for migration errors.
+- **A version bump that carries migrations is one-way.** Re-pinning
+  `openwebui_version` downwards does not undo them — Alembic downgrades are not run,
+  and the old code then meets a newer schema. Take a database backup
+  (`zai-backup`) before bumping; that is the only rollback. `0.11.1` carried four,
+  one of which (`repair_double_encoded_user_oauth`) rewrites the `user.oauth`
+  column that every account here has, since OIDC is the only way in.
 - **nomic embeddings want `search_document:` / `search_query:` prefixes.**
   `nomic-embed-text-v1.5` retrieves poorly without them, and litellm passes input
   through verbatim — so the *client* (Open WebUI's RAG pipeline) must add them. Noted

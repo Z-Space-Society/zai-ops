@@ -308,7 +308,7 @@ later; the repo bakes in neither.
 | `assign.yml`          | CT 100 (local) | Bind a service to a CTID in runtime inventory (the `zai-assign` engine) |
 | `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the `zai-set-domain` engine) |
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox node name in runtime inventory (the `zai-set-node` engine; `bootstrap.sh` calls it automatically) |
-| `set-console.yml`     | CT 100 (local) | Record the admin console's per-cluster settings in runtime inventory (the `zai-set-console` engine) |
+| `set-registry.yml`    | CT 100 (local) | Record the membership registry's per-cluster identity in runtime inventory (the `zai-set-registry` engine) |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
 | `make-admin.yml`      | corliss (SSH) | Promote an ATProto handle to corliss admin, keyed on DID (the `zai-make-admin` engine) |
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
@@ -339,7 +339,7 @@ PATH when the control node is configured. The convention:
 | `zai-assign <service> <ctid>` | Bind a service to a CTID in runtime inventory | [`assign.yml`](#playbooks) |
 | `zai-set-domain <domain>` | Record the cluster's public base domain in runtime inventory | [`set-domain.yml`](#playbooks) |
 | `zai-set-node <node>` | Record the Proxmox node name in runtime inventory (bootstrap sets it automatically) | [`set-node.yml`](#playbooks) |
-| `zai-set-console <key> <value>` | Record an admin-console setting (`client_key`, `service_did`, `registry_space_uri`) in runtime inventory. **Two of the three are read by [corliss](roles/corliss.md) too**, not just the console — `service_did` for its roster read and `client_key` for its registry reconciliation, each one registry identity recorded once | [`set-console.yml`](#playbooks) |
+| `zai-set-registry <key> <value>` | Record a membership-registry identity (`client_key`, `service_did`) in runtime inventory. Both are read by [corliss](roles/corliss.md) — `service_did` for its roster read, `client_key` for its registry reconciliation — each one registry identity recorded once. Was `zai-set-console`; renamed when the `manage_console` role was deleted and corliss became the only consumer. The third key it used to take, `registry_space_uri`, went with the console | [`set-registry.yml`](#playbooks) |
 | `zai-make-admin <handle>` | Promote an ATProto handle to corliss admin, keyed on DID | [`make-admin.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
@@ -359,14 +359,13 @@ command. Only control-node operator commands belong in `bin/`.
 | ------------------------------------------ | ---------- | ------------------------------------------------------- |
 | [`control_node`](roles/control_node.md)    | CT 100     | Base config for the Ansible control node                |
 | [`proxy`](roles/proxy.md)                  | `proxy`    | Caddy reverse proxy — the LAN-facing edge; single apt package, git-tracked routes |
-| [`manage_console`](roles/manage_console.md) | `proxy` (built on CT 100) | SCN admin console — a static browser bundle built from [Z-Space-Society/member-registry](https://github.com/Z-Space-Society/member-registry) at a pinned tag on the control node, served by Caddy's `file_server` at `manage.<domain>`; **no container of its own** |
 | [`nvidia_cuda`](roles/nvidia_cuda.md)      | inference nodes | NVIDIA driver + CUDA toolkit (bare-metal Debian 13) |
 | [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
 | [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
 | [`object_store`](roles/object_store.md)    | `object-store` | Single-node Garage (S3-compatible) — the on-box backup target |
 | [`postgres`](roles/postgres.md)            | `postgres` | PostgreSQL 17 (Debian-native) — the internal database server |
 | [`redis`](roles/redis.md)                  | `redis`    | Redis (Debian-native) — the revocation store that lets Open WebUI invalidate an already-issued session JWT, so a corliss back-channel logout actually ends a chat session. **Once wired, it is a hard dependency of the whole chat surface, not just of logout** |
-| [`corliss`](roles/corliss.md)            | `corliss` | ATProto→OIDC login bridge (Django, venv) — Postgres-backed, cloned from [Z-Space-Society/Corliss](https://github.com/Z-Space-Society/Corliss) at a pinned tag, fronted by Caddy at the **apex** domain; the sole identity provider for Open WebUI. Also serves the cluster console at `/manage/`, which supersedes [`manage_console`](roles/manage_console.md), reconciles its membership cache from the registry, and is where a non-member applies to join — the application is written to the applicant's own PDS, never to the registry |
+| [`corliss`](roles/corliss.md)            | `corliss` | ATProto→OIDC login bridge (Django, venv) — Postgres-backed, cloned from [Z-Space-Society/Corliss](https://github.com/Z-Space-Society/Corliss) at a pinned tag, fronted by Caddy at the **apex** domain; the sole identity provider for Open WebUI. Also serves the cluster console at `/manage/` — the cluster's only admin write surface since the `manage_console` SPA was deleted — reconciles its membership cache from the registry, and is where a non-member applies to join, the application written to the applicant's own PDS, never to the registry |
 | [`litellm`](roles/litellm.md)              | `litellm`  | LiteLLM proxy (venv) — OpenAI-compatible gateway, Postgres-backed; + an always-on CPU floor embedder (`nomic-embed-text`) |
 | [`open-webui`](roles/open-webui.md)        | `open-webui` | OpenWebUI chat UI (uv-managed Python 3.12 venv) — Postgres-backed, fronted by Caddy, talks to litellm for chat + RAG embeddings |
 | [`happyview`](roles/happyview.md)          | `happyview` | HappyView AT Protocol AppView platform (Rust binary, built from source) — Postgres-backed, fronted by Caddy |
@@ -501,15 +500,17 @@ on the remaining service CTs:
   that client — it needs a Cloudflare rule, or no Cloudflare.
 
 - **A static Caddy route serves `index.html` for files that don't exist.** The
-  SPA fallback the admin console needs (`try_files {path} /index.html`) is
+  SPA fallback such a route needs (`try_files {path} /index.html`) is
   indiscriminate: a file the build *failed to emit* is served as HTML rather
-  than 404ing. The concrete case is `client-metadata.json` — with
-  `VITE_OAUTH_CLIENT_ID` unset, member-registry's `prebuild` hook prints a note
-  and **exits 0**, so the build succeeds, the file is absent, the member's PDS
-  fetches HTML where it expects JSON, and sign-in dies at the consent screen
-  with nothing in any log pointing at the cause. Assert the file exists after
-  any static deploy; don't wait for a 404 that will never come. See
-  [`manage_console`](roles/manage_console.md).
+  than 404ing. The concrete case was `client-metadata.json` — with
+  `VITE_OAUTH_CLIENT_ID` unset, member-registry's `prebuild` hook printed a
+  note and **exited 0**, so the build succeeded, the file was absent, the
+  member's PDS fetched HTML where it expected JSON, and sign-in died at the
+  consent screen with nothing in any log pointing at the cause. Assert the file
+  exists after any static deploy; don't wait for a 404 that will never come.
+  Kept after the `manage_console` role was deleted because the `root:` branch in
+  [`Caddyfile.j2`](../ansible/roles/proxy/templates/Caddyfile.j2) survives it,
+  so the next `root:` route inherits the same trap.
 
 - **Renumbering a CT breaks CT 100's `known_hosts`, and the error accuses you of
   a MITM.** Addresses derive from the CTID, so reassigning numbers recycles IPs

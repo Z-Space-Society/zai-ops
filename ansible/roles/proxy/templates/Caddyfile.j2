@@ -48,23 +48,26 @@ http://{{ h.domain }} {
 {% if h.root is defined %}
     # A static route: this entry names a directory instead of an upstream
     # service, so Caddy serves the files itself — no CT, no daemon, no port.
-    # Used for pre-built browser apps (manage_console); everything else here
-    # proxies.
+    # For pre-built browser apps; everything else here proxies.
+    #
+    # NO ROUTE CURRENTLY USES THIS. It served the manage_console SPA until that
+    # role was deleted, and is kept because it is generic static-file support
+    # rather than anything console-specific — it was a separate commit for that
+    # reason. Correct and inert with no `root:` entry in caddy_proxy_hosts.
     root * {{ h.root }}
     # SPA fallback, and it is load-bearing rather than boilerplate: a
     # single-page app owns client-side routes that have no file behind them
-    # (the admin console's OAuth callback lands on /oauth/callback). Without
-    # this, that request 404s and sign-in fails *silently* — the token
-    # exchange has already happened, so the only symptom is a user who never
-    # lands. Any path that isn't a real file resolves to index.html and the
-    # app routes it.
+    # (an OAuth callback landing on /oauth/callback, say). Without this, that
+    # request 404s and sign-in fails *silently* — the token exchange has
+    # already happened, so the only symptom is a user who never lands. Any path
+    # that isn't a real file resolves to index.html and the app routes it.
     #
     # The same fallback is a trap in the other direction: a MISSING file also
-    # resolves to index.html, so a build that never emitted
-    # client-metadata.json serves HTML at the client-id URL, the member's PDS
-    # gets HTML where it expects JSON, and sign-in dies at the consent screen
-    # with no 404 anywhere to explain it. manage_console asserts that file
-    # exists rather than trusting this to reveal its absence.
+    # resolves to index.html, so a build that never emitted its client metadata
+    # serves HTML at the client-id URL, the member's PDS gets HTML where it
+    # expects JSON, and sign-in dies at the consent screen with no 404 anywhere
+    # to explain it. Any role adding a `root:` route back should assert its
+    # critical files exist rather than trust this to reveal their absence.
     try_files {path} /index.html
     file_server
 {% elif h.redirects is defined and h.redirects %}

@@ -1,24 +1,31 @@
 ---
-# Record the admin console's per-cluster settings — the manage_console setter.
+# Record the membership registry's per-cluster identity.
 #
-#   ansible-playbook set-console.yml -e "key=client_key" -e "value=hvc_xxxxx"
+#   ansible-playbook set-registry.yml -e "key=client_key" -e "value=hvc_xxxxx"
 #
-# (`zai-set-console <key> <value>`, the operator command in bin/, is sugar over
+# (`zai-set-registry <key> <value>`, the operator command in bin/, is sugar over
 # this — no logic lives in the wrapper.)
 #
-# Why a setter and not group_vars: these three are this-cluster IDENTITY (which
+# Named for the REGISTRY, not the console: this was `set-console.yml` while the
+# manage_console role existed, and both settings were shared with it. That role
+# is gone and corliss is the only consumer left, so the name now says whose
+# identity these are. The VARIABLE names are deliberately unchanged — they are
+# what the live cluster's runtime inventory already holds, and renaming them is
+# a migration rather than an edit.
+#
+# Why a setter and not group_vars: both are this-cluster IDENTITY (which
 # HappyView client, which registry DID), the same category as cluster_domain and
 # the CTID assignments, so they go in the git-ignored runtime inventory and the
 # committed tree stays generic (ADR-0001).
 #
-# Why a setter and not the vault: none of them is a secret. All three ship
-# inside the browser bundle or are published at a public URL — the client key is
-# origin-bound, which is what carries the security, not its secrecy. Putting a
+# Why a setter and not the vault: neither is a secret. The DID is public
+# information and the client key is published at a public URL and bound to an
+# origin, which is what carries the security, not its secrecy. Putting a
 # non-secret in the vault is the mistake this repo's conventions call out by
 # name.
 #
 # Unlike set-domain.yml this takes a KEY as well as a value, because there are
-# three of them and three near-identical playbooks would be worse. The allowlist
+# two of them and two near-identical playbooks would be worse. The allowlist
 # is the safety rail: it stops a typo'd key from being merged into the runtime
 # inventory as a new, silently-ignored variable — the failure mode a free-form
 # setter would have.
@@ -27,21 +34,22 @@
 # preserves cluster_domain, every service's CTID assignment AND the
 # inference-node roster that share this file, instead of corrupting it.
 
-- name: Record the admin console's per-cluster settings
+- name: Record the membership registry's per-cluster identity
   hosts: localhost
   connection: local
   gather_facts: false
   vars:
     runtime_inventory: "{{ playbook_dir }}/inventory/local.yml"
-    # Short operator-facing key -> the inventory variable it sets. The two
-    # scn_* names are deliberately NOT prefixed manage_console_*: the service
-    # DID is the registry's identity, needed identically by corliss for its
-    # roster read, and one identity should not be recorded twice under two
-    # names in the same file.
-    console_keys:
+    # Short operator-facing key -> the inventory variable it sets. Both are
+    # read by corliss (roles/corliss/defaults/main.yml, which is where their
+    # blank blueprint defaults live now).
+    #
+    # `registry_space_uri` was a third key and is gone: it configured the
+    # console's service-identity panel only, and the registry's own Lua carries
+    # its copy in the HappyView script env, so nothing in this repo reads it.
+    registry_keys:
       client_key: console_client_key
       service_did: scn_service_did
-      registry_space_uri: scn_registry_space_uri
   tasks:
     - name: Require key and value
       ansible.builtin.assert:
@@ -54,14 +62,14 @@
 
     - name: Validate the key against the allowlist
       ansible.builtin.assert:
-        that: key in console_keys
+        that: key in registry_keys
         fail_msg: >-
-          '{{ key }}' is not a console setting — expected one of:
-          {{ console_keys.keys() | join(', ') }}
+          '{{ key }}' is not a registry setting — expected one of:
+          {{ registry_keys.keys() | join(', ') }}
 
     - name: Resolve the inventory variable name
       ansible.builtin.set_fact:
-        console_var: "{{ console_keys[key] }}"
+        registry_var: "{{ registry_keys[key] }}"
 
     # errors='ignore' → empty string when the file doesn't exist yet; 'or {}'
     # turns that (and an empty/whitespace file) into an empty mapping to merge into.
@@ -73,12 +81,12 @@
     - name: Detect an unchanged (no-op) value
       ansible.builtin.set_fact:
         is_noop: >-
-          {{ (runtime_data.get('all', {}).get('vars', {}).get(console_var) | default(none))
+          {{ (runtime_data.get('all', {}).get('vars', {}).get(registry_var) | default(none))
              == (value | string) }}
 
     - name: Report the no-op and finish
       ansible.builtin.debug:
-        msg: "{{ console_var }} is already set to that value — nothing to do."
+        msg: "{{ registry_var }} is already set to that value — nothing to do."
       when: is_noop | bool
 
     # Read-modify-write: merge ONLY this one variable into the whole structure,
@@ -89,7 +97,7 @@
         merged_inventory: >-
           {{
             runtime_data
-            | combine({'all': {'vars': {console_var: value | string}}}, recursive=True)
+            | combine({'all': {'vars': {registry_var: value | string}}}, recursive=True)
           }}
       when: not (is_noop | bool)
 
@@ -102,5 +110,5 @@
 
     - name: Report
       ansible.builtin.debug:
-        msg: "{{ console_var }} recorded in {{ runtime_inventory }}."
+        msg: "{{ registry_var }} recorded in {{ runtime_inventory }}."
       when: not (is_noop | bool)

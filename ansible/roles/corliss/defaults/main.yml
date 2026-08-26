@@ -359,8 +359,17 @@ corliss_oidc_backchannel_logout_uri: "http://{{ hostvars['open-webui'].ansible_h
 # derived rather than required: nothing here fails when a surface is absent.
 corliss_chat_url: "https://chat.{{ cluster_domain }}"     # nav "Chat" link
 corliss_api_url: "https://api.{{ cluster_domain }}"       # base URL shown on /api/
-corliss_manage_url: "https://manage.{{ cluster_domain }}"  # admin block's console link
 corliss_happyview_url: "https://view.{{ cluster_domain }}"  # Manage menu, admins only
+
+# Deliberately BLANK, and not derived like the three above. The Manage Console
+# SPA it pointed at was deleted with the manage_console role, so
+# manage.{{ cluster_domain }} now resolves to nothing — a derived value here
+# would render a live-looking link to a dead origin. Corliss treats blank as
+# "no console" and drops the fallback offer on /manage/ (its own console has
+# covered everything the SPA did since v0.9.0, roster editing included), so the
+# knob stays for a cluster that stands a second admin surface up at some other
+# origin. Nothing in corliss requires it.
+corliss_manage_url: ""
 
 # The Proxmox host's own web UI, linked from the Manage menu for cluster admins.
 #
@@ -457,3 +466,32 @@ corliss_membership_registry_port: 3000
 # through, so going direct means presenting it ourselves. Same derivation as the
 # `view.<domain>` entry in caddy_proxy_hosts, which is the name it routes on.
 corliss_membership_registry_host: "view.{{ cluster_domain }}"
+
+# --- Registry identity, set per cluster with `zai-set-registry` -------------
+# These two lived in the manage_console role's defaults until that role was
+# deleted; corliss is now the only consumer, so they are rehomed here rather
+# than dropped. Neither is prefixed `corliss_*` on purpose: both are the
+# REGISTRY's identity, not corliss's, and one identity should not be recorded
+# twice under two names in the same inventory.
+#
+# Blank blueprint defaults — the real values are this-cluster identity and live
+# in the git-ignored runtime inventory (ADR-0001). Neither is a secret: the DID
+# is public information and the client key is public by construction and bound
+# to an origin, which is what carries its security rather than its secrecy. A
+# non-secret in the vault is the mistake this repo's conventions name outright.
+
+# The service DID whose repo anchors the public admin roster. Corliss reads it
+# for the ELEVATE roster check. Blank is a working state: the roster reads as
+# empty, so nobody is elevated.
+scn_service_did: ""
+
+# The registry's public, origin-bound HappyView client key, passed through as
+# MEMBERSHIP_REGISTRY_CLIENT_KEY for reconciliation reads. OPTIONAL, and blank
+# is fully working — verified against production 2026-08-18 that HappyView
+# dispatches to a Lua script with no session and no client key at all. It must
+# stay optional, or a cluster rebuilt before the key was recorded could not
+# reconcile its own membership, tying recovery to a setting rather than to the
+# registry. The `console_` prefix now outlives the console; renaming it is a
+# separate change, because the name is also what the runtime inventory already
+# holds on the live cluster.
+console_client_key: ""

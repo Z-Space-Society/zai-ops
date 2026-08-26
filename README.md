@@ -43,11 +43,10 @@ itself from this repo.
    ansible-playbook verify-proxmox.yml   # confirm the API token authenticates
    zai-set-domain example.com            # the cluster's public base domain
 
-   # the admin console + registry settings (see below — client_key is required
-   # before provisioning the proxy; register the client at manage.example.com
-   # in the HappyView dashboard first)
-   zai-set-console client_key hvc_xxxxx
-   zai-set-console service_did did:plc:xxxxx
+   # the membership registry's identity (see below — neither blocks
+   # provisioning, but corliss reads both)
+   zai-set-registry client_key hvc_xxxxx
+   zai-set-registry service_did did:plc:xxxxx
    ```
 
    `bootstrap.sh` already recorded the **Proxmox node name** from the host's
@@ -57,24 +56,23 @@ itself from this repo.
 
    - **`zai-set-domain`** — required before provisioning the proxy; its Caddy
      routes are built from `cluster_domain`, and every service's public URL
-     (`chat.`, `api.`, `manage.`, …) derives from it, so setting it once moves
+     (`chat.`, `api.`, `view.`, …) derives from it, so setting it once moves
      them all together.
-   - **`zai-set-console client_key`** — the HappyView public client key for the
-     `manage.` origin. Also required before provisioning the proxy: the admin
-     console is static files served by the proxy CT rather than its own
-     container (so it never gets a `zai-assign`), and its role asserts this key,
-     so `provision.yml --limit proxy` fails without it.
-   - **`zai-set-console service_did`** — the SCN service DID whose repo holds
-     the public admin roster. Read by both the console and
-     [corliss](docs/roles/corliss.md) to decide who is an admin. Unlike the two
-     above this one does *not* fail the run when unset — provisioning succeeds
-     and the roster is simply empty, meaning nobody sees the admin surfaces, so
-     it's the one to check when admin links don't appear.
+   - **`zai-set-registry client_key`** — the registry's public, origin-bound
+     HappyView client key, passed to [corliss](docs/roles/corliss.md) for its
+     membership reconciliation reads. Optional and blank is fully working:
+     HappyView dispatches to a Lua script with no client key at all, and it has
+     to stay that way so a cluster rebuilt before this was recorded can still
+     recover its membership.
+   - **`zai-set-registry service_did`** — the SCN service DID whose repo holds
+     the public admin roster, read by corliss to decide who is an admin. Also
+     does *not* fail the run when unset — provisioning succeeds and the roster
+     is simply empty, meaning nobody sees the admin surfaces, so it's the one to
+     check when admin links don't appear.
 
-   A third console setting, `zai-set-console registry_space_uri`, is optional —
-   it only populates the console's identity panel. All of these are stored in
-   git-ignored runtime state ([`inventory/local.yml`](docs/README.md#networking)),
-   which is what keeps the committed tree free of this cluster's identity.
+   Both are stored in git-ignored runtime state
+   ([`inventory/local.yml`](docs/README.md#networking)), which is what keeps the
+   committed tree free of this cluster's identity.
 
 4. Build the service containers in two passes: **assign** every service its
    container ID first, then **provision** them. `zai-assign` only records the
@@ -121,8 +119,7 @@ itself from this repo.
    ansible-playbook provision.yml --limit postgres
    ansible-playbook provision.yml --limit redis   # before open-webui, which
                                                   #   builds its REDIS_URL from it
-   ansible-playbook provision.yml --limit proxy   # also builds + serves the
-                                                  #   admin console at manage.<domain>
+   ansible-playbook provision.yml --limit proxy
    ansible-playbook provision.yml --limit happyview
    ansible-playbook provision.yml --limit litellm
    ansible-playbook provision.yml --limit corliss

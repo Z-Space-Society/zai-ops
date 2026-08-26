@@ -90,6 +90,18 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.9.1 is the membership console's presentation only — no new env keys, no
+# migration, and nothing changes in member-registry or happyview. The members
+# table stopped scrolling sideways: every per-member write (tier, revoke,
+# appoint/retire admin) moved out of a `Change` column and into a panel opened
+# by clicking the member's handle, which also carries their DID and who granted
+# them. The panel is pure CSS `:target` — no JavaScript, deliberately, because
+# `/manage/` holds the reconcile button and is how a Corliss rebuilt from
+# nothing gets its membership back. Members now sits above Applications, the
+# service-session lock is a drawn icon reading "Admin Locked"/"Admin Unlocked"
+# rather than an emoji, and page titles read "— SCN". A pin below v0.9.1 is the
+# old layout and is otherwise identical in behaviour.
+#
 # v0.9.0 brings admin roster editing into the console: appoint and retire
 # cluster admins from `/manage/`, which is the last thing the Manage Console was
 # still needed for. Appointing does BOTH halves — the roster entry in the
@@ -204,7 +216,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.9.0
+corliss_version: v0.9.1
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

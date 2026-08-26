@@ -90,6 +90,35 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.9.0 brings admin roster editing into the console: appoint and retire
+# cluster admins from `/manage/`, which is the last thing the Manage Console was
+# still needed for. Appointing does BOTH halves — the roster entry in the
+# service DID's repo, and registry space write access via the registry's
+# `setSpaceAccess` — because space membership is what makes a grant
+# authoritative at HappyView, so an admin holding only the roster entry can
+# reach the console and cannot approve anyone. Retiring stamps `removedAt`
+# (never deletes: the record is the history of who held authority and when) and
+# removes space access. No new env keys, and no migration.
+#
+# Two operational consequences:
+#
+# - **The service account has to be signed in, and there is a lock on the
+#   console to do it.** The roster record lives in the service DID's own repo,
+#   so only that account can write it — `/manage/unlock` authenticates it
+#   through the ordinary callback route, so no second redirect URI and no
+#   re-consent for anyone else. Its login is also the only one that asks for a
+#   wider atproto scope (`_scope_for`), so members are untouched by this. Two
+#   sessions expire independently and only the PDS one self-refreshes; the
+#   console names which of them died, because only the registry one is worth
+#   signing in over.
+# - **The space-access half is reported, never raised.** If it fails the roster
+#   write has already landed and stands; the console says so and asks for the
+#   same action again, which both halves are idempotent under.
+#
+# `make_admin` no longer hands out Django `is_superuser` along with roster
+# authority — the two were never the same grant. A pin below v0.9.0 leaves
+# roster editing in the Manage Console, where it was.
+#
 # v0.8.3 fixes v0.8.2: every approve came back 401 "DPoP proof htu mismatch",
 # so no admin could actually decide anything. The proof named corliss's
 # INTERNAL address for the registry while the registry reconstructs the request
@@ -175,7 +204,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.8.3
+corliss_version: v0.9.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

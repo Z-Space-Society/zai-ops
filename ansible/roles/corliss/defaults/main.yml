@@ -90,6 +90,20 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.9.2 adds the other half of a decision: an application can be DECLINED from
+# the queue, where until now the only way to answer "no" was to leave the row
+# sitting there. It needs nothing deployed at the registry — a decline writes an
+# ordinary revocation, and with no grant before it that is already what "not a
+# member" resolves to under latest-event-wins. The decision survives a reconcile
+# (the revocation is an admin-authored event, so the DID is accounted for rather
+# than orphaned), which is what keeps a declined applicant out of the queue after
+# a rebuild. The record carries `reason: "Application declined."` so the log does
+# not read as revoking a membership that never existed, and Decline refuses when
+# the subject is a current member — the queue can hold one, flagged "asked
+# again", and there it would silently revoke a sitting member. Applicants' handles
+# also link out to their bsky.app profile now (by DID, since handles are mutable).
+# No new env keys, no migration; a pin below v0.9.2 has no decline button.
+#
 # v0.9.1 is the membership console's presentation only — no new env keys, no
 # migration, and nothing changes in member-registry or happyview. The members
 # table stopped scrolling sideways: every per-member write (tier, revoke,
@@ -216,7 +230,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.9.1
+corliss_version: v0.9.2
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

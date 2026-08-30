@@ -1,0 +1,48 @@
+---
+# Version to build from source. Bump here to upgrade; the role re-clones and
+# rebuilds when this changes — a cold `cargo build --release`, since the role
+# deletes target/ after installing, so budget 15-30 min and a restart.
+#
+# v0.1.0 is Phase A: the relay speaks the automerge-repo protocol and persists
+# to Postgres, but enforces no membership. See ADR-0007 and the deliberate
+# sync_relay_require_auth: false below.
+sync_relay_version: "0.1.0"
+
+sync_relay_port: 7030
+# Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race
+# with systemd-networkd and the service comes up silently loopback-only — the
+# failure mode that took the cluster down on 2026-08-20 via Postgres.
+sync_relay_host: "0.0.0.0"
+
+sync_relay_user: scn-sync-relay
+sync_relay_group: scn-sync-relay
+sync_relay_home: /opt/scn-sync-relay
+sync_relay_bin: /opt/scn-sync-relay/bin/scn-sync-relay
+sync_relay_src: /opt/scn-sync-relay/src
+sync_relay_config_dir: /etc/scn-sync-relay
+sync_relay_env_file: /etc/scn-sync-relay/scn-sync-relay.env
+
+sync_relay_db_name: scn_sync_relay
+sync_relay_db_user: scn_sync_relay
+sync_relay_database_url: "postgresql://{{ sync_relay_db_user }}:{{ sync_relay_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ sync_relay_db_name }}"
+
+# PHASE A: no membership gate.
+#
+# The binary defaults this to true and refuses to start when it is true, because
+# it has no DID verifier yet. Setting it false here is the deliberate act ADR-0007
+# calls for — and it is only sound while both of the following hold:
+#
+#   1. There is no entry for this service in the proxy role's caddy_proxy_hosts,
+#      so the relay is reachable on vmbr1 and nowhere else.
+#   2. Nothing anyone cares about has been synced into it.
+#
+# Flip this to true in the same change that lands Phase B's verifier. Do not flip
+# it before, and do not add the Caddy route before.
+sync_relay_require_auth: false
+
+sync_relay_repo_url: "https://github.com/Z-Space-Society/scn-sync-relay"
+
+# Pinned in the repo's own rust-toolchain.toml; rustup reads that file and
+# installs the right toolchain regardless of what this channel says. Kept here
+# so the bootstrap install has something to fetch on a cold CT.
+sync_relay_rust_channel: stable

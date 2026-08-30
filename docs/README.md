@@ -145,7 +145,7 @@ and the gaps leave room to grow a tier without renumbering:
 | Range       | Tier         | Examples                                   |
 | ----------- | ------------ | ------------------------------------------ |
 | `100`–`109` | Core infra   | control (100), object-store (101), postgres (102), [`redis`](roles/redis.md) (103) |
-| `110`–`119` | Platform     | proxy/edge (110), registry (111, the [`happyview`](roles/happyview.md) role), gateway (112) |
+| `110`–`119` | Platform     | proxy/edge (110), registry (111, the [`happyview`](roles/happyview.md) role), gateway (112), sync relay (113, the [`sync_relay`](roles/sync_relay.md) role) |
 | `120`–`129` | Applications | [`corliss`](roles/corliss.md) (120), open-webui (121), … other user-facing apps |
 
 What separates the last two tiers is **who talks to it**: platform CTs are
@@ -153,6 +153,13 @@ consumed by other services, application CTs are consumed by members. `corliss`
 is an application despite being the thing that does authentication — it is also
 the membership surface and the page a member lands on. `happyview` is the
 inverse: no one signs in to it, it is the registry `corliss` reads.
+
+"Consumed by members" means a surface a member **lands on**, not merely a port a
+member's device opens a socket to. `litellm` and `sync_relay` are both
+platform even though a member's own client connects to each of them directly,
+authenticated as that member: neither has a page, neither has a login, and both
+are reached *through* an application rather than being one. Reading the rule as
+"do member devices talk to it" puts both in the wrong tier.
 
 That rule does **not** separate core from platform, and reaching for it there
 puts things in the wrong tier — `postgres` and `redis` are also "consumed by
@@ -369,6 +376,7 @@ command. Only control-node operator commands belong in `bin/`.
 | [`litellm`](roles/litellm.md)              | `litellm`  | LiteLLM proxy (venv) — OpenAI-compatible gateway, Postgres-backed; + an always-on CPU floor embedder (`nomic-embed-text`) |
 | [`open-webui`](roles/open-webui.md)        | `open-webui` | OpenWebUI chat UI (uv-managed Python 3.12 venv) — Postgres-backed, fronted by Caddy, talks to litellm for chat + RAG embeddings |
 | [`happyview`](roles/happyview.md)          | `happyview` | HappyView AT Protocol AppView platform (Rust binary, built from source) — Postgres-backed, fronted by Caddy |
+| [`sync_relay`](roles/sync_relay.md) | `sync-relay` | Automerge sync server (Rust binary, built from source) — the server end of the automerge-repo WebSocket protocol behind shared notes, Postgres-backed. **Deliberately has no Caddy route:** the Phase A build enforces no membership, so `vmbr1` is the entire access boundary. See [ADR-0007](decisions/0007-sync-relay-and-space-membership.md) |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
 
 ---

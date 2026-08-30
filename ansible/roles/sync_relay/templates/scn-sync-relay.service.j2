@@ -1,0 +1,29 @@
+# {{ ansible_managed }}
+[Unit]
+Description=SCN Automerge sync relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ sync_relay_user }}
+Group={{ sync_relay_group }}
+EnvironmentFile={{ sync_relay_env_file }}
+WorkingDirectory={{ sync_relay_home }}
+ExecStart={{ sync_relay_bin }}
+
+# Restart=always, not on-failure: the relay exits cleanly on SIGTERM, and a
+# clean exit for any other reason (Postgres gone at startup, for instance) is
+# still an outage. Every restart re-reads storage, so recovery is free.
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# All state lives in Postgres. The binary writes nothing to disk, so it gets no
+# writable paths at all — ProtectSystem=strict alone is the whole story here.
+
+[Install]
+WantedBy=multi-user.target

@@ -108,13 +108,16 @@ itself from this repo.
    zai-assign happyview 111      # platform: atproto AppView — indexes the firehose
                                  #   and hosts the spaces holding the membership registry
    zai-assign litellm 112        # platform: AI gateway
+   zai-assign sync-relay 113     # platform: automerge sync relay behind shared
+                                 #   notes. No proxy route on purpose — see ADR-0007
    zai-assign corliss 120        # application: the member's front door — ATProto
                                  #   sign-in, membership and tier, OIDC provider
    zai-assign open-webui 121     # application: the chat UI
 
    # 2. provision each — create over the API, configure over SSH.
    #    object store first: it's the restic backend the backup job writes to.
-   #    postgres before corliss/litellm/open-webui (all three create their DB on it).
+   #    postgres before happyview/litellm/sync-relay/corliss/open-webui —
+   #    each of those roles creates its own role + database on the postgres CT.
    ansible-playbook provision.yml --limit object-store
    ansible-playbook provision.yml --limit postgres
    ansible-playbook provision.yml --limit redis   # before open-webui, which
@@ -122,6 +125,8 @@ itself from this repo.
    ansible-playbook provision.yml --limit proxy
    ansible-playbook provision.yml --limit happyview
    ansible-playbook provision.yml --limit litellm
+   ansible-playbook provision.yml --limit sync-relay # ~15-30 min: builds
+                                                  #   from source on a cold CT
    ansible-playbook provision.yml --limit corliss
    ansible-playbook provision.yml --limit open-webui
    ```

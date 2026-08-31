@@ -99,6 +99,19 @@ percent-encoding inside the connection string.
   for a `--limit sync-relay` run, because the DB tasks are delegated to it.
 - **Not** [`proxy`](proxy.md), deliberately. See the danger note.
 
+### Who else reaches this
+
+[`corliss`](corliss.md) polls `/health` from its own CT to render the relay's row
+on `/systems/`, as `corliss_sync_relay_url`. Nothing about Phase A changes for
+it: the probe is one unauthenticated hop over `vmbr1` to a read-only liveness
+endpoint, so it neither needs nor gains anything the LAN boundary is holding
+back. What it does mean is that **this role's CTID must be assigned before the
+corliss role can render its env file** — that derivation is unguarded on purpose.
+
+It also inherits the caveat above: `/health` reports liveness without touching
+Postgres, so a green dot on `/systems/` says the process is serving, not that its
+storage works. Corliss says so on the row rather than letting the dot overclaim.
+
 ## Storage
 
 One table, created by the binary at startup:

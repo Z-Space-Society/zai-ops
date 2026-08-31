@@ -90,6 +90,36 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v0.9.3 makes /systems/ tell the truth. It has listed the stack since v0.7.2
+# and reported "unknown" for everything but itself and Postgres; it now asks each
+# service directly and reports up, down, or unknown. The probes are read-only
+# liveness endpoints, one hop over vmbr1, fanned out concurrently with a 2s
+# timeout and cached, so the page costs one timeout rather than eight and a dead
+# service costs it once per window rather than once per load.
+#
+# **Needs the four new keys in the "Health probes" section at the foot of this
+# file** — SYNC_RELAY_URL, REDIS_URL, GARAGE_S3_URL and CADDY_HEALTH_URL. They
+# are the only services corliss had no address for; HappyView, LiteLLM and Open
+# WebUI reuse the addresses it already calls them on.
+#
+# Two consequences worth knowing before pinning it:
+#
+# - **This role now fails if sync-relay, redis, object-store or proxy has no
+#   CTID assigned.** The four URLs derive from hostvars unguarded, the same
+#   idiom and reasoning as corliss_membership_registry_url. `zai-assign
+#   <service> <ctid>` is the fix. It is an inventory dependency, not an ordering
+#   one — no facts are read from those hosts, so their plays need not have run.
+# - **A pin below v0.9.3 ignores the four keys** and the page reverts to
+#   reporting "unknown", which is the state it shipped in. Nothing fails.
+#
+# Blank is a working state on corliss's side and means "unknown", never "down" —
+# a value it cannot dial is a question it cannot answer, not an outage.
+#
+# It also drops the page's "Manage Console" row, which described static files
+# already deleted with the manage_console role — the same deletion that is why
+# corliss_manage_url above is deliberately blank. Every remaining row is a
+# service something can be asked about.
+#
 # v0.9.2 adds the other half of a decision: an application can be DECLINED from
 # the queue, where until now the only way to answer "no" was to leave the row
 # sitting there. It needs nothing deployed at the registry — a decline writes an
@@ -230,7 +260,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.9.2
+corliss_version: v0.9.3
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -495,3 +525,63 @@ scn_service_did: ""
 # separate change, because the name is also what the runtime inventory already
 # holds on the live cluster.
 console_client_key: ""
+
+# --- Health probes: what /systems/ dials -------------------------------------
+#
+# Corliss's /systems/ page reports whether the cluster is up, and asks each
+# service directly rather than inferring anything. Everything it dials is
+# INTERNAL — one hop over vmbr1 — for the reason recorded above
+# corliss_litellm_url: server-side Python cannot fetch our own public origin
+# through Cloudflare's Browser Integrity Check, so a probe aimed at a public
+# origin would measure the edge instead of the service.
+#
+# READ-ONLY LIVENESS ENDPOINTS, all of them. None carries a credential and none
+# can change anything, which is what makes handing this list to a page safe.
+#
+# Only four services need an entry. HappyView, LiteLLM and Open WebUI are already
+# reached by address elsewhere in this file, and Corliss's probes reuse those
+# settings — a second address for a host we already know is a second thing to get
+# wrong, and they would drift.
+#
+# Derived from the inventory and DELIBERATELY UNGUARDED, the same idiom and the
+# same reasoning as corliss_membership_registry_url above: a service with no CTID
+# assigned fails the play loudly rather than rendering a blank that would look
+# like working config. Corliss treats a blank as "unknown" and says so on the
+# page, but that is its safety net for a deployment that never set these — not a
+# licence for this role to hand it one silently.
+
+# The Automerge sync server behind collaborative spaces. Probed at /health, which
+# reports liveness WITHOUT touching Postgres — deliberately, so a database blip
+# cannot get the relay restarted out from under live sync connections. So "up"
+# means the process is serving, not that its storage works; Corliss says as much
+# on the row rather than overclaiming.
+#
+# The port is a LOCAL default rather than a reach into the sync_relay role's
+# vars — same convention as corliss_litellm_port above, for the reason
+# open-webui records: a role default isn't a reliable host fact from another
+# play. Keep in sync with sync_relay_port.
+corliss_sync_relay_port: 7030
+corliss_sync_relay_url: "http://{{ hostvars['sync-relay'].ansible_host }}:{{ corliss_sync_relay_port }}"
+
+# Redis, as something to DIAL — not a cache backend. Corliss holds no Redis
+# client and no redis dependency: the probe writes PING to a socket and reads the
+# reply. The redis role sets requirepass, so the reply is `-NOAUTH`, and that
+# refusal proves liveness as well as `+PONG` would — only a Redis that is up,
+# listening and speaking its own protocol can produce it. No password is passed
+# here and none is needed, which is the point: this stays a probe, not a
+# credential.
+corliss_redis_port: 6379
+corliss_redis_url: "redis://{{ hostvars['redis'].ansible_host }}:{{ corliss_redis_port }}"
+
+# Garage's S3 port — deliberately NOT its admin API, which garage.toml binds to
+# 127.0.0.1:3903 and is therefore unreachable from the corliss CT. An
+# unauthenticated GET on an S3 endpoint answers an XML error, so Corliss counts
+# ANY HTTP status as up: a 403 from Garage is a serving Garage.
+corliss_garage_s3_port: 3900
+corliss_garage_s3_url: "http://{{ hostvars['object-store'].ansible_host }}:{{ corliss_garage_s3_port }}"
+
+# Caddy's own health site on :80, which the Caddyfile serves whether or not TLS
+# is enabled — it shares that listener with the HTTPS redirect. A full URL rather
+# than an origin, because unlike the three above this names an endpoint Caddy
+# publishes rather than the root of a service.
+corliss_caddy_health_url: "http://{{ hostvars['proxy'].ansible_host }}/healthz"

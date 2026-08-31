@@ -811,6 +811,12 @@ Hard-won lessons about **binding a listen socket at boot**:
   the postgres role's `pg_isready -h {{ ansible_host }}` passes only if the
   listener really came up on the internal IP, which a `systemctl is-active` or a
   local-socket check would not have caught. Prefer that shape of verify.
+- **Those asserts run once, at provision time.** They prove a service came up on
+  the run that built it and say nothing about it an hour later. Corliss's
+  [`/systems/`](roles/corliss.md) is the standing version of the same shape — it
+  asks each service the same feature-level question on demand — but it is a
+  status page for an admin who is already looking, not monitoring: nothing polls
+  it and nothing alerts. The cluster still has no monitoring; see [TODO](#todo).
 
 Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
 

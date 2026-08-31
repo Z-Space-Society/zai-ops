@@ -194,3 +194,18 @@
   gather_facts: true
   roles:
     - happyview
+
+# sync-relay runs AFTER postgres: its role creates the scn_sync_relay role +
+# database ON the postgres CT (delegate_to: postgres). A --limit sync-relay run
+# still needs postgres already provisioned (its host facts + SSH reachability are
+# required for the delegated DB tasks). First run takes ~15–30 min on a cold CT
+# because cargo build --release compiles the full Rust dependency graph.
+#
+# There is deliberately no proxy route for this service — Phase A enforces no
+# membership, so vmbr1 is the entire access boundary. See
+# docs/decisions/0007-sync-relay-and-space-membership.md.
+- name: Configure the SCN sync relay
+  hosts: sync-relay
+  gather_facts: true
+  roles:
+    - sync_relay

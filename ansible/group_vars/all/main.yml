@@ -167,3 +167,12 @@ corliss_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir 
 # matches happyview_token_encryption_key just above.
 corliss_atproto_ec_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/corliss_atproto_ec.pem && cat ' ~ _zai_secrets_dir ~ '/corliss_atproto_ec.pem || (openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve | tee ' ~ _zai_secrets_dir ~ '/corliss_atproto_ec.pem)') }}"
 corliss_oidc_rsa_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/corliss_oidc_rsa.pem && cat ' ~ _zai_secrets_dir ~ '/corliss_oidc_rsa.pem || (openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | tee ' ~ _zai_secrets_dir ~ '/corliss_oidc_rsa.pem)') }}"
+
+# The sync relay's Postgres password, same generate-once-and-persist posture as
+# the pairs above. Hex, so it needs no percent-encoding inside the
+# SCN_SYNC_RELAY_DATABASE_URL the role builds from it.
+#
+# Named sync_relay_db_password to match the role default that consumes it
+# directly — unlike the redis/openwebui pairs, nothing wraps this one under a
+# second name, because only the one role reads it.
+sync_relay_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/sync_relay_db_password chars=digits,abcdef length=48') }}"

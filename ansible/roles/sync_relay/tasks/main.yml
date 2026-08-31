@@ -1,0 +1,248 @@
+---
+# Install the SCN Automerge sync relay natively under systemd.
+#
+# scn-sync-relay is a Rust binary built from source at a pinned tag: no upstream
+# publishes a Debian package or a plain-HTTP release tarball for it, and it is
+# ours anyway. Same shape as the happyview role — rustup on the CT, build in
+# place, install the binary, delete the build tree. Runtime memory is light; the
+# 2 GB CT sizing is compilation headroom.
+#
+# ADR-0007 records the design. Note that this role deploys the Phase A relay,
+# which has NO membership enforcement and MUST NOT be given a Caddy route.
+
+# --- Provision the role + database on the postgres CT ------------------------------
+# Same idiom as happyview/litellm/open-webui: the postgres superuser is peer-only,
+# so all psql calls are delegated to the postgres CT. Probe first (psql has no
+# IF NOT EXISTS for ROLE or DATABASE), then branch. Password passed via env ($VAR)
+# so it never reaches the shell history or the process list; no_log keeps it out of
+# the Ansible log.
+
+- name: Check whether the scn-sync-relay Postgres role exists
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname = '{{ sync_relay_db_user }}'\""
+  delegate_to: postgres
+  register: sync_relay_role_check
+  changed_when: false
+
+- name: Create the scn-sync-relay Postgres role with a generated password
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1
+      -c \"CREATE ROLE {{ sync_relay_db_user }} LOGIN PASSWORD '\$SCN_SYNC_RELAY_DB_PW'\""
+  environment:
+    SCN_SYNC_RELAY_DB_PW: "{{ sync_relay_db_password }}"
+  delegate_to: postgres
+  when: sync_relay_role_check.stdout | trim != "1"
+  no_log: true
+
+- name: Ensure the scn-sync-relay role password matches the generated secret
+  # ALTER ROLE always succeeds and only re-hashes — mark unchanged to keep runs quiet.
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1
+      -c \"ALTER ROLE {{ sync_relay_db_user }} LOGIN PASSWORD '\$SCN_SYNC_RELAY_DB_PW'\""
+  environment:
+    SCN_SYNC_RELAY_DB_PW: "{{ sync_relay_db_password }}"
+  delegate_to: postgres
+  when: sync_relay_role_check.stdout | trim == "1"
+  no_log: true
+  changed_when: false
+
+- name: Check whether the scn-sync-relay database exists
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '{{ sync_relay_db_name }}'\""
+  delegate_to: postgres
+  register: sync_relay_db_check
+  changed_when: false
+
+- name: Create the scn-sync-relay database owned by the scn-sync-relay role
+  # The schema itself is not created here — the binary runs its own CREATE TABLE
+  # IF NOT EXISTS at startup, which is why the role owns the database.
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -v ON_ERROR_STOP=1 -c \"CREATE DATABASE {{ sync_relay_db_name }}
+      OWNER {{ sync_relay_db_user }}\""
+  delegate_to: postgres
+  when: sync_relay_db_check.stdout | trim != "1"
+
+# --- Service account + directories ------------------------------------------------
+
+- name: Create the scn-sync-relay system group
+  ansible.builtin.group:
+    name: "{{ sync_relay_group }}"
+    system: true
+
+- name: Create the scn-sync-relay system user
+  ansible.builtin.user:
+    name: "{{ sync_relay_user }}"
+    group: "{{ sync_relay_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ sync_relay_home }}"
+    create_home: false
+
+- name: Create the scn-sync-relay home and config directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ sync_relay_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    # home/bin: the installed binary (root-owned, world-readable).
+    # config dir: root-owned, holds the 0600 env the daemon reads via EnvironmentFile.
+    - { path: "{{ sync_relay_home }}", owner: root, mode: "0755" }
+    - { path: "{{ sync_relay_home }}/bin", owner: root, mode: "0755" }
+    - { path: "{{ sync_relay_config_dir }}", owner: root, mode: "0750" }
+
+# --- Build dependencies -----------------------------------------------------------
+
+- name: Install system build dependencies
+  # libssl-dev + pkg-config are for the TLS stack behind sqlx; the rest is the
+  # usual cargo prerequisites.
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - ca-certificates
+      - curl
+      - git
+      - libssl-dev
+      - pkg-config
+    state: present
+    update_cache: true
+
+- name: Check whether the Rust toolchain is installed
+  ansible.builtin.command: rustc --version
+  register: sync_relay_rust_installed
+  changed_when: false
+  failed_when: false
+  environment:
+    PATH: "/root/.cargo/bin:{{ ansible_env.PATH }}"
+
+- name: Install the Rust toolchain via rustup
+  # Minimal profile keeps the install lean. The repo commits a
+  # rust-toolchain.toml, so rustup installs and uses the pinned toolchain on
+  # first build regardless of the channel requested here.
+  ansible.builtin.shell:
+    cmd: >-
+      curl -fsSL https://sh.rustup.rs |
+      sh -s -- -y --profile minimal --default-toolchain {{ sync_relay_rust_channel }}
+    creates: /root/.cargo/bin/rustc
+  when: sync_relay_rust_installed.rc != 0
+
+# --- Clone + build ----------------------------------------------------------------
+
+- name: Check the checked-out scn-sync-relay version
+  ansible.builtin.command: git -C "{{ sync_relay_src }}" describe --tags --exact-match
+  register: sync_relay_src_version
+  changed_when: false
+  failed_when: false
+
+- name: Clone scn-sync-relay source at the pinned tag
+  # ansible.builtin.git can only check out what origin advertises, so the release
+  # tag must be pushed: a local-only tag fails here with "pathspec 'vX.Y.Z' did not
+  # match", which reads like a bad version pin. `git ls-remote --tags origin`
+  # distinguishes the two; listing tags in a local clone does not.
+  ansible.builtin.git:
+    repo: "{{ sync_relay_repo_url }}"
+    dest: "{{ sync_relay_src }}"
+    version: "v{{ sync_relay_version }}"
+    depth: 1
+    force: true
+  register: sync_relay_clone
+  when: sync_relay_src_version.stdout | trim != "v" ~ sync_relay_version
+
+- name: Check whether the installed binary exists
+  ansible.builtin.stat:
+    path: "{{ sync_relay_bin }}"
+  register: sync_relay_bin_stat
+
+- name: Build scn-sync-relay from source (cargo build --release)
+  # Build when the clone just moved to a new version, or the binary isn't installed
+  # yet. No `creates:` guard — the deleted target/ below would otherwise trick it
+  # into rebuilding on every idempotent re-run.
+  ansible.builtin.command:
+    cmd: /root/.cargo/bin/cargo build --release
+    chdir: "{{ sync_relay_src }}"
+  environment:
+    PATH: "/usr/local/bin:/root/.cargo/bin:{{ ansible_env.PATH }}"
+    HOME: /root
+  when: (sync_relay_clone is changed) or (not sync_relay_bin_stat.stat.exists)
+  notify: restart scn-sync-relay
+
+- name: Install the built binary to {{ sync_relay_home }}/bin
+  ansible.builtin.copy:
+    src: "{{ sync_relay_src }}/target/release/scn-sync-relay"
+    dest: "{{ sync_relay_bin }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: (sync_relay_clone is changed) or (not sync_relay_bin_stat.stat.exists)
+  notify: restart scn-sync-relay
+
+- name: Remove the Cargo build tree to reclaim disk space
+  # target/ holds every intermediate object and dependency (multiple GB). The
+  # binary is installed; the src tree without target/ is kept so the
+  # `git describe` version probe above still works.
+  ansible.builtin.file:
+    path: "{{ sync_relay_src }}/target"
+    state: absent
+
+# --- Secret env + unit ------------------------------------------------------------
+
+- name: Render the scn-sync-relay environment file
+  ansible.builtin.template:
+    src: scn-sync-relay.env.j2
+    dest: "{{ sync_relay_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart scn-sync-relay
+
+- name: Install the scn-sync-relay systemd unit
+  ansible.builtin.template:
+    src: scn-sync-relay.service.j2
+    dest: /etc/systemd/system/scn-sync-relay.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart scn-sync-relay
+
+- name: Ensure scn-sync-relay is started and enabled
+  ansible.builtin.systemd:
+    name: scn-sync-relay
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply pending scn-sync-relay restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for scn-sync-relay to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ sync_relay_port }}"
+    timeout: 60
+
+- name: Verify the scn-sync-relay health endpoint responds
+  # /health reports liveness and the auth mode without touching Postgres, so this
+  # proves the process is up and serving — the storage path is proved by the
+  # protocol test in docs/roles/scn_sync_relay.md, not from here.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ sync_relay_port }}/health"
+    return_content: true
+  register: sync_relay_health
+  until: sync_relay_health is succeeded
+  retries: 10
+  delay: 3

@@ -134,8 +134,20 @@ From the control node:
 psql -h 10.1.1.102 -U scn_sync_relay -c 'select count(*) from storage;'
 ```
 
-**The protocol test.** Point an automerge-repo client (Reams: override the sync
-server per device) at `ws://10.1.1.113:7030/sync`, then:
+**The protocol test.** `10.1.1.113` is on `vmbr1`, which has **no uplink** — only
+the Proxmox host and CT 100 can reach it, and no browser on the LAN can. Since the
+relay deliberately has no Caddy route, reach it with an SSH tunnel rather than by
+opening a hole:
+
+```sh
+# on your laptop; leave running
+ssh -L 7030:10.1.1.113:7030 jsayles@192.168.6.99
+```
+
+Then point an automerge-repo client at `ws://localhost:7030` — note **no path**;
+the client connects to exactly the URL it is given. The tunnel is authenticated by
+SSH and dies when you close it, which is the property a temporary vhost would not
+have. Then:
 
 1. Create a document — `storage` gains rows.
 2. Edit from a second browser — both converge.

@@ -3,10 +3,17 @@
 # rebuilds when this changes — a cold `cargo build --release`, since the role
 # deletes target/ after installing, so budget 15-30 min and a restart.
 #
-# v0.1.0 is Phase A: the relay speaks the automerge-repo protocol and persists
-# to Postgres, but enforces no membership. See ADR-0007 and the deliberate
+# v0.1.1 serves the websocket at the URL root as well as at /sync, and the root
+# is the one that matters: automerge-repo's WebSocketClientAdapter connects to
+# exactly the URL it is given and appends no path, and the reference sync server
+# serves at the root — so clients are configured with a bare ws://host:port. On
+# 0.1.0 a stock client got a 404 instead of an upgrade, which presents as "sync
+# silently never works" rather than as a routing error.
+#
+# Phase A: the relay speaks the automerge-repo protocol and persists to Postgres,
+# but enforces no membership. See ADR-0007 and the deliberate
 # sync_relay_require_auth: false below.
-sync_relay_version: "0.1.0"
+sync_relay_version: "0.1.1"
 
 sync_relay_port: 7030
 # Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race

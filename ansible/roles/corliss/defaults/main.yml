@@ -90,6 +90,37 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v1.0.0 gives members a name. A member was identified by DID, handle and email
+# and nowhere by a name, so the console, the nav and the id_token handed to Open
+# WebUI all showed a handle where a reader expects a person. Corliss now reads
+# `displayName` off the member's own `app.bsky.actor.profile` record at login,
+# and `/account/` lets them change it — along with their email — afterwards.
+# **No new env keys**, and no new OAuth scope, so nobody re-consents (contrast
+# v0.8.0, which did).
+#
+# **One migration** (`0005_user_display_name`) adds a blank column to the user
+# table. It must run before the new code serves, which the migrate task below
+# already guarantees.
+#
+# Three consequences worth knowing before pinning it:
+#
+# - **Names arrive as people sign in, not at deploy.** There is no backfill: the
+#   column starts blank for everyone and login fills it. So the console looks
+#   unchanged on deploy day and fills in over the following days. That is the
+#   fill-blanks rule working, not a half-finished deploy.
+# - **Once a member has an email in Corliss, a change at their PDS stops
+#   propagating.** Login used to overwrite the email every time; it now only
+#   fills a blank one, because `/account/` lets the member set it and an edit
+#   that reverted at their next sign-in would make that page a lie. Both fields
+#   are display-only — DID is what everything keys on — and clearing a field on
+#   `/account/` re-arms the fill.
+# - **Open WebUI picks the name up with no config change.** The id_token gains a
+#   `name` claim, which is what an RP displays; `OAUTH_USERNAME_CLAIM=handle`
+#   stays as it is, since the handle is still what the RP keys the account on.
+#
+# A pin below v1.0.0 is the old behaviour with an unused column left behind,
+# which is harmless — the older code neither reads nor writes it.
+#
 # v0.9.3 makes /systems/ tell the truth. It has listed the stack since v0.7.2
 # and reported "unknown" for everything but itself and Postgres; it now asks each
 # service directly and reports up, down, or unknown. The probes are read-only
@@ -260,7 +291,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v0.9.3
+corliss_version: v1.0.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

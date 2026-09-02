@@ -9,6 +9,7 @@ one script, and the stack rebuilds itself from this repo.
 
 ## Contents
 
+- [Diagrams](diagrams.md) — topology, provision flow, and the member login path
 - [Bootstrap process](#bootstrap-process)
 - [Architecture](#architecture)
 - [Networking](#networking)
@@ -25,6 +26,10 @@ one script, and the stack rebuilds itself from this repo.
 ---
 
 ## Bootstrap process
+
+> **The whole path, end to end**, is drawn in [Diagrams → Build and provision
+> flow](diagrams.md#build-and-provision-flow) — the five phases from bare host to
+> steady state, and which orderings are real data dependencies.
 
 There is exactly **one** host-level script, [`bootstrap.sh`](../bootstrap.sh),
 run as root on a freshly-flashed Proxmox host. Everything after the control
@@ -84,20 +89,9 @@ ansible-playbook provision.yml --limit proxy    # create + configure proxy
 
 ## Architecture
 
-```
-                    ┌──────────────── Proxmox host (<node>) ────────────────┐
-   LAN (vmbr0) ─────┤                                                        │
-        │           │   CT 100  ansible-control   (control node)            │
-        │           │      • runs Ansible, holds the vault + SSH key        │
-        │           │      • net0 vmbr0 (DHCP), net1 vmbr1 10.1.1.100       │
-        │           │                                                        │
-   ┌────┴─────┐     │   CT 110  proxy  (Caddy reverse proxy, LAN-facing)    │
-   │ clients  │────▶│      • net0 vmbr0 (DHCP), net1 vmbr1 10.1.1.110       │
-   └──────────┘     │                                                        │
-                    │   CT 101+ object-store / postgres / litellm (internal)│
-                    │      • vmbr1 only, route out via host NAT (10.1.1.1)   │
-                    └────────────────────────────────────────────────────────┘
-```
+> **Drawn in full** in [Diagrams → Cluster topology](diagrams.md#cluster-topology)
+> — every CT by tier, the proxy's four public routes, and the service-to-service
+> calls that stay on `vmbr1`. The prose below is the same picture in words.
 
 - **CT 100** creates and configures every other container over the Proxmox API
   (create) and SSH (configure). It is the only machine that holds secrets.
@@ -107,8 +101,10 @@ ansible-playbook provision.yml --limit proxy    # create + configure proxy
   not held in a UI database — so the CT holds nothing that needs backing up. Only
   one public hostname should point at a given proxy at a time (controlled at
   Cloudflare).
-- **CT 102+** (postgres, litellm, open-webui) live only on the internal network
-  and are reached through the proxy.
+- **Every other CT** (postgres, redis, happyview, litellm, sync-relay, corliss,
+  open-webui) lives only on the internal network and is reached through the
+  proxy — except [`sync-relay`](roles/sync_relay.md), which has no route at all
+  while it is in Phase A.
 - **CT 101** (object-store, Garage) is internal-only too — it's the restic
   backend the [`backup`](#backups) job writes to, not a user-facing service.
 - **Inference nodes** (salmon, orca, …) are **bare-metal**, *outside* the Proxmox

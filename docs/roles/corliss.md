@@ -35,6 +35,11 @@ in `corliss_version`. Updating the app is therefore a *reviewable version bump*
 in `defaults/main.yml` plus a role replay — not a side effect of `git pull` on
 CT 100.
 
+> **The request path is drawn** in [Diagrams → Member login
+> path](../diagrams.md#member-login-path) — ATProto sign-in, the membership
+> gate, the OIDC handoff into Open WebUI, and why revocation needs
+> [`redis`](redis.md).
+
 ### URL surface
 
 | Path | Serves |

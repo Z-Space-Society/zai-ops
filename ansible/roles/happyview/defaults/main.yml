@@ -4,11 +4,12 @@
 # the role deletes target/ after installing, so budget 15-30 min and a restart.
 #
 # 2.13.1 makes `POST /admin/lexicons` with `backfill: true` actually queue the
-# backfill job; on 2.12.0 it silently did nothing. That is member-registry's
-# `npm run deploy` path, and the admin roster is read from HappyView's *index*
-# rather than the PDS, so a backfill that no-ops is how a roster write goes
-# missing from every roster check. Also picks up an h2 security advisory fix.
-# No migrations changed across 2.12.0 → 2.13.1, so re-pinning downgrades cleanly.
+# backfill job; on 2.12.0 it silently did nothing. That is
+# scn-member-registry's `npm run deploy` path, and the admin roster is read
+# from HappyView's *index* rather than the PDS, so a backfill that no-ops is
+# how a roster write goes missing from every roster check. Also picks up an h2
+# security advisory fix. No migrations changed across 2.12.0 → 2.13.1, so
+# re-pinning downgrades cleanly.
 happyview_version: "2.13.1"
 
 happyview_port: 3000

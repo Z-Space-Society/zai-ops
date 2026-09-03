@@ -68,15 +68,15 @@ Defined in [`defaults/main.yml`](../../ansible/roles/happyview/defaults/main.yml
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `happyview_version` | `2.13.1` | Tag checked out and built. Bump to upgrade; the build task re-runs when this changes. `2.13.1` makes `POST /admin/lexicons` with `backfill: true` actually queue the backfill job — on `2.12.0` it silently did nothing, which is member-registry's `npm run deploy` path and the reason a roster write could go missing from the index every roster check reads. Also carries an h2 security advisory fix. No migrations changed since `2.12.0`, so re-pinning downgrades cleanly. |
+| `happyview_version` | `2.13.1` | Tag checked out and built. Bump to upgrade; the build task re-runs when this changes. `2.13.1` makes `POST /admin/lexicons` with `backfill: true` actually queue the backfill job — on `2.12.0` it silently did nothing, which is scn-member-registry's `npm run deploy` path and the reason a roster write could go missing from the index every roster check reads. Also carries an h2 security advisory fix. No migrations changed since `2.12.0`, so re-pinning downgrades cleanly. |
 | `happyview_port` / `happyview_host` | `3000` / `0.0.0.0` | Listen socket; `0.0.0.0` so Caddy can reach it from the proxy CT. |
 
-> [!warning] An upgrade can break member-registry silently, in two ways
+> [!warning] An upgrade can break scn-member-registry silently, in two ways
 > Both were established by probing this instance at `2.13.1` on 2026-09-02, and
 > neither shows up as a failed deploy.
 >
-> - **One member-registry script reads HappyView's own tables.** The Workspace
->   listing has no API to call — the Lua spaces surface offers no
+> - **One scn-member-registry script reads HappyView's own tables.** The
+>   Workspace listing has no API to call — the Lua spaces surface offers no
 >   "spaces for this DID" — so it queries `happyview_spaces` joined to
 >   `happyview_space_members` (`space_id`, `member_did`, `access`,
 >   `is_delegation`, `type_nsid`, `skey`, `authority_did`). A schema change
@@ -88,7 +88,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/happyview/defaults/main.yml
 >   the named-table form that `atproto.spaces.query` takes is rejected. A rename
 >   or a signature change upstream is a Lua error at call time.
 >
-> **After bumping `happyview_version`, exercise member-registry's endpoints
+> **After bumping `happyview_version`, exercise scn-member-registry's endpoints
 > rather than assuming the deploy proves them** — the same discipline the
 > `backfill: true` note above exists for. Space config keys are `snake_case`
 > at rest (`membership_public`, `records_public`), not the camelCase in

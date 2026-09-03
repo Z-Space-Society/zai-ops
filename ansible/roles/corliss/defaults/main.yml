@@ -67,8 +67,8 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # way to learn about grants that had already happened. Needs the three
 # MEMBERSHIP_REGISTRY_* keys in corliss.env.j2 (a pin below v0.4.0 ignores them);
 # reconciliation reports itself unconfigured until RECONCILE_TOKEN is also
-# installed registry-side by member-registry's `npm run deploy` — see Secrets
-# in docs/roles/corliss.md.
+# installed registry-side by scn-member-registry's `npm run deploy` — see
+# Secrets in docs/roles/corliss.md.
 #
 # v0.3.2 adds the home page, the /api/ page and the nav's identity/admin menu —
 # the surfaces API_URL and MANAGE_URL below feed — and reads the admin roster
@@ -166,16 +166,17 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # No new env keys, no migration; a pin below v0.9.2 has no decline button.
 #
 # v0.9.1 is the membership console's presentation only — no new env keys, no
-# migration, and nothing changes in member-registry or happyview. The members
-# table stopped scrolling sideways: every per-member write (tier, revoke,
-# appoint/retire admin) moved out of a `Change` column and into a panel opened
-# by clicking the member's handle, which also carries their DID and who granted
-# them. The panel is pure CSS `:target` — no JavaScript, deliberately, because
-# `/manage/` holds the reconcile button and is how a Corliss rebuilt from
-# nothing gets its membership back. Members now sits above Applications, the
-# service-session lock is a drawn icon reading "Admin Locked"/"Admin Unlocked"
-# rather than an emoji, and page titles read "— SCN". A pin below v0.9.1 is the
-# old layout and is otherwise identical in behaviour.
+# migration, and nothing changes in scn-member-registry or happyview. The
+# members table stopped scrolling sideways: every per-member write (tier,
+# revoke, appoint/retire admin) moved out of a `Change` column and into a
+# panel opened by clicking the member's handle, which also carries their DID
+# and who granted them. The panel is pure CSS `:target` — no JavaScript,
+# deliberately, because `/manage/` holds the reconcile button and is how a
+# Corliss rebuilt from nothing gets its membership back. Members now sits
+# above Applications, the service-session lock is a drawn icon reading
+# "Admin Locked"/"Admin Unlocked" rather than an emoji, and page titles read
+# "— SCN". A pin below v0.9.1 is the old layout and is otherwise identical
+# in behaviour.
 #
 # v0.9.0 brings admin roster editing into the console: appoint and retire
 # cluster admins from `/manage/`, which is the last thing the Manage Console was
@@ -239,8 +240,8 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 #   migrate task below already guarantees.
 #
 # Non-admin logins are untouched, and the registry never sees a non-admin's
-# tokens. Nothing changes in member-registry or happyview: the lexicons and the
-# Lua that enforce the roster check are already deployed and unmodified.
+# tokens. Nothing changes in scn-member-registry or happyview: the lexicons and
+# the Lua that enforce the roster check are already deployed and unmodified.
 #
 # v0.8.1 tightens what v0.8.0 shipped, from testing it on the cluster. The
 # applications panel lists only what is still awaiting a decision — it was
@@ -269,9 +270,9 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # - **A pin below v0.8.0 leaves the apply button inert**, as it was — the stub
 #   says so on the page rather than failing.
 #
-# Nothing changes in member-registry or happyview for this: the request lexicon
-# is already published and indexed, so there is no Lua to deploy and no script
-# variable to set.
+# Nothing changes in scn-member-registry or happyview for this: the request
+# lexicon is already published and indexed, so there is no Lua to deploy and no
+# script variable to set.
 #
 # v0.7.3 welcomes members on the home page and points them at chat and at their
 # own API keys. Copy only — no new env keys.

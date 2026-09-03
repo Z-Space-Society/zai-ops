@@ -507,7 +507,7 @@ on the remaining service CTs:
   SPA fallback such a route needs (`try_files {path} /index.html`) is
   indiscriminate: a file the build *failed to emit* is served as HTML rather
   than 404ing. The concrete case was `client-metadata.json` — with
-  `VITE_OAUTH_CLIENT_ID` unset, member-registry's `prebuild` hook printed a
+  `VITE_OAUTH_CLIENT_ID` unset, scn-member-registry's `prebuild` hook printed a
   note and **exited 0**, so the build succeeded, the file was absent, the
   member's PDS fetched HTML where it expected JSON, and sign-in died at the
   consent screen with nothing in any log pointing at the cause. Assert the file

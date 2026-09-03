@@ -117,7 +117,7 @@ corliss_oidc_client_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_
 # or revocation to corliss's /membership/events. Same generate-once posture as
 # the secrets above, with one difference worth knowing: this is the first
 # secret here that has to travel OUTWARD. The identical value must be set as
-# CORLISS_PUSH_TOKEN in the member-registry checkout's .env on whichever
+# CORLISS_PUSH_TOKEN in the scn-member-registry checkout's .env on whichever
 # machine runs `npm run deploy`, because that script — not Ansible — is what
 # installs it as a HappyView script variable. Read it off the control node
 # with:
@@ -135,7 +135,7 @@ corliss_membership_push_token: "{{ lookup('ansible.builtin.password', _zai_secre
 # no pushes, and those events already happened.
 #
 # Travels OUTWARD like the push token, and to the same place: set the identical
-# value as RECONCILE_TOKEN in the member-registry checkout's .env before
+# value as RECONCILE_TOKEN in the scn-member-registry checkout's .env before
 # `npm run deploy`, since that script installs it as a HappyView script
 # variable.
 #

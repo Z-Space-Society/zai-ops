@@ -90,6 +90,23 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v1.1.0 adds workspaces: a named place a few members share, at /workspaces/.
+# Making one takes a cluster membership; past that, being in a workspace is the
+# whole permission and it is flat, so everyone in it can rename it and add or
+# remove anybody, the creator included. **Needs a migration** (0006_workspace) —
+# the role's migrate task already runs it, but a pin below v1.1.0 after this has
+# been applied leaves an unused table rather than a broken app, so rolling back
+# is safe and needs no manual step.
+#
+# No new env keys. Nothing changes in scn-member-registry or happyview: this is
+# local Django rows and nothing talks to HappyView yet. The model carries an
+# `automerge_root` column that stays blank until the notes editor lands.
+#
+# /account/ moved onto a Django form in the same release. Same fields, same
+# behaviour, no env or schema change — worth knowing only because the page's
+# markup changed, so a cached stylesheet is the thing to suspect if it looks
+# wrong after the deploy.
+#
 # v1.0.0 gives members a name. A member was identified by DID, handle and email
 # and nowhere by a name, so the console, the nav and the id_token handed to Open
 # WebUI all showed a handle where a reader expects a person. Corliss now reads
@@ -292,7 +309,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v1.0.0
+corliss_version: v1.1.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

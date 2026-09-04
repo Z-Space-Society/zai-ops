@@ -90,6 +90,12 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v1.1.1 fixes the workspace list, which reported one member for every
+# workspace however many it had. Display only: the rosters themselves were
+# always right, and nothing needs re-entering. Also adds a Django admin page for
+# workspaces, which is superuser-only and can write a roster the app itself
+# refuses to — an empty one included. No env keys, no migration.
+#
 # v1.1.0 adds workspaces: a named place a few members share, at /workspaces/.
 # Making one takes a cluster membership; past that, being in a workspace is the
 # whole permission and it is flat, so everyone in it can rename it and add or
@@ -309,7 +315,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v1.1.0
+corliss_version: v1.1.1
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

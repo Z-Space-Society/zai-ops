@@ -12,14 +12,15 @@
 #
 # One instance only: a replica count above one is a data-loss setting.
 
-# Source + pin. TODO(spike): set pds_revision to the exact commit tested in the
-# throwaway spike LXC, and confirm pds_version matches that checkout. Upstream
-# publishes no tag to fetch, so the revision IS the reproducibility pin — a
-# bump drives a re-clone + rebuild (cold cargo build, ~15–30 min, same budget
-# as happyview).
+# Source + pin. PIN VERIFIED 2026-09-08 against tangled main HEAD
+# (711ee2db1aaa01b3fe994364739b425a5dd966ae): atproto-pds resolves to
+# 0.15.0-rc.4, workspace edition 2024 / rust-version 1.97 / license MIT.
+# Upstream publishes no tag to fetch, so the revision IS the reproducibility
+# pin — a bump drives a re-clone + rebuild (cold cargo build, ~15–30 min, same
+# budget as happyview). Re-verify the SHA before the spike deploys.
 pds_repo_url: "https://tangled.org/ngerakines.me/atproto-crates"
 pds_version: "0.15.0-rc.4"        # informational; verified against the checkout
-pds_revision: "TODO(spike)"       # commit SHA from the feasibility spike
+pds_revision: "711ee2db1aaa01b3fe994364739b425a5dd966ae"
 
 # Build features — the default sqlite storage profile stays on. clap is
 # REQUIRED (both bin targets gate on it); smtp = outbound mail (invites/2FA),

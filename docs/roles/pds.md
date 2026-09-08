@@ -159,7 +159,8 @@ secrets), not the full cluster playbook. Known deltas vs. the blueprint:
 - **CTID tier / reserved list:** pick a free ovhproxmox CTID outside the live
   guests (104, 110, 201).
 
-The spike fills `TODO(spike)` → proof list:
+The spike fills the remaining `TODO(spike)`s (key generators; the revision pin
+is already verified — see below) → proof list:
 1. **Pin the revision** + confirm `pds_version`; record the build features.
 2. **Key generators** — exact commands for the OAuth JWK set and the PLC
    `did:key` rotation key (or write the pipe lookups).

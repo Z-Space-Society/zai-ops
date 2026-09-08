@@ -70,7 +70,7 @@ build is more than a `cargo build --release`. The runtime footprint is light.
 | Install the systemd unit | `template` → `/etc/systemd/system/habitat.service` | Hardened; `Restart=always`. Notifies reload + restart. |
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config before the smoke test. |
-| Wait for port + root endpoint | `wait_for` (`127.0.0.1:8000`) + `uri` (`/`) | Proves the process booted, bound, and got far enough to serve the embedded UI, which, since migrations run at startup, also means Postgres was reachable. |
+| Wait for port + health endpoint | `wait_for` (`127.0.0.1:8000`) + `uri` (`/health`) | Proves the process booted and bound. `/health` is pear's own unauthenticated liveness route and returns the literal body `ok`. **Not `/`**, see the routing note below. Liveness only: it touches neither Postgres nor the blob bucket. |
 
 ### Handlers
 
@@ -212,8 +212,13 @@ where the unit grants any `ReadWritePaths`.
 systemctl status habitat
 journalctl -u habitat -f
 ss -ltnp | grep 8000
-curl -si http://127.0.0.1:8000/ | head -1
+
+curl -s  http://127.0.0.1:8000/health      # -> ok
+curl -sI http://127.0.0.1:8000/ui/ | head -1
 ```
+
+A bare `curl http://127.0.0.1:8000/` returns **404, and that is correct**. See
+the routing note below before treating it as a fault.
 
 **Migrations ran against Postgres, not SQLite.** This is the check worth doing
 first, because `HABITAT_DB` silently falls back: `ParseDialect()` returns a `""`
@@ -281,6 +286,21 @@ scn-member-registry deploy:
 > `git rev-parse HEAD` instead. And `depth: 1` is unreliable when `version` is
 > a bare SHA rather than a branch or tag tip, so drop it or fetch the branch
 > and reset.
+
+> [!note] `/` is the libp2p handler, so a root 404 is normal
+> `pear` registers `mux.PathPrefix("/").HandlerFunc(p2pServer.HandleLibp2p)` as
+> its catch-all, so a plain browser GET of `/` returns 404 by design. There is no
+> landing page at the root.
+>
+> - **`/health`** is the liveness route, unauthenticated and returning `ok`. This
+>   is what the role's smoke test uses.
+> - **`/ui/`** is the embedded web console, and the page a person wants.
+> - **`/xrpc/...`**, `/admin`, `/oauth/...` and `/.well-known/did.json` are the
+>   rest of the real surface.
+>
+> Because of that catch-all, do **not** add a Caddy redirect from `/` to `/ui/`
+> without checking what it does to libp2p over HTTP. The console URL is
+> `https://habitat.<domain>/ui/`.
 
 > [!danger] The database must be UTF8, and the cluster probably is not
 > `pear` reaches Postgres through GORM's **pgx** driver in simple-protocol mode,

@@ -671,12 +671,23 @@
     port: "{{ habitat_port }}"
     timeout: 90
 
-- name: Verify the habitat root endpoint responds
+- name: Verify the habitat health endpoint responds
+  # /health, NOT /. pear registers PathPrefix("/") as the libp2p handler, so a
+  # plain GET of the root legitimately 404s and is not a sign of anything wrong;
+  # the web console is under /ui/. /health is pear's own canonical liveness
+  # endpoint, registered before any auth-gated route specifically so a deploy
+  # check can reach it without credentials, and it returns the literal body "ok".
+  #
+  # Liveness only: it touches neither Postgres nor the blob bucket, so a pass
+  # means the process is serving, not that its storage works. The UTF8 crash loop
+  # would still have been caught, because that killed the process outright and
+  # nothing would have been listening at all.
   ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ habitat_port }}/"
+    url: "http://127.0.0.1:{{ habitat_port }}/health"
     follow_redirects: none
-    status_code: [200, 302, 303]
+    status_code: [200]
+    return_content: true
   register: habitat_health
-  until: habitat_health is succeeded
+  until: habitat_health is succeeded and (habitat_health.content | default('') | trim) == "ok"
   retries: 10
   delay: 3

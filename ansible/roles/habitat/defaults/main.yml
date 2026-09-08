@@ -8,15 +8,22 @@
 # the delegable `manager` role is real, revocation timing) against a running
 # server we control. Membership stays where ADR-003 and ADR-006 put it.
 
-# Pinned upstream tag. Habitat publishes NO stable releases. The GitHub
-# releases list is empty and the only tags are pre-release `v0.0.2-testing-N`, so there is
-# no non-testing version to pin to. That is a property of the project today, not
-# an oversight here; bump deliberately and read their changelog first, because
-# breaking changes are explicitly promised in the README.
+# Upstream commit to build. A COMMIT SHA, not a tag, and that is not a shortcut.
 #
-# Their own self-hosting guide tells you to fetch a compose file from
-# `releases/latest/download/`, which 404s for the same reason. Do not follow it.
-habitat_version: "v0.0.2-testing-12"
+# Habitat's tags do not version this codebase. All 28 are `v0.0.x-testing-N` from
+# mid-2024 and point at the previous architecture, when the project was
+# github.com/eagraf/habitat-new: go 1.22, a single `cmd/node` binary, an npm
+# frontend under frontend/, and a Makefile as the build system. None of cmd/pear,
+# go.work, the pnpm workspace or any HABITAT_* flag exists there. The
+# pear/OpenSocial tree that this role builds, that the API docs describe, and
+# that ghcr.io/habitat-network/pear ships lives only on an UNTAGGED main.
+#
+# So upgrades are a deliberate re-pin against upstream main rather than a version
+# bump, and there is no changelog to read first. The layout probe in
+# tasks/main.yml asserts the checkout actually has the pear-era shape, so a wrong
+# pin fails with that reason instead of several tasks deeper with a confusing
+# pnpm error.
+habitat_version: "ace441b19038ce870e66127df7ef70b2543743ff"
 
 habitat_repo_url: "https://github.com/habitat-network/habitat"
 
@@ -53,30 +60,21 @@ habitat_database_url: "postgres://{{ habitat_db_user }}:{{ habitat_db_password }
 habitat_domain: "habitat.{{ cluster_domain }}"
 
 # --- Blob storage ------------------------------------------------------------
-# Local disk, not Garage. This is a finding, not a preference.
+# Blobs go to Garage over S3, which is what the SCN spec asks for.
 #
-# `--blob_bucket` is documented as a gocloud.dev connection string accepting
-# `s3://`, and on that basis the S3 path looked like a solved problem. It is not:
-# cmd/pear/main.go calls blob.OpenBucket() but blank-imports NO gocloud blob
-# driver, and gocloud registers drivers only via those imports. Decisively,
-# `gocloud.dev/blob/s3blob` cannot compile without
-# github.com/aws/aws-sdk-go-v2/service/s3, and that module appears NOWHERE in
-# cmd/pear/go.mod, direct or indirect. So s3blob is not linked into this binary
-# and an `s3://` URL fails at runtime with "no driver registered", regardless of
-# what the flag help says.
-#
-# The role therefore asserts which drivers are actually linked at build time (see
-# tasks/main.yml) rather than letting this surface as a confusing runtime error.
-# If a future version links s3blob, point this at Garage and enable the bucket
-# tasks; the wiring is written and guarded, not missing.
-habitat_blob_dir: /var/lib/habitat/blobs
-
-# Garage-backed blobs, OFF until upstream links s3blob. Flipping this to true
-# enables the bucket/key provisioning tasks and repoints the bucket URL below;
-# the build-time assert is what stops it being turned on prematurely.
-habitat_blob_use_garage: false
+# Verified in the source rather than assumed: internal/spaces/blobs.go blank-imports
+# fileblob, gcsblob, memblob AND s3blob, and cmd/pear/main.go imports
+# internal/spaces, so all four schemes are registered in the built binary. The
+# driver set is confirmed again at build time by the assert in tasks/main.yml,
+# because which schemes work is a property of the build rather than of the flag's
+# help text.
+habitat_blob_use_garage: true
 habitat_s3_bucket: "habitat-blobs"
 habitat_s3_key_name: "habitat"
+
+# Local-disk fallback, used when habitat_blob_use_garage is false. Also the path
+# the unit grants write access to in that case.
+habitat_blob_dir: /var/lib/habitat/blobs
 
 # Garage's S3 port and region are LOCAL defaults, deliberately duplicated rather
 # than read out of the object_store role: a role default is not a reliable host
@@ -86,14 +84,14 @@ habitat_s3_key_name: "habitat"
 habitat_s3_port: 3900
 habitat_s3_region: "garage"
 
-# The Garage query string is written from gocloud's s3blob URL options, but it is
-# UNVERIFIED against a running server for the reason above: s3blob isn't linked,
-# so there has been nothing to test it with. Treat the exact parameter spelling
-# (endpoint as host:port vs full URL, use_path_style vs s3ForcePathStyle) as
-# needing a check against the gocloud version in cmd/pear/go.mod on the day this
-# is switched on. A wrong endpoint does not error clearly; it tries real AWS.
-# Credentials travel via the standard AWS env vars in the env template, since
-# s3blob resolves them through the AWS default credential chain.
+# gocloud s3blob connection string. Garage is not AWS, so it needs an explicit
+# endpoint, path-style addressing and plain HTTP over vmbr1. Credentials travel
+# via the standard AWS env vars in the env template rather than inline here, so
+# they stay out of the process list and out of any log that echoes the URL.
+#
+# UNVERIFIED against a running Garage: check the parameter spelling against the
+# gocloud version in the root go.mod on first run. A wrong endpoint does not
+# error clearly, it tries real AWS. The journal is where this shows up.
 #
 # Jinja's conditional expression is lazy, so hostvars['object-store'] is only
 # dereferenced when the flag is true, so this stays resolvable on a cluster

@@ -49,7 +49,7 @@ build is more than a `cargo build --release`. The runtime footprint is light.
 | ---- | ------ | --- |
 | Probe + create the `habitat` PG role | `command`/`shell` → `su - postgres -c psql`, `delegate_to: postgres` | Postgres superuser is **peer-only** on that CT; DB setup must be delegated there. Probe `pg_roles` → `CREATE ROLE` (else `ALTER ROLE` to sync the password). Password via `$HABITAT_DB_PW` (`no_log`) so it reaches neither argv nor the Ansible log. |
 | Probe + create the `habitat` database | `command` → `su - postgres -c psql`, `delegate_to: postgres` | Probe `pg_database`, then `CREATE DATABASE OWNER habitat`. The **schema** is not created here: `pear` runs goose migrations on every startup, which is why the role must own the database. |
-| Garage key + bucket | `command`, `delegate_to: object-store` | **Skipped**: gated on `habitat_blob_use_garage`, which is `false`. See "Blob storage" below. Written now so enabling it is a flag flip. Deliberately *not* added to the object_store role's `garage-init.sh`, which is sentinel-guarded and will not re-run. |
+| Garage key + bucket | `command`, `delegate_to: object-store` | Import the access key, create the bucket, grant read/write. Each guarded by its own `grep -q` on the live `garage` listing. Deliberately *not* added to the object_store role's `garage-init.sh`, which is sentinel-guarded and will not re-run. Skipped if `habitat_blob_use_garage` is `false`. |
 | Create `habitat` group + user | `group`, `user` | Run the daemon unprivileged, no login shell. |
 | Create home, config + blob dirs | `ansible.builtin.file` | `/opt/habitat` + `/opt/habitat/bin` (root-owned), `/etc/habitat` (root-owned `0750`), `/var/lib/habitat/blobs` (**habitat-owned**, the only path the daemon writes). |
 | Install build dependencies | `apt` | `build-essential`, `ca-certificates`, `curl`, `git`, `pkg-config`. |
@@ -61,7 +61,7 @@ build is more than a `cargo build --release`. The runtime footprint is light.
 | Build the `internal` TS package | `command` → `pnpm --filter internal build` | `pear-pages` depends on it and pnpm does not build workspace deps implicitly. |
 | Build the embedded web UI | `command` → `pnpm --filter pear-pages exec vite build --outDir …/internal/webui/dist` | **Order is load-bearing**: the UI is embedded in the Go binary, so this must land before `go build`. |
 | Build `pear` and `keygen` | `command` → `go build` | Runs only when the clone changed or the binary is missing. No `creates:` guard, because the deleted build caches would otherwise trigger a rebuild on every replay. Notifies restart. |
-| Detect + assert the blob driver | `shell` → `go list -deps`, `assert` | Turns a confusing runtime "no driver registered" into a provisioning failure that names the drivers actually linked. See "Blob storage". |
+| Detect + assert the blob driver | `shell` → `go list -deps`, `assert` | Proves the configured scheme's driver is in *this* build, turning a runtime "no driver registered" into a provisioning failure that names the drivers actually linked. See "Blob storage". |
 | Mint the space signing key | `copy`, `command` → `go run`, `copy` (`delegate_to: localhost`) | `pear` requires a multibase P-256 key that **nothing upstream will generate**. See "The space signing key". |
 | Remove build trees | `file: state=absent` | `node_modules`, the Go build cache and module cache are several GB. The `src/` tree stays so the `git describe` probe keeps working. |
 | Render the env file | `template` (`0600 root`, `no_log`) | The whole config surface, `pear` reads every flag from a `HABITAT_`-prefixed env var, so the unit's `ExecStart` carries no arguments. Notifies restart. |
@@ -83,7 +83,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/habitat/defaults/main.yml):
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `habitat_version` | `v0.0.2-testing-12` | Tag checked out and built. See the maturity note below: there is no stable tag to pin to. |
+| `habitat_version` | a `main` commit SHA | **A commit, not a tag**; no tag can be right here. See the pinning note below. |
 | `habitat_port` | `8000` | Listen port. There is **no** `habitat_host`: `pear` has no bind-address flag, so it always serves on all interfaces. The literal-IP cold-boot trap that [`postgres`](postgres.md) and [`sync_relay`](sync_relay.md) guard against cannot be configured into existence here. |
 | `habitat_domain` | `habitat.{{ cluster_domain }}` | `HABITAT_DOMAIN`, no scheme. **Effectively immutable**, baked into org DIDs and the OAuth issuer. |
 | `habitat_home` / `_bin` / `_src` | `/opt/habitat[/bin/pear, /src]` | Install path, binary path, source checkout. |
@@ -91,9 +91,9 @@ Defined in [`defaults/main.yml`](../../ansible/roles/habitat/defaults/main.yml):
 | `habitat_env_file` | `/etc/habitat/habitat.env` | The `0600` env read via `EnvironmentFile`. |
 | `habitat_db_name` / `_db_user` | `habitat` | Postgres database + role this role creates. |
 | `habitat_database_url` | composed | `postgres://…@{{ hostvars['postgres'].ansible_host }}:5432/…`, the address is derived, never written down. |
-| `habitat_blob_dir` | `/var/lib/habitat/blobs` | Local blob storage; the unit's only `ReadWritePaths` entry. |
-| `habitat_blob_use_garage` | `false` | See "Blob storage". |
-| `habitat_blob_bucket` | composed | `file://…`, or the Garage `s3://…` string when the flag above is true. |
+| `habitat_blob_dir` | `/var/lib/habitat/blobs` | Local-disk fallback path, used only when `habitat_blob_use_garage` is `false`. |
+| `habitat_blob_use_garage` | `true` | Blobs on Garage over S3. `false` switches to a local-disk `file://` bucket. See "Blob storage". |
+| `habitat_blob_bucket` | composed | The Garage `s3://…` string, or `file://…` when the flag above is false. |
 | `habitat_node_major` / `_pnpm_version` | `22` / `11.5.1` | Mirrors the Dockerfile's UI stage, **not** `.prototools`. |
 | `habitat_go_version` / `_go_sha256` | `1.27.1` | Pinned toolchain. Bump the version and the checksum together, from <https://go.dev/dl/?mode=json>. |
 
@@ -118,8 +118,8 @@ which under systemd means it lands in the journal and changes on every restart.
   service genuinely needs a public origin: org DIDs are minted against
   `HABITAT_DOMAIN` and PDS OAuth plus external DID resolution have to reach it
   from the internet.
-- [`object_store`](object_store.md), referenced only when
-  `habitat_blob_use_garage` is true, which it is not. No real dependency today.
+- [`object_store`](object_store.md), for the blob bucket. Must be provisioned and
+  SSH-reachable, because the bucket and key tasks are delegated to it.
 
 ### Who else reaches this
 
@@ -161,33 +161,48 @@ the same key back instead of minting a second host identity.
 
 ## Blob storage
 
-**Local disk, not Garage, and this is a finding, not a preference.**
+**Garage over S3, which is what the SCN spec asks for.** `HABITAT_BLOB_BUCKET` is
+a `gocloud.dev` connection string, and `pear` registers the drivers in
+`internal/spaces/blobs.go`, which blank-imports `fileblob`, `gcsblob`, `memblob`
+and `s3blob`. `cmd/pear/main.go` reaches that package through the `go.work`
+workspace, so all four schemes work in the built binary.
 
-`--blob_bucket` is documented as a `gocloud.dev` connection string accepting
-`s3://`, `gs://` and `file://`, and on that basis Garage looked like a solved
-problem. It is not:
+> [!warning] Do not conclude a driver is missing from `cmd/pear/go.mod`
+> `cmd/pear/go.mod` lists **no** AWS modules, even though `s3blob` is linked and
+> cannot compile without `aws-sdk-go-v2/service/s3`. That is not a contradiction:
+> `cmd/pear` is a submodule in a `go.work` workspace, and the workspace build
+> takes the union of the member modules' requirements, so the AWS deps come from
+> the **root** `go.mod` (where they appear as indirect). Reading the submodule's
+> `go.mod` alone gives exactly the wrong answer here.
 
-- `cmd/pear/main.go` calls `blob.OpenBucket()` but blank-imports **no** gocloud
-  blob driver, and gocloud registers drivers only via those imports.
-- Decisively, `gocloud.dev/blob/s3blob` cannot compile without
-  `github.com/aws/aws-sdk-go-v2/service/s3`, and that module appears **nowhere**
-  in `cmd/pear/go.mod`, direct or indirect.
+Because which schemes work is a property of the build rather than of the flag's
+help text, the role asks the build rather than trusting either: `go list -deps`
+on `cmd/pear`, filtered to `gocloud.dev/blob/`, then an `assert` that the
+configured scheme is among them. A wrong configuration fails the play with a
+message naming the real options, in the same fail-closed-and-loudly spirit as
+corliss's push token.
 
-So `s3blob` is not linked into this binary and an `s3://` URL fails at runtime
-with `no driver registered for "s3"`, whatever the flag help says. Which drivers
-*are* linked is a property of the build, so the role asks the build rather than
-guessing: `go list -deps` on `cmd/pear`, filtered to `gocloud.dev/blob/`, then an
-`assert` that the configured scheme is among them. A wrong configuration fails
-the play with a message naming the real options, in the same
-fail-closed-and-loudly spirit as corliss's push token.
+The bucket and access key are provisioned by delegated `garage` tasks inside this
+role, each with its own `grep -q` guard, rather than by extending the
+`object_store` role's `garage-init.sh` (which is sentinel-guarded and will not
+re-run on an initialised store). The key is `garage key import`ed rather than
+generated so it survives a rebuilt object store, matching the backup key.
 
-The Garage bucket/key tasks and the `s3://` URL are written and guarded behind
-`habitat_blob_use_garage`, so if a future version links `s3blob` this becomes a
-flag flip. The query string itself is **unverified**, because there has been nothing to
-test it against, so check the parameter spelling (`endpoint` as host:port vs
-full URL, `use_path_style`) against the gocloud version in `cmd/pear/go.mod` on
-the day it is switched on. A wrong endpoint does not error clearly; it tries real
-AWS.
+Two things to know about the connection string:
+
+- **Garage is not AWS**, so it needs an explicit `endpoint`, `use_path_style` and
+  `disable_https` (plain HTTP over `vmbr1`). This spelling is **unverified**
+  against a running Garage; check it against the gocloud version in the root
+  `go.mod` on first run. A wrong endpoint does not error clearly, it tries real
+  AWS, and the journal is where that shows up.
+- **Credentials go in the env file, not the URL.** `flags.go` describes the
+  string as carrying "inline credentials", but the AWS env vars keep the secret
+  out of the process list and out of anything that echoes the URL, and s3blob
+  resolves them through the AWS default credential chain either way.
+
+Setting `habitat_blob_use_garage: false` switches to a local-disk `file://`
+bucket under `habitat_blob_dir`, skips the Garage tasks, and is the only mode
+where the unit grants any `ReadWritePaths`.
 
 ## Verify
 
@@ -209,10 +224,11 @@ su - postgres -c "psql -d habitat -c '\dt'"
 That must list goose's version table plus Habitat's own tables. A healthy
 service with an empty database means the DSN did not take.
 
-The blob directory fills as blobs are uploaded through the console:
+Blobs land in Garage as they are uploaded through the console. On the object
+store:
 
 ```sh
-ls -la /var/lib/habitat/blobs
+garage bucket info habitat-blobs
 ```
 
 **Idempotency.** A second `provision.yml --limit habitat` must not rebuild.
@@ -235,12 +251,34 @@ scn-member-registry deploy:
 
 ## Notes
 
-> [!warning] There is no stable version to pin
-> Habitat publishes **no GitHub releases**; the only tags are pre-release
-> `v0.0.2-testing-N`. The README promises breaking changes, and their
-> self-hosting guide tells you to fetch a compose file from
-> `releases/latest/download/`, which 404s for the same reason. Do not follow
-> it. Bump `habitat_version` deliberately and read their changelog first.
+> [!danger] No tag can pin this codebase, and the obvious one is a trap
+> Habitat's tags do not version the software this role builds. All 28 are
+> `v0.0.x-testing-N` from **mid-2024** (the newest, `v0.0.2-testing-12`, is
+> dated 2024-06-18) and they point at the previous architecture, when the
+> project was `github.com/eagraf/habitat-new`: go 1.22, one `cmd/node` binary,
+> an **npm** frontend under `frontend/`, and a Makefile as the build system.
+> None of `cmd/pear`, `go.work`, the pnpm workspace or any `HABITAT_*` flag
+> exists there.
+>
+> The pear/OpenSocial tree, which is what their API docs, the published
+> `ghcr.io/habitat-network/pear` image and this whole role describe, lives only
+> on an **untagged `main`**. So `habitat_version` has to be a main commit SHA.
+>
+> Pinning to a tag fails several tasks deep with an unrelated-looking error
+> (pnpm reporting no `package.json`, because the pnpm workspace does not exist
+> at that ref). The layout probe in `tasks/main.yml` exists to turn that into a
+> statement of the actual problem. Do not "fix" it by patching build paths: the
+> binary, the module path and the frontend toolchain all differ.
+>
+> Habitat also publishes **no GitHub releases**, so their self-hosting guide's
+> `curl releases/latest/download/docker-compose.yml` 404s. Do not follow it.
+
+> [!note] Switching to a SHA pin needs two other changes
+> The drift probe uses `git describe --tags --exact-match`, which cannot
+> describe a SHA-pinned checkout, so it would re-clone on every run; use
+> `git rev-parse HEAD` instead. And `depth: 1` is unreliable when `version` is
+> a bare SHA rather than a branch or tag tip, so drop it or fetch the branch
+> and reset.
 
 > [!warning] The pnpm install diverges from upstream's Dockerfile
 > Their UI stage copies in only `typescript/` before installing, so pnpm

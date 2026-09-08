@@ -834,18 +834,26 @@ Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
 
 Hard-won lessons about **upstream projects we build from source**:
 
-- **A Go program's advertised connection-string schemes are a property of the
-  build, not of its docs.** Pluggable-driver libraries (`gocloud.dev/blob`,
-  `database/sql`) register backends via *blank imports*, so a flag whose help
-  text lists `s3://`, `gs://` and `file://` supports only whichever drivers the
-  binary actually links. Habitat's `--blob_bucket` is the live example: it
-  advertises `s3://`, but `s3blob` is absent from its module graph, so an
-  `s3://` URL fails at startup with `no driver registered`, which reads like a
-  credentials or endpoint problem and is not. `go list -deps <pkg> | grep
-  <driver-path>` answers it offline and in one command, and the
-  [`habitat`](roles/habitat.md) role asserts on it at build time so the failure
-  lands in the play rather than in the journal. Check this before wiring any
-  such service to Garage or Postgres.
+- **In a Go workspace, a submodule's `go.mod` does not tell you what the binary
+  links.** `go.work` builds take the union of the member modules' requirements,
+  so a dependency can be entirely absent from the submodule you build in and
+  still be compiled in via the root module. Habitat is the live example:
+  `cmd/pear/go.mod` lists no AWS modules, yet `pear` links
+  `gocloud.dev/blob/s3blob` (blank-imported by the root module's
+  `internal/spaces/blobs.go`), which cannot build without
+  `aws-sdk-go-v2/service/s3`. Reading the submodule's `go.mod` alone gives the
+  opposite answer, confidently. When the question is "is this driver in the
+  build", ask the build: `go list -deps <pkg> | grep <driver-path>` is offline,
+  definitive, and one command. The [`habitat`](roles/habitat.md) role asserts on
+  it at provision time for exactly this reason.
+- **A project's tags may not version the code you are building.** Habitat's 28
+  tags are all `v0.0.x-testing-N` from mid-2024 and point at a previous
+  architecture with a different module path, a different binary and a different
+  frontend toolchain; the current tree is on an untagged `main`. "There are tags,
+  and `main` has none, so the tags must be the pre-releases" is a bad inference,
+  and it fails several tasks into a build with an unrelated-looking error. Check
+  what is *in* a ref before pinning to it, and have the role assert the shape it
+  expects.
 
 Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
 

@@ -22,15 +22,17 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-# The blob directory is the only path the daemon writes to; everything else is
-# in Postgres. Narrower than happyview's ReadWritePaths on purpose: nothing needs
-# to be writable under /opt/habitat at runtime, since the binary and source tree
-# are root-owned build output.
-#
-# This line becomes unnecessary if blobs ever move to Garage
-# (habitat_blob_use_garage), at which point the service holds no local state at
-# all and can drop to the sync relay's posture of ProtectSystem=strict alone.
+{% if habitat_blob_use_garage | bool %}
+# No ReadWritePaths at all: with blobs on Garage the service's entire state is in
+# Postgres and S3, so ProtectSystem=strict alone is the whole hardening story.
+# Same posture as the sync relay.
+{% else %}
+# Local-disk blobs, so the blob directory is the one path the daemon writes to.
+# Narrower than happyview's ReadWritePaths on purpose: nothing under /opt/habitat
+# needs to be writable at runtime, since the binary and source tree are
+# root-owned build output.
 ReadWritePaths={{ habitat_blob_dir }}
+{% endif %}
 
 [Install]
 WantedBy=multi-user.target

@@ -69,8 +69,12 @@ instance that is consumed by nothing.**
   against `HABITAT_DOMAIN` and PDS OAuth plus external DID resolution must reach
   it from the internet, so an internal-only instance could not answer the
   questions it exists to answer. The name is therefore effectively immutable.
-- **Pinned to a pre-release tag**, because there is no other kind. Habitat
-  publishes no releases and tags only `v0.0.2-testing-N`.
+- **Pinned to a commit, because no tag can work.** Habitat's 28 tags are all
+  `v0.0.x-testing-N` from mid-2024 and point at the previous `habitat-new`
+  architecture, not the pear/OpenSocial tree this evaluates. That tree is on an
+  untagged `main`, so the pin is a commit SHA and upgrades are a deliberate
+  re-pin rather than a version bump. The role asserts on the checkout's shape so
+  a wrong pin fails with the reason rather than deep in the build.
 
 ### What the instance is for
 
@@ -99,8 +103,8 @@ Positive:
 - The two unanswered specification items become testable rather than pending.
 - The role is generic (ADR-0001), so it stands up on any cluster, including a
   staging box, with no committed host facts.
-- Two upstream gaps were found while writing it and are now documented rather
-  than waiting to be hit at runtime. See "Findings" below.
+- An upstream gap was found while writing it and is documented rather than
+  waiting to be hit at runtime. See "Findings" below.
 
 Negative:
 
@@ -112,24 +116,18 @@ Negative:
 - The build reproduces a Dockerfile rather than consuming a supported artifact,
   so it is exposed to upstream refactors that a container user would not notice.
 
-### Findings that changed the implementation
+### Finding that changed the implementation
 
-Both were discovered from source while writing the role, and both are gaps in
-upstream's self-hosting path rather than in this one:
+Discovered from source while writing the role, and a gap in upstream's
+self-hosting path rather than in this one:
 
-- **`s3://` blob storage does not work on this build.** The flag advertises it,
-  but `cmd/pear/main.go` blank-imports no gocloud blob driver and
-  `aws-sdk-go-v2/service/s3` is absent from `cmd/pear/go.mod`, so `s3blob` is
-  not linked. Blobs go to local disk; the Garage wiring is written and guarded
-  behind a flag, and the role asserts at build time which drivers are actually
-  linked rather than letting this surface as a runtime error.
 - **`HABITAT_SPACE_SIGNING_KEY` is required and nothing upstream generates it.**
   `cmd/keygen` produces the wrong shape, `cmd/didgen` produces the wrong curve,
   and their own container entrypoint never sets it, so the published container
   cannot start either without it supplied from outside. The role mints it with
   indigo's `atcrypto` at the version `cmd/pear` pins.
 
-Details of both are in [`docs/roles/habitat.md`](../roles/habitat.md).
+Details are in [`docs/roles/habitat.md`](../roles/habitat.md).
 
 ## Revisit when
 

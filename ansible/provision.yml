@@ -216,10 +216,11 @@
 # postgres already provisioned (its host facts + SSH reachability are required
 # for the delegated DB tasks).
 #
-# It also references the object-store host to build its blob bucket URL, but only
-# when habitat_blob_use_garage is true, which it is not, because s3blob is not
-# compiled into the pear binary. Blobs go to local disk until upstream links it,
-# so today this play has no real dependency on the object store.
+# It also runs AFTER object-store: blobs go to Garage over S3, and the role
+# creates its own bucket and access key ON the object-store CT
+# (delegate_to: object-store), so that host must be provisioned and reachable
+# too. Setting habitat_blob_use_garage: false drops that dependency and puts
+# blobs on local disk instead.
 #
 # First run takes a while on a cold CT: a pnpm workspace install, a Vite build of
 # the embedded UI, and a full Go build of two binaries.

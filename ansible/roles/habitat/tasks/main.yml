@@ -75,14 +75,28 @@
   delegate_to: postgres
   when: habitat_db_check.stdout | trim != "1"
 
-# --- Garage bucket + key (OFF by default) -----------------------------------------
-# Guarded on habitat_blob_use_garage, which is false because s3blob is not linked
-# into the pear binary. See the blob-driver assert below and the note in
-# defaults/main.yml. Written now so enabling it later is a flag flip rather than
-# new work, and shaped like every other role's dependency provisioning: delegated
-# to the owning CT with its own idempotency guard, NOT bolted into the object_store
-# role's garage-init.sh (that script is sentinel-guarded and will not re-run).
+# --- Blob storage backend ---------------------------------------------------------
+# Blobs go to Garage over S3 by default, which is what the SCN spec asks for.
+# pear links the s3blob driver (internal/spaces/blobs.go blank-imports fileblob,
+# gcsblob, memblob and s3blob), and the build-time assert further down proves it
+# for the binary actually built rather than taking that on trust.
+#
+# Setting habitat_blob_use_garage: false switches to a local-disk file:// bucket
+# and skips the five tasks below. The backend is announced either way, because a
+# run of consecutive "skipping" lines with no explanation reads like something
+# failed to provision silently.
+- name: Report which blob backend this instance is configured for
+  ansible.builtin.debug:
+    msg: >-
+      Blobs: {{ ('Garage, bucket ' ~ habitat_s3_bucket ~ ' on ' ~ hostvars['object-store'].ansible_host)
+      if habitat_blob_use_garage | bool
+      else ('local disk at ' ~ habitat_blob_dir ~ '. The Garage tasks below skip by design.') }}
 
+# The Garage tasks are written now so enabling them later is a flag flip rather
+# than new work, and shaped like every other role's dependency provisioning:
+# delegated to the owning CT with its own idempotency guard, NOT bolted into the
+# object_store role's garage-init.sh (that script is sentinel-guarded and will
+# not re-run).
 - name: Check whether the habitat Garage key exists
   ansible.builtin.command:
     cmd: garage key list
@@ -126,7 +140,8 @@
 
 - name: Grant the habitat key read/write on its bucket
   # Idempotent server-side (re-granting an existing permission is a no-op), so
-  # this runs unconditionally like the object_store role's equivalent.
+  # unlike the two tasks above it is not gated on a probe result, only on the
+  # feature flag. Same shape as the object_store role's equivalent.
   ansible.builtin.command:
     cmd: >-
       garage bucket allow --read --write "{{ habitat_s3_bucket }}"
@@ -162,12 +177,16 @@
     # home/bin: holds the installed binaries (root-owned, world-readable).
     # home/src: build tree, root-owned; the heavy parts are removed after build.
     # config dir: root-owned, holds the 0600 secret env read via EnvironmentFile.
-    # blob dir: the ONLY path the daemon writes to, so it is habitat-owned and is
-    # the sole entry in the unit's ReadWritePaths.
+    # blob dir: local-disk fallback only, so it is habitat-owned and is the
+    # unit's sole ReadWritePaths entry in that mode. Skipped when blobs are on
+    # Garage, where the service writes nothing locally.
     - { path: "{{ habitat_home }}", owner: root, mode: "0755" }
     - { path: "{{ habitat_home }}/bin", owner: root, mode: "0755" }
     - { path: "{{ habitat_config_dir }}", owner: root, mode: "0750" }
     - { path: "{{ habitat_blob_dir }}", owner: "{{ habitat_user }}", mode: "0750" }
+  # The blob dir is only needed for the local-disk fallback; with Garage the
+  # service holds no local state at all.
+  when: (item.path != habitat_blob_dir) or (not habitat_blob_use_garage | bool)
 
 # --- Build dependencies -----------------------------------------------------------
 
@@ -249,18 +268,24 @@
 
 # --- Clone ------------------------------------------------------------------------
 
-- name: Check the checked-out Habitat version
-  ansible.builtin.command: git -C "{{ habitat_src }}" describe --tags --exact-match
+- name: Check the checked-out Habitat commit
+  # rev-parse, not `git describe --tags`, because habitat_version is a commit SHA:
+  # there is no tag on the pear-era tree to describe, so describe would fail every
+  # run and re-clone every run. See the pin note in defaults/main.yml.
+  ansible.builtin.command: git -C "{{ habitat_src }}" rev-parse HEAD
   register: habitat_src_version
   changed_when: false
   failed_when: false
 
-- name: Clone Habitat source at the pinned tag
+- name: Clone Habitat source at the pinned commit
+  # No depth: 1. A shallow fetch of a bare SHA is only supported when the server
+  # allows reachable-SHA1-in-want and the SHA is still reachable from a branch
+  # tip, which is not a property worth depending on for reproducibility. The
+  # repository is small enough that a full clone costs little.
   ansible.builtin.git:
     repo: "{{ habitat_repo_url }}"
     dest: "{{ habitat_src }}"
     version: "{{ habitat_version }}"
-    depth: 1
     force: true
   register: habitat_clone
   when: habitat_src_version.stdout | trim != habitat_version
@@ -269,6 +294,44 @@
   ansible.builtin.stat:
     path: "{{ habitat_bin }}"
   register: habitat_bin_stat
+
+# --- Fail fast if the checkout is not the codebase this role builds ---------------
+# Everything below is written against the pear-era tree: cmd/pear + cmd/keygen,
+# a go.work workspace, and a pnpm workspace whose pear-pages package builds the
+# embedded UI. That tree is what upstream's main branch and
+# build/debian/pear/Dockerfile describe.
+#
+# It is NOT what any upstream TAG contains. Every tag in the repository is
+# `v0.0.x-testing-N` from mid-2024, and those point at an entirely different,
+# pre-rename architecture: module github.com/eagraf/habitat-new on go 1.22,
+# a single `cmd/node` binary, an npm (not pnpm) frontend under frontend/, and a
+# Makefile as the build system. Pointing this role at one of those tags fails
+# several tasks deep with an unrelated-looking error (pnpm reporting no
+# package.json), so check the shape up front and say what is actually wrong.
+- name: Probe the checked-out tree for the pear-era layout
+  ansible.builtin.stat:
+    path: "{{ habitat_src }}/{{ item }}"
+  loop:
+    - cmd/pear
+    - go.work
+    - pnpm-workspace.yaml
+  register: habitat_layout_probe
+
+- name: Assert the checkout is the codebase this role knows how to build
+  ansible.builtin.assert:
+    that:
+      - habitat_layout_probe.results | rejectattr('stat.exists') | list | length == 0
+    fail_msg: >-
+      habitat_version is "{{ habitat_version }}", and the resulting checkout is
+      missing
+      {{ habitat_layout_probe.results | rejectattr('stat.exists') | map(attribute='item') | join(', ') }}.
+      That means this is not the pear-era codebase. Every upstream tag is a
+      mid-2024 `v0.0.x-testing-N` pointing at the old habitat-new architecture
+      (cmd/node, npm frontend, Makefile), and the current pear/OpenSocial tree
+      exists only on an UNTAGGED main. Re-pin habitat_version to a main commit
+      SHA; a tag cannot work here. Patching build paths will not fix this,
+      because the binary, the module path and the frontend toolchain all differ.
+    success_msg: "Checkout has the pear-era layout (cmd/pear, go.work, pnpm workspace)."
 
 # --- Build: web UI, then the binary -----------------------------------------------
 # Order is load-bearing. The UI is EMBEDDED in the Go binary (there is no
@@ -342,9 +405,12 @@
   notify: restart habitat
 
 # --- Assert the configured blob driver is actually linked -------------------------
-# gocloud registers blob drivers by blank import, and cmd/pear/main.go
-# blank-imports none of them, so which schemes work is a property of the build,
-# not of the flag's help text (which advertises s3://, gs:// and file:// alike).
+# gocloud registers blob drivers by blank import. cmd/pear/main.go imports none
+# of them directly; they come in via internal/spaces/blobs.go, which is reached
+# through the go.work workspace. So which schemes work is a property of the build
+# rather than of the flag's help text, and reading a single go.mod is not enough
+# to tell (cmd/pear/go.mod lists no AWS modules even though s3blob is linked,
+# because the workspace supplies the root module's requirements).
 # `go list -deps` reports the real answer offline. Failing here turns a confusing
 # runtime "no driver registered" into a provisioning error that names what IS
 # available, in the same fail-closed-and-loudly spirit as the corliss push token.
@@ -386,11 +452,10 @@
       is not compiled into this build of pear, so blob.OpenBucket() fails at
       startup with "no driver registered for {{ habitat_blob_scheme }}".
       Drivers actually linked: {{ habitat_blob_drivers.stdout_lines | default([]) | join(', ') | default('none', true) }}.
-      Pick one of those. If s3blob is now among them, set
-      habitat_blob_use_garage: true to put blobs on Garage. If only memblob is,
-      upstream's own default (mem://) is the sole option and blobs will NOT
-      survive a restart, acceptable only for a throwaway evaluation, and worth
-      raising with them.
+      Reconfigure habitat_blob_bucket to a scheme in that list. If s3blob has
+      disappeared upstream, set habitat_blob_use_garage: false for the local-disk
+      file:// fallback and raise it with them, because Garage blobs are a stated
+      requirement rather than a preference.
     success_msg: >-
       Blob driver OK, linked:
       {{ habitat_blob_drivers.stdout_lines | default([]) | join(', ') | default('none', true) }}

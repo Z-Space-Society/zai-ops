@@ -209,9 +209,10 @@ habitat_oauth_server_secret: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _za
 habitat_oauth_client_secret: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/habitat_oauth_client_secret && cat ' ~ _zai_secrets_dir ~ '/habitat_oauth_client_secret || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/habitat_oauth_client_secret)') }}"
 habitat_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/habitat_admin_password chars=ascii_letters,digits length=32') }}"
 
-# Garage credentials for habitat's blob bucket. Generated now but UNUSED while
-# habitat_blob_use_garage is false: s3blob is not compiled into the pear binary
-# (see the role defaults). Same GK-prefixed shape as the backup key, and imported
-# rather than generated on the Garage side so they survive a rebuilt object store.
+# Garage credentials for habitat's blob bucket, which is where its blobs live
+# (pear links gocloud's s3blob driver; see the role defaults). Same GK-prefixed
+# shape as the backup key, and imported rather than generated on the Garage side
+# so they survive a rebuilt object store. Read by the habitat role's delegated
+# bucket tasks and by its env file, as the standard AWS_* vars.
 habitat_s3_access_key: "GK{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/habitat_s3_access_key chars=digits,abcdef length=24') }}"
 habitat_s3_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/habitat_s3_secret_key chars=digits,abcdef length=64') }}"

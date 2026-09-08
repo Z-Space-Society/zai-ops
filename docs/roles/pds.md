@@ -161,7 +161,11 @@ secrets), not the full cluster playbook. Known deltas vs. the blueprint:
 
 The spike fills the remaining `TODO(spike)`s (key generators; the revision pin
 is already verified — see below) → proof list:
-1. **Pin the revision** + confirm `pds_version`; record the build features.
+1. ~~**Pin the revision**~~ — **DONE 2026-09-08**: tangled `main` HEAD
+   `711ee2db1aaa01b3fe994364739b425a5dd966ae` builds `atproto-pds 0.15.0-rc.4`
+   (edition 2024, rust 1.97, MIT) — pinned in `roles/pds/defaults/main.yml`.
+   Re-confirm the SHA on the spike box (it is the reproducibility pin; a main
+   push since this notes the SHA must not silently move the pin).
 2. **Key generators** — exact commands for the OAuth JWK set and the PLC
    `did:key` rotation key (or write the pipe lookups).
 3. **Account hosting** (the point of this server): invite → `createAccount` →

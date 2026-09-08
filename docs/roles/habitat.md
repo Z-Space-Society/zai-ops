@@ -55,7 +55,8 @@ build is more than a `cargo build --release`. The runtime footprint is light.
 | Install build dependencies | `apt` | `build-essential`, `ca-certificates`, `curl`, `git`, `pkg-config`. |
 | Install Node.js + pnpm | `shell` (NodeSource), `apt`, `command` | Node 22 per the Dockerfile's UI stage; Debian's own is older than the toolchain expects. pnpm is pinned to the Dockerfile's version because the repo ships a `pnpm-lock.yaml` and the install runs `--frozen-lockfile`. |
 | Install the Go toolchain | `get_url` (+`sha256`), `file`, `unarchive` | Debian 13 ships older than `cmd/pear` needs. Pinned + checksummed tarball, same posture as the Garage binary; `get_url` fails the run on a mismatch. The previous tree is removed before unpacking, because the tarball extracts as `go/` and would otherwise leave stale files. |
-| Check checked-out version | `command` → `git describe --tags --exact-match` | Detect version drift; re-clone only when the pinned tag differs from what is on disk. |
+| Check checked-out commit | `command` → `git rev-parse HEAD` | Detect drift; re-clone only when the pinned commit differs from what is on disk. **Not** `git describe --tags`, which cannot describe a SHA-pinned checkout and would re-clone every run. |
+| Remove a shallow checkout | `stat`, `file: state=absent` | A shallow clone cannot check out a commit that was never in its history, and `git fetch` will not deepen it. See the shallow-clone note below. |
 | Clone source at pinned tag | `ansible.builtin.git` | `--depth 1` keeps the clone lean; `force: true` discards drift on re-pin. |
 | Install pnpm workspace deps | `command` → `pnpm install --frozen-lockfile` | **Known divergence** from the Dockerfile, see notes. |
 | Build the `internal` TS package | `command` → `pnpm --filter internal build` | `pear-pages` depends on it and pnpm does not build workspace deps implicitly. |
@@ -279,6 +280,21 @@ scn-member-registry deploy:
 > `git rev-parse HEAD` instead. And `depth: 1` is unreliable when `version` is
 > a bare SHA rather than a branch or tag tip, so drop it or fetch the branch
 > and reset.
+
+> [!warning] A leftover shallow clone breaks a re-pin, and the error does not say so
+> `depth: 1` was dropped when the pin moved from a tag to a commit SHA, but that
+> only affects *new* clones. An existing `/opt/habitat/src` cloned shallowly
+> stays shallow, and `git fetch` does not deepen it, so checking out a commit
+> that was never in its history fails with:
+>
+> ```
+> fatal: unable to read tree <sha>
+> ```
+>
+> which mentions neither depth nor shallowness and reads like a bad SHA. The role
+> now detects `.git/shallow` and removes the tree so the clone can make a full
+> one, gated on the version mismatch so it can only delete a tree that is about
+> to be replaced. To clear it by hand: `rm -rf /opt/habitat/src`.
 
 > [!warning] The pnpm install diverges from upstream's Dockerfile
 > Their UI stage copies in only `typescript/` before installing, so pnpm

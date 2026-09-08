@@ -277,11 +277,40 @@
   changed_when: false
   failed_when: false
 
+- name: Check whether the existing checkout is shallow
+  ansible.builtin.stat:
+    path: "{{ habitat_src }}/.git/shallow"
+  register: habitat_src_shallow
+
+- name: Remove a shallow checkout so the pinned commit can be fetched
+  # A shallow clone cannot check out a commit that was never in its history, and
+  # `git fetch` does not deepen it, so the checkout below fails with
+  # "fatal: unable to read tree <sha>" rather than anything mentioning depth.
+  # Any tree left behind by an earlier depth: 1 revision of this role hits that,
+  # so drop it and let the clone below make a full one. Self-limiting: a full
+  # clone has no .git/shallow, so this never fires twice.
+  #
+  # Gated on the version mismatch too, so this can only ever delete a tree the
+  # clone below is about to replace. Without that, a shallow checkout already
+  # sitting at the pinned commit would be removed and then not re-cloned,
+  # leaving no source tree at all.
+  ansible.builtin.file:
+    path: "{{ habitat_src }}"
+    state: absent
+  when:
+    - habitat_src_shallow.stat.exists
+    - habitat_src_version.stdout | trim != habitat_version
+
 - name: Clone Habitat source at the pinned commit
   # No depth: 1. A shallow fetch of a bare SHA is only supported when the server
   # allows reachable-SHA1-in-want and the SHA is still reachable from a branch
   # tip, which is not a property worth depending on for reproducibility. The
   # repository is small enough that a full clone costs little.
+  #
+  # The `when` compares against the rev-parse above rather than using a creates:
+  # style guard, so re-pinning is what triggers a re-clone. Note it still fires
+  # when the shallow removal above has just deleted the tree, because the stale
+  # HEAD it recorded cannot equal the pinned commit.
   ansible.builtin.git:
     repo: "{{ habitat_repo_url }}"
     dest: "{{ habitat_src }}"

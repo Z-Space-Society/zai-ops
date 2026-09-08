@@ -1,0 +1,78 @@
+---
+# In-house PDS — atproto-pds (Nick @ngerakines.me, the atproto-crates
+# workspace). The server that is the SOURCE of the cluster's AT Protocol
+# (atmosphere) accounts: it hosts the SCN DID and member accounts, and speaks
+# federation, OAuth 2.1 and Sync 1.1. Operator guide:
+# https://atproto-crates.com/pds.html
+#
+# NOT on crates.io — the workspace is a git dependency. We build the two
+# binaries (`pds`, `atproto-pds-admin`) from source at a pinned revision, the
+# same shape as the happyview role. Its state lives on disk (per-actor SQLite
+# + a shared accounts.sqlite) — no Postgres, no S3 (both refuse at boot).
+#
+# One instance only: a replica count above one is a data-loss setting.
+
+# Source + pin. TODO(spike): set pds_revision to the exact commit tested in the
+# throwaway spike LXC, and confirm pds_version matches that checkout. Upstream
+# publishes no tag to fetch, so the revision IS the reproducibility pin — a
+# bump drives a re-clone + rebuild (cold cargo build, ~15–30 min, same budget
+# as happyview).
+pds_repo_url: "https://tangled.org/ngerakines.me/atproto-crates"
+pds_version: "0.15.0-rc.4"        # informational; verified against the checkout
+pds_revision: "TODO(spike)"       # commit SHA from the feasibility spike
+
+# Build features — the default sqlite storage profile stays on. clap is
+# REQUIRED (both bin targets gate on it); smtp = outbound mail (invites/2FA),
+# metrics = Prometheus /metrics, hickory-dns = the async resolver.
+pds_build_features: "clap,smtp,metrics,hickory-dns"
+
+# Listen. Like every other service CT: bind wildcard — the CT is vmbr1-only, so
+# "all interfaces" IS the internal network and Caddy is the boundary.
+pds_port: 3000
+pds_host: "0.0.0.0"
+
+# Service account + layout, mirroring the happyview/corliss conventions. The
+# bin dir is root-owned; the DATA dir is owned by the daemon (unlike happyview,
+# whose state lives in Postgres — see the unit's ReadWritePaths).
+pds_user: pds
+pds_group: pds
+pds_home: /opt/pds
+pds_bin_dir: "{{ pds_home }}/bin"
+pds_bin: "{{ pds_bin_dir }}/pds"
+pds_admin_bin: "{{ pds_bin_dir }}/atproto-pds-admin"
+pds_src: "{{ pds_home }}/src"
+pds_config_dir: /etc/pds
+pds_env_file: "{{ pds_config_dir }}/pds.env"
+pds_data_dir: /var/lib/pds
+
+# Public identity. Derive from cluster_domain so the blueprint stays generic
+# (ADR-0001): on the SCN cluster cluster_domain == sharedcomputer.network, so
+# the PDS is pds.sharedcomputer.network, its service DID is did:web for that
+# origin, and accounts get *.sharedcomputer.network handles. On a spike
+# cluster the same derivation lands on that cluster's domain.
+pds_hostname: "pds.{{ cluster_domain }}"
+pds_service_did: "did:web:pds.{{ cluster_domain }}"
+pds_handle_domains: [".{{ cluster_domain }}"]
+
+# Federation. TODO(decision): announce to bsky.network, or stand up our own
+# crawler/relay? Unset, nothing else on the network ever discovers this
+# server's accounts. The app view is Bluesky's open appview.
+pds_crawlers: ["https://bsky.network"]
+pds_bsky_app_view_did: "did:web:api.bsky.app"
+pds_bsky_app_view_url: "https://api.bsky.app"
+pds_did_plc_url: "plc.directory"
+
+# Delegated admin — DIDs (public, not secrets) allowed to administer the PDS by
+# signing a service-auth token with the #atproto key of their own DID document.
+# Per-cluster identity: blank blueprint default; recorded in the runtime
+# inventory with `zai-set-pds-admin` (see set-pds-admin.yml). The /admin
+# dashboard is deliberately NOT routed publicly — see docs/roles/pds.md.
+pds_admin_dids: []
+
+# Limits. Keep the Caddy side in sync if changed (a proxy that rejects a body
+# first shows the operator its error instead of an XRPC one).
+pds_blob_upload_limit: 16777216        # 16 MiB (default) — bytes
+pds_import_limit: 1073741824           # 1 GiB (default) — bytes
+
+# Rust toolchain — stable satisfies the workspace's rust-version (≥ 1.97).
+pds_rust_channel: stable

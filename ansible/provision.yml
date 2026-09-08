@@ -209,3 +209,14 @@
   gather_facts: true
   roles:
     - sync_relay
+
+# pds runs AFTER nothing in particular: atproto-pds is SQLite-only, so unlike
+# happyview/sync-relay there is no delegated postgres role to provision first.
+# First run takes ~15–30 min on a cold CT because cargo build --release
+# compiles the full Rust dependency graph. Its public route is pds.<domain>
+# (see the proxy role).
+- name: Configure the in-house PDS (atproto-pds)
+  hosts: pds
+  gather_facts: true
+  roles:
+    - pds

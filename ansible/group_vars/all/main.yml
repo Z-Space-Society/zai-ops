@@ -176,3 +176,24 @@ corliss_oidc_rsa_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secre
 # directly — unlike the redis/openwebui pairs, nothing wraps this one under a
 # second name, because only the one role reads it.
 sync_relay_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/sync_relay_db_password chars=digits,abcdef length=48') }}"
+
+# pds secrets — the in-house PDS (atproto-pds) that hosts the cluster's atproto
+# accounts. Same generate-once-and-persist posture as every pair above; all ride
+# the existing Tier-1 control-node backup of /root/.zai-secrets.
+#
+# PDS_JWT_SECRET signs JWTs the server issues; PDS_ADMIN_PASSWORD guards the
+# /admin dashboard (the break-glass staff door when delegated-admin auth is
+# down); the OAuth JWK set signs the OAuth provider's tokens; and
+# PDS_PLC_ROTATION_KEY_PRIVATE is the operator's recovery key for every identity
+# this server issues — losing it is losing the accounts. DR-critical, all four.
+#
+# TODO(spike): the two generated forms below stay commented until the spike
+# confirms their generator commands in the atproto-crates workspace — the
+# operator guide calls the PLC key "the private did:key a key generator prints"
+# (P-256 z42t… / K-256 z3vL…) and the OAuth keys a multi-key JWK set. The role's
+# env template emits those two variables only when defined, so the rest of the
+# role runs (and boots, and smoke-tests) fine without them.
+pds_jwt_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/pds_jwt_secret chars=digits,abcdef length=64') }}"
+pds_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/pds_admin_password chars=ascii_letters,digits length=32') }}"
+# pds_oauth_jwk_set: "{{ lookup('ansible.builtin.pipe', 'TODO(spike)') }}"
+# pds_plc_rotation_key_private: "{{ lookup('ansible.builtin.pipe', 'TODO(spike)') }}"

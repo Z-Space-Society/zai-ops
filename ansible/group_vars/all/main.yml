@@ -176,3 +176,42 @@ corliss_oidc_rsa_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secre
 # directly — unlike the redis/openwebui pairs, nothing wraps this one under a
 # second name, because only the one role reads it.
 sync_relay_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/sync_relay_db_password chars=digits,abcdef length=48') }}"
+
+# Habitat (the `pear` binary) secrets. A TIME-BOXED EVALUATION instance, see
+# docs/decisions/0008-habitat-evaluation.md. Same generate-once-and-persist
+# posture as everything above.
+#
+# db_password is the password for the `habitat` Postgres role; hex so it needs no
+# percent-encoding inside HABITAT_DB.
+#
+# The three base64 keys are what upstream's docker-entrypoint.sh generates with
+# cmd/keygen on first container start and appends to /data/.secrets.env. We
+# generate them here instead, for the same reason every other secret resolves on
+# the control node: a rebuilt CT must read back the same values rather than mint
+# new ones. pds_cred_encrypt_key in particular CANNOT change once PDS credentials
+# are stored (it decrypts them), which is the same immutability
+# happyview_token_encryption_key has.
+#
+# admin_password is the instance admin login. Explicit on purpose: unset, pear
+# generates a random one on every boot and prints it once to stdout, so under
+# systemd it lands in the journal and changes on every restart.
+#
+# NOT here: habitat_space_signing_key. It is a multibase P-256 key that only
+# indigo's atcrypto can produce, so the role mints it ON the service CT with a
+# tiny generator compiled against the version cmd/pear pins, then persists it
+# back to this same secrets dir, the litellm-mints-corliss-a-key idiom. Read it
+# with:
+#
+#     cat /root/.zai-secrets/habitat_space_signing_key
+habitat_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/habitat_db_password chars=digits,abcdef length=48') }}"
+habitat_pds_cred_encrypt_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/habitat_pds_cred_encrypt_key && cat ' ~ _zai_secrets_dir ~ '/habitat_pds_cred_encrypt_key || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/habitat_pds_cred_encrypt_key)') }}"
+habitat_oauth_server_secret: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/habitat_oauth_server_secret && cat ' ~ _zai_secrets_dir ~ '/habitat_oauth_server_secret || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/habitat_oauth_server_secret)') }}"
+habitat_oauth_client_secret: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/habitat_oauth_client_secret && cat ' ~ _zai_secrets_dir ~ '/habitat_oauth_client_secret || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/habitat_oauth_client_secret)') }}"
+habitat_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/habitat_admin_password chars=ascii_letters,digits length=32') }}"
+
+# Garage credentials for habitat's blob bucket. Generated now but UNUSED while
+# habitat_blob_use_garage is false: s3blob is not compiled into the pear binary
+# (see the role defaults). Same GK-prefixed shape as the backup key, and imported
+# rather than generated on the Garage side so they survive a rebuilt object store.
+habitat_s3_access_key: "GK{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/habitat_s3_access_key chars=digits,abcdef length=24') }}"
+habitat_s3_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/habitat_s3_secret_key chars=digits,abcdef length=64') }}"

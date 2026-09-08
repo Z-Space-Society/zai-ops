@@ -209,3 +209,27 @@
   gather_facts: true
   roles:
     - sync_relay
+
+# habitat runs AFTER postgres: its role creates the habitat role + database ON
+# the postgres CT (delegate_to: postgres), and pear runs its goose migrations
+# against that database on every startup. A --limit habitat run still needs
+# postgres already provisioned (its host facts + SSH reachability are required
+# for the delegated DB tasks).
+#
+# It also references the object-store host to build its blob bucket URL, but only
+# when habitat_blob_use_garage is true, which it is not, because s3blob is not
+# compiled into the pear binary. Blobs go to local disk until upstream links it,
+# so today this play has no real dependency on the object store.
+#
+# First run takes a while on a cold CT: a pnpm workspace install, a Vite build of
+# the embedded UI, and a full Go build of two binaries.
+#
+# This is a TIME-BOXED EVALUATION instance and is wired to nothing on purpose.
+# See docs/decisions/0008-habitat-evaluation.md. Membership stays where ADR-003
+# and ADR-006 put it. Do not add corliss or relay configuration pointing at it
+# without superseding those decisions first.
+- name: Configure Habitat (evaluation instance)
+  hosts: habitat
+  gather_facts: true
+  roles:
+    - habitat

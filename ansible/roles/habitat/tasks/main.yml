@@ -1,0 +1,539 @@
+---
+# Install Habitat (the `pear` binary) natively under systemd.
+#
+# Upstream ships ONLY a container (ghcr.io/habitat-network/pear, built from
+# build/debian/pear/Dockerfile on every push to main). Docker on LXC is against
+# this repo's prime directive, so the role reproduces that Dockerfile's two build
+# stages on the CT instead: Node + pnpm + Vite for the web UI, then Go for the
+# binary. Same shape as the happyview role, which builds Rust + Next.js for the
+# same reason: no pre-built binary on a plain HTTP URL.
+#
+# Runtime is light; the CT sizing is for the build.
+
+# --- Provision the habitat role + database on the postgres CT ---------------------
+# Same idiom as happyview/litellm/open-webui: the postgres superuser is peer-only,
+# so all psql calls are delegated to the postgres CT. Probe first (psql has no
+# IF NOT EXISTS for ROLE or DATABASE), then branch on the result. Password passed
+# via env ($VAR) so it never appears in the shell history or process list; no_log
+# keeps it out of the Ansible log.
+
+- name: Check whether the habitat Postgres role exists
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname = '{{ habitat_db_user }}'\""
+  delegate_to: postgres
+  register: habitat_role_check
+  changed_when: false
+
+- name: Create the habitat Postgres role with a generated password
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1
+      -c \"CREATE ROLE {{ habitat_db_user }} LOGIN PASSWORD '\$HABITAT_DB_PW'\""
+  environment:
+    HABITAT_DB_PW: "{{ habitat_db_password }}"
+  delegate_to: postgres
+  when: habitat_role_check.stdout | trim != "1"
+  no_log: true
+
+- name: Ensure the habitat role password matches the generated secret
+  # ALTER ROLE always succeeds and only re-hashes, so mark it unchanged to keep
+  # runs quiet.
+  ansible.builtin.shell:
+    cmd: >-
+      su -m postgres -c
+      "psql -v ON_ERROR_STOP=1
+      -c \"ALTER ROLE {{ habitat_db_user }} LOGIN PASSWORD '\$HABITAT_DB_PW'\""
+  environment:
+    HABITAT_DB_PW: "{{ habitat_db_password }}"
+  delegate_to: postgres
+  when: habitat_role_check.stdout | trim == "1"
+  no_log: true
+  changed_when: false
+
+- name: Check whether the habitat database exists
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '{{ habitat_db_name }}'\""
+  delegate_to: postgres
+  register: habitat_db_check
+  changed_when: false
+
+- name: Create the habitat database owned by the habitat role
+  # pear runs goose migrations against this on every startup (internal/db/db.go
+  # calls goose.Up when migrations are supplied, and cmd/pear blank-imports
+  # cmd/pear/migrations), so the role owning the database is what lets it create
+  # its own schema. Same reason the sync relay owns its database.
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -v ON_ERROR_STOP=1 -c \"CREATE DATABASE {{ habitat_db_name }}
+      OWNER {{ habitat_db_user }}\""
+  delegate_to: postgres
+  when: habitat_db_check.stdout | trim != "1"
+
+# --- Garage bucket + key (OFF by default) -----------------------------------------
+# Guarded on habitat_blob_use_garage, which is false because s3blob is not linked
+# into the pear binary. See the blob-driver assert below and the note in
+# defaults/main.yml. Written now so enabling it later is a flag flip rather than
+# new work, and shaped like every other role's dependency provisioning: delegated
+# to the owning CT with its own idempotency guard, NOT bolted into the object_store
+# role's garage-init.sh (that script is sentinel-guarded and will not re-run).
+
+- name: Check whether the habitat Garage key exists
+  ansible.builtin.command:
+    cmd: garage key list
+  delegate_to: object-store
+  register: habitat_garage_keys
+  changed_when: false
+  when: habitat_blob_use_garage | bool
+
+- name: Import the habitat Garage access key
+  # Import rather than create, so the credentials survive a rebuilt object store
+  # and stay resolvable from the control node's secrets dir, same reasoning as
+  # the backup key in the object_store role.
+  ansible.builtin.command:
+    cmd: >-
+      garage key import --yes -n "{{ habitat_s3_key_name }}"
+      "$ZAI_HABITAT_ACCESS_KEY" "$ZAI_HABITAT_SECRET_KEY"
+  environment:
+    ZAI_HABITAT_ACCESS_KEY: "{{ habitat_s3_access_key }}"
+    ZAI_HABITAT_SECRET_KEY: "{{ habitat_s3_secret_key }}"
+  delegate_to: object-store
+  when:
+    - habitat_blob_use_garage | bool
+    - habitat_s3_key_name not in habitat_garage_keys.stdout
+  no_log: true
+
+- name: Check whether the habitat Garage bucket exists
+  ansible.builtin.command:
+    cmd: garage bucket list
+  delegate_to: object-store
+  register: habitat_garage_buckets
+  changed_when: false
+  when: habitat_blob_use_garage | bool
+
+- name: Create the habitat Garage bucket
+  ansible.builtin.command:
+    cmd: garage bucket create "{{ habitat_s3_bucket }}"
+  delegate_to: object-store
+  when:
+    - habitat_blob_use_garage | bool
+    - habitat_s3_bucket not in habitat_garage_buckets.stdout
+
+- name: Grant the habitat key read/write on its bucket
+  # Idempotent server-side (re-granting an existing permission is a no-op), so
+  # this runs unconditionally like the object_store role's equivalent.
+  ansible.builtin.command:
+    cmd: >-
+      garage bucket allow --read --write "{{ habitat_s3_bucket }}"
+      --key "{{ habitat_s3_key_name }}"
+  delegate_to: object-store
+  changed_when: false
+  when: habitat_blob_use_garage | bool
+
+# --- Service account + directories ------------------------------------------------
+
+- name: Create the habitat system group
+  ansible.builtin.group:
+    name: "{{ habitat_group }}"
+    system: true
+
+- name: Create the habitat system user
+  ansible.builtin.user:
+    name: "{{ habitat_user }}"
+    group: "{{ habitat_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ habitat_home }}"
+    create_home: false
+
+- name: Create the habitat home, config and blob directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ habitat_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    # home/bin: holds the installed binaries (root-owned, world-readable).
+    # home/src: build tree, root-owned; the heavy parts are removed after build.
+    # config dir: root-owned, holds the 0600 secret env read via EnvironmentFile.
+    # blob dir: the ONLY path the daemon writes to, so it is habitat-owned and is
+    # the sole entry in the unit's ReadWritePaths.
+    - { path: "{{ habitat_home }}", owner: root, mode: "0755" }
+    - { path: "{{ habitat_home }}/bin", owner: root, mode: "0755" }
+    - { path: "{{ habitat_config_dir }}", owner: root, mode: "0750" }
+    - { path: "{{ habitat_blob_dir }}", owner: "{{ habitat_user }}", mode: "0750" }
+
+# --- Build dependencies -----------------------------------------------------------
+
+- name: Install system build dependencies
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - ca-certificates
+      - curl
+      - git
+      - pkg-config
+    state: present
+    update_cache: true
+
+# Node for the web UI build. The Dockerfile's UI stage is node:22-slim, and
+# Debian's own node is older than the toolchain expects, so NodeSource supplies
+# it, identical approach to the happyview role.
+- name: Set up the NodeSource Node.js repository
+  ansible.builtin.shell:
+    cmd: curl -fsSL https://deb.nodesource.com/setup_{{ habitat_node_major }}.x | bash -
+    creates: /etc/apt/sources.list.d/nodesource.list
+
+- name: Install Node.js
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: true
+
+- name: Check the installed pnpm version
+  ansible.builtin.command: pnpm --version
+  register: habitat_pnpm_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install pnpm at the pinned version
+  # Pinned to the Dockerfile's version rather than `latest`: the repo ships a
+  # pnpm-lock.yaml and the install below runs --frozen-lockfile, which a
+  # different major would reject. The default('') covers the first run, where
+  # the probe above fails outright because pnpm is not on PATH yet.
+  ansible.builtin.command:
+    cmd: npm install -g pnpm@{{ habitat_pnpm_version }}
+  when: (habitat_pnpm_installed.stdout | default('') | trim) != habitat_pnpm_version
+
+# Go toolchain as a pinned, checksummed tarball, Debian 13 ships older than
+# cmd/pear needs. Same get_url + sha256 posture as the Garage binary.
+- name: Check the installed Go toolchain version
+  ansible.builtin.command: "{{ habitat_go_root }}/bin/go version"
+  register: habitat_go_installed
+  changed_when: false
+  failed_when: false
+
+- name: Download the Go toolchain tarball
+  ansible.builtin.get_url:
+    url: "{{ habitat_go_url }}"
+    dest: "/tmp/{{ habitat_go_tarball }}"
+    checksum: "sha256:{{ habitat_go_sha256 }}"
+    mode: "0644"
+  when: "habitat_go_version not in (habitat_go_installed.stdout | default(''))"
+
+- name: Remove any previous Go toolchain
+  # go.dev's install guidance: the tarball unpacks as `go/`, and extracting over
+  # an existing tree leaves stale files from the older version behind.
+  ansible.builtin.file:
+    path: "{{ habitat_go_root }}"
+    state: absent
+  when: "habitat_go_version not in (habitat_go_installed.stdout | default(''))"
+
+- name: Unpack the Go toolchain to /usr/local
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ habitat_go_tarball }}"
+    dest: /usr/local
+    remote_src: true
+    creates: "{{ habitat_go_root }}/bin/go"
+
+- name: Remove the Go tarball
+  ansible.builtin.file:
+    path: "/tmp/{{ habitat_go_tarball }}"
+    state: absent
+
+# --- Clone ------------------------------------------------------------------------
+
+- name: Check the checked-out Habitat version
+  ansible.builtin.command: git -C "{{ habitat_src }}" describe --tags --exact-match
+  register: habitat_src_version
+  changed_when: false
+  failed_when: false
+
+- name: Clone Habitat source at the pinned tag
+  ansible.builtin.git:
+    repo: "{{ habitat_repo_url }}"
+    dest: "{{ habitat_src }}"
+    version: "{{ habitat_version }}"
+    depth: 1
+    force: true
+  register: habitat_clone
+  when: habitat_src_version.stdout | trim != habitat_version
+
+- name: Check whether the installed binary exists
+  ansible.builtin.stat:
+    path: "{{ habitat_bin }}"
+  register: habitat_bin_stat
+
+# --- Build: web UI, then the binary -----------------------------------------------
+# Order is load-bearing. The UI is EMBEDDED in the Go binary (there is no
+# STATIC_DIR equivalent, the only escape is --ui_dev_proxy, which is for
+# development), so the Vite output must exist at internal/webui/dist before
+# `go build` runs. The Dockerfile enforces this with stage ordering; here it is
+# just task order.
+
+- name: Install the pnpm workspace dependencies
+  # KNOWN DIVERGENCE from the Dockerfile, and the likeliest place this build
+  # breaks when upstream moves. Their UI stage copies in only typescript/ before
+  # installing, so pnpm resolves a subset of the workspace; we have the whole
+  # clone, so this installs every workspace package (frontend/, api-docs/, …),
+  # slower, and it fails if any of those gains an install-time requirement the
+  # UI build does not need. If that happens, the fix is to install with
+  # --filter pear-pages... rather than to fight the extra packages.
+  ansible.builtin.command:
+    cmd: pnpm install --frozen-lockfile
+    chdir: "{{ habitat_src }}"
+  environment:
+    HOME: /root
+  when: (habitat_clone is changed) or (not habitat_bin_stat.stat.exists)
+
+- name: Build the internal TypeScript package
+  # pear-pages depends on it, and pnpm does not build workspace deps implicitly.
+  ansible.builtin.command:
+    cmd: pnpm --filter internal build
+    chdir: "{{ habitat_src }}"
+  environment:
+    HOME: /root
+  when: (habitat_clone is changed) or (not habitat_bin_stat.stat.exists)
+
+- name: Build the embedded web UI into internal/webui/dist
+  ansible.builtin.command:
+    cmd: >-
+      pnpm --filter pear-pages exec vite build
+      --outDir {{ habitat_src }}/internal/webui/dist
+    chdir: "{{ habitat_src }}"
+  environment:
+    HOME: /root
+  when: (habitat_clone is changed) or (not habitat_bin_stat.stat.exists)
+
+- name: Build pear and keygen
+  # keygen is not used by this role, the three base64 secrets are generated with
+  # `openssl rand -base64 32` on the control node instead, so they resolve like
+  # every other secret here and a rebuilt CT reads back the same values. It is
+  # built and installed anyway as an operator tool: it is upstream's own
+  # generator for those secrets, so if pear ever rejects one as malformed,
+  # comparing against `{{ habitat_keygen_bin }}` output is the one-command check.
+  #
+  # Build when the clone just updated, OR the binary isn't installed yet (first
+  # run). No creates: guard, the cleanup below deletes build state, which would
+  # otherwise trick a guard into rebuilding on every idempotent re-run. Same
+  # reasoning as the happyview role.
+  #
+  # go.work at the repo root is load-bearing: cmd/pear is its own module with no
+  # replace directive, so without workspace mode the build resolves
+  # github.com/habitat-network/habitat from the module proxy and embeds a web UI
+  # from a published version rather than the one just built. Do not add
+  # -mod=mod or GOFLAGS that disable the workspace.
+  ansible.builtin.command:
+    cmd: "{{ habitat_go_root }}/bin/go build -o {{ habitat_home }}/bin/{{ item }} ."
+    chdir: "{{ habitat_src }}/cmd/{{ item }}"
+  loop:
+    - pear
+    - keygen
+  environment:
+    HOME: /root
+    PATH: "{{ habitat_go_root }}/bin:{{ ansible_env.PATH }}"
+  when: (habitat_clone is changed) or (not habitat_bin_stat.stat.exists)
+  notify: restart habitat
+
+# --- Assert the configured blob driver is actually linked -------------------------
+# gocloud registers blob drivers by blank import, and cmd/pear/main.go
+# blank-imports none of them, so which schemes work is a property of the build,
+# not of the flag's help text (which advertises s3://, gs:// and file:// alike).
+# `go list -deps` reports the real answer offline. Failing here turns a confusing
+# runtime "no driver registered" into a provisioning error that names what IS
+# available, in the same fail-closed-and-loudly spirit as the corliss push token.
+#
+# Runs only when we just built, for one practical reason: the cleanup step below
+# drops the Go module cache, so a `go list` on an unchanged re-run would have to
+# re-download the dependency graph, slow, and it would fail on a box with no
+# outbound network. Building is also exactly when the answer can change.
+- name: Determine which gocloud blob drivers are linked into pear
+  # The dependency list is captured to a file FIRST rather than piped straight
+  # into grep. Piping would need `|| true` to tolerate grep's exit 1 on no
+  # match, and that same `|| true` would also swallow a genuine `go list`
+  # failure, reporting "no drivers linked" when the real problem was that the
+  # dependency graph could not be resolved, which is a much worse error to debug.
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      {{ habitat_go_root }}/bin/go list -deps . > /tmp/habitat-deps.txt
+      grep '^gocloud\.dev/blob/' /tmp/habitat-deps.txt || true
+    chdir: "{{ habitat_src }}/cmd/pear"
+  args:
+    executable: /bin/bash
+  environment:
+    HOME: /root
+    PATH: "{{ habitat_go_root }}/bin:{{ ansible_env.PATH }}"
+  register: habitat_blob_drivers
+  changed_when: false
+  when: (habitat_clone is changed) or (not habitat_bin_stat.stat.exists)
+
+- name: Assert the configured blob scheme has a linked driver
+  vars:
+    habitat_blob_scheme: "{{ habitat_blob_bucket | urlsplit('scheme') }}"
+    habitat_blob_driver_pkg: "gocloud.dev/blob/{{ habitat_blob_bucket | urlsplit('scheme') }}blob"
+  ansible.builtin.assert:
+    that:
+      - habitat_blob_driver_pkg in habitat_blob_drivers.stdout
+    fail_msg: >-
+      habitat_blob_bucket is "{{ habitat_blob_bucket }}", but {{ habitat_blob_driver_pkg }}
+      is not compiled into this build of pear, so blob.OpenBucket() fails at
+      startup with "no driver registered for {{ habitat_blob_scheme }}".
+      Drivers actually linked: {{ habitat_blob_drivers.stdout_lines | default([]) | join(', ') | default('none', true) }}.
+      Pick one of those. If s3blob is now among them, set
+      habitat_blob_use_garage: true to put blobs on Garage. If only memblob is,
+      upstream's own default (mem://) is the sole option and blobs will NOT
+      survive a restart, acceptable only for a throwaway evaluation, and worth
+      raising with them.
+    success_msg: >-
+      Blob driver OK, linked:
+      {{ habitat_blob_drivers.stdout_lines | default([]) | join(', ') | default('none', true) }}
+  when: (habitat_clone is changed) or (not habitat_bin_stat.stat.exists)
+
+# --- Mint the space signing key ---------------------------------------------------
+# pear marks --space_signing_key Required with no default and no auto-generation,
+# and nothing upstream mints one: cmd/keygen emits the base64 shape used by the
+# three OAuth/PDS secrets, cmd/didgen emits secp256k1 hex, and their own
+# docker-entrypoint.sh never sets it at all. pear parses it with
+# atcrypto.ParsePrivateMultibase, so the generator below uses that same library
+# at the version cmd/pear pins, compiled inside the tree for exactly that reason.
+#
+# Minted ON this CT (where Go is) and persisted BACK to the control node's secrets
+# dir, the same shape as the litellm-minted corliss provisioner key. It rides the
+# existing Tier-1 backup of /root/.zai-secrets from there.
+
+- name: Check whether the space signing key has already been minted
+  ansible.builtin.stat:
+    path: "{{ _zai_secrets_dir }}/habitat_space_signing_key"
+  delegate_to: localhost
+  register: habitat_space_key_stat
+
+- name: Create the space signing key generator directory
+  # copy does not reliably create intermediate directories for its dest.
+  ansible.builtin.file:
+    path: "{{ habitat_src }}/cmd/pear/spacekeygen"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: not habitat_space_key_stat.stat.exists
+
+- name: Install the space signing key generator into the source tree
+  # A subdirectory of cmd/pear, so it compiles against cmd/pear/go.mod and cannot
+  # resolve a different indigo than the server will parse with. A sibling package
+  # does not affect `go build .` in cmd/pear itself, and it is deleted below.
+  ansible.builtin.copy:
+    src: spacekeygen/main.go
+    dest: "{{ habitat_src }}/cmd/pear/spacekeygen/main.go"
+    owner: root
+    group: root
+    mode: "0644"
+  when: not habitat_space_key_stat.stat.exists
+
+- name: Generate the multibase P-256 space signing key
+  ansible.builtin.command:
+    cmd: "{{ habitat_go_root }}/bin/go run ."
+    chdir: "{{ habitat_src }}/cmd/pear/spacekeygen"
+  environment:
+    HOME: /root
+    PATH: "{{ habitat_go_root }}/bin:{{ ansible_env.PATH }}"
+  register: habitat_space_key_new
+  when: not habitat_space_key_stat.stat.exists
+  no_log: true
+
+- name: Persist the space signing key to the control node secrets dir
+  # DR-critical and immutable: this key signs permissioned-repo commits, so
+  # replacing it orphans everything already signed. Stored 0600 beside the other
+  # generate-once secrets rather than only on the service CT, so a rebuilt CT
+  # re-reads the same key instead of minting a second identity.
+  ansible.builtin.copy:
+    content: "{{ habitat_space_key_new.stdout }}"
+    dest: "{{ _zai_secrets_dir }}/habitat_space_signing_key"
+    owner: root
+    group: root
+    mode: "0600"
+  delegate_to: localhost
+  when: not habitat_space_key_stat.stat.exists
+  no_log: true
+
+- name: Load the space signing key
+  ansible.builtin.set_fact:
+    habitat_space_signing_key: >-
+      {{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/habitat_space_signing_key') | trim }}
+  no_log: true
+
+# --- Clean the build tree ---------------------------------------------------------
+
+- name: Remove build trees to reclaim disk space
+  # Several GB between them. The binaries are already installed; the src tree
+  # itself is kept so the `git describe` probe above keeps working.
+  #
+  # The root node_modules holds pnpm's virtual store (.pnpm), which is the bulk
+  # of the workspace install, the per-package node_modules dirs left behind are
+  # symlink farms and negligible. The pnpm content-addressed store and the Go
+  # build/module caches live outside the source tree and are the other three.
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ habitat_src }}/node_modules"
+    - "{{ habitat_src }}/cmd/pear/spacekeygen"
+    - /tmp/habitat-deps.txt
+    - /root/.local/share/pnpm/store
+    - /root/.cache/go-build
+    - /root/go/pkg/mod
+
+# --- Secret env + unit ------------------------------------------------------------
+
+- name: Render the habitat secret environment file
+  ansible.builtin.template:
+    src: habitat.env.j2
+    dest: "{{ habitat_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart habitat
+
+- name: Install the habitat systemd unit
+  ansible.builtin.template:
+    src: habitat.service.j2
+    dest: /etc/systemd/system/habitat.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart habitat
+
+- name: Ensure habitat is started and enabled
+  ansible.builtin.systemd:
+    name: habitat
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply pending habitat restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for habitat to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ habitat_port }}"
+    timeout: 90
+
+- name: Verify the habitat root endpoint responds
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ habitat_port }}/"
+    follow_redirects: none
+    status_code: [200, 302, 303]
+  register: habitat_health
+  until: habitat_health is succeeded
+  retries: 10
+  delay: 3

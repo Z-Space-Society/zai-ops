@@ -1,0 +1,36 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Habitat Organizational Data Server (pear)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ habitat_user }}
+Group={{ habitat_group }}
+EnvironmentFile={{ habitat_env_file }}
+WorkingDirectory={{ habitat_home }}
+ExecStart={{ habitat_bin }}
+# Restart=always rather than on-failure, same reasoning as the sync relay: a
+# clean exit for any reason other than SIGTERM, Postgres not yet reachable at
+# startup being the likely one, is still an outage, and pear re-runs its goose
+# migrations and re-reads all state on start, so recovery costs nothing.
+Restart=always
+RestartSec=5
+TimeoutStartSec=90
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# The blob directory is the only path the daemon writes to; everything else is
+# in Postgres. Narrower than happyview's ReadWritePaths on purpose: nothing needs
+# to be writable under /opt/habitat at runtime, since the binary and source tree
+# are root-owned build output.
+#
+# This line becomes unnecessary if blobs ever move to Garage
+# (habitat_blob_use_garage), at which point the service holds no local state at
+# all and can drop to the sync relay's posture of ProtectSystem=strict alone.
+ReadWritePaths={{ habitat_blob_dir }}
+
+[Install]
+WantedBy=multi-user.target

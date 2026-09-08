@@ -102,9 +102,12 @@ ansible-playbook provision.yml --limit proxy    # create + configure proxy
   one public hostname should point at a given proxy at a time (controlled at
   Cloudflare).
 - **Every other CT** (postgres, redis, happyview, litellm, sync-relay, corliss,
-  open-webui) lives only on the internal network and is reached through the
-  proxy — except [`sync-relay`](roles/sync_relay.md), which has no route at all
-  while it is in Phase A.
+  open-webui, habitat) lives only on the internal network and is reached through
+  the proxy — except [`sync-relay`](roles/sync_relay.md), which has no route at
+  all while it is in Phase A. [`habitat`](roles/habitat.md) is the opposite case
+  and worth not mistaking for the relay: it *needs* its public route, because
+  org DIDs are minted against its domain and PDS OAuth has to reach it from the
+  internet.
 - **CT 101** (object-store, Garage) is internal-only too — it's the restic
   backend the [`backup`](#backups) job writes to, not a user-facing service.
 - **Inference nodes** (salmon, orca, …) are **bare-metal**, *outside* the Proxmox
@@ -141,7 +144,7 @@ and the gaps leave room to grow a tier without renumbering:
 | Range       | Tier         | Examples                                   |
 | ----------- | ------------ | ------------------------------------------ |
 | `100`–`109` | Core infra   | control (100), object-store (101), postgres (102), [`redis`](roles/redis.md) (103) |
-| `110`–`119` | Platform     | proxy/edge (110), registry (111, the [`happyview`](roles/happyview.md) role), gateway (112), sync relay (113, the [`sync_relay`](roles/sync_relay.md) role) |
+| `110`–`119` | Platform     | proxy/edge (110), registry (111, the [`happyview`](roles/happyview.md) role), gateway (112), sync relay (113, the [`sync_relay`](roles/sync_relay.md) role), [`habitat`](roles/habitat.md) (evaluation) |
 | `120`–`129` | Applications | [`corliss`](roles/corliss.md) (120), open-webui (121), … other user-facing apps |
 
 What separates the last two tiers is **who talks to it**: platform CTs are
@@ -373,6 +376,7 @@ command. Only control-node operator commands belong in `bin/`.
 | [`open-webui`](roles/open-webui.md)        | `open-webui` | OpenWebUI chat UI (uv-managed Python 3.12 venv) — Postgres-backed, fronted by Caddy, talks to litellm for chat + RAG embeddings |
 | [`happyview`](roles/happyview.md)          | `happyview` | HappyView AT Protocol AppView platform (Rust binary, built from source) — Postgres-backed, fronted by Caddy |
 | [`sync_relay`](roles/sync_relay.md) | `sync-relay` | Automerge sync server (Rust binary, built from source) — the server end of the automerge-repo WebSocket protocol behind shared notes, Postgres-backed. **Deliberately has no Caddy route:** the Phase A build enforces no membership, so `vmbr1` is the entire access boundary. See [ADR-0007](decisions/0007-sync-relay-and-space-membership.md) |
+| [`habitat`](roles/habitat.md) | `habitat` | Habitat Organizational Data Server (the `pear` Go binary, built from source). Postgres-backed, fronted by Caddy. A **time-boxed evaluation instance, wired to nothing**: it holds no cluster members, no `corliss_*` var points at it, and it has no row on `/systems/`. Membership stays in the registry space and in Corliss. See [ADR-0008](decisions/0008-habitat-evaluation.md) before connecting anything to it |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
 
 ---
@@ -827,6 +831,21 @@ Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
   apex — so a wildcard-only Cloudflare Origin CA cert makes the bare domain
   answer **526** under Full (strict) while every subdomain keeps working. Issue
   the cert for `example.com, *.example.com`.
+
+Hard-won lessons about **upstream projects we build from source**:
+
+- **A Go program's advertised connection-string schemes are a property of the
+  build, not of its docs.** Pluggable-driver libraries (`gocloud.dev/blob`,
+  `database/sql`) register backends via *blank imports*, so a flag whose help
+  text lists `s3://`, `gs://` and `file://` supports only whichever drivers the
+  binary actually links. Habitat's `--blob_bucket` is the live example: it
+  advertises `s3://`, but `s3blob` is absent from its module graph, so an
+  `s3://` URL fails at startup with `no driver registered`, which reads like a
+  credentials or endpoint problem and is not. `go list -deps <pkg> | grep
+  <driver-path>` answers it offline and in one command, and the
+  [`habitat`](roles/habitat.md) role asserts on it at build time so the failure
+  lands in the play rather than in the journal. Check this before wiring any
+  such service to Garage or Postgres.
 
 Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
 

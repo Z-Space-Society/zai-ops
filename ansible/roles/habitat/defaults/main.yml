@@ -1,0 +1,131 @@
+---
+# Habitat (the `pear` binary), an Organizational Data Server on AT Protocol,
+# deployed as a TIME-BOXED EVALUATION. See docs/decisions/0008-habitat-evaluation.md.
+#
+# This instance is deliberately wired to nothing: no corliss vars point at it, no
+# relay reads it, and it holds no cluster members. It exists to answer questions
+# the vendor's email replies did not (durable scoped service credentials, whether
+# the delegable `manager` role is real, revocation timing) against a running
+# server we control. Membership stays where ADR-003 and ADR-006 put it.
+
+# Pinned upstream tag. Habitat publishes NO stable releases. The GitHub
+# releases list is empty and the only tags are pre-release `v0.0.2-testing-N`, so there is
+# no non-testing version to pin to. That is a property of the project today, not
+# an oversight here; bump deliberately and read their changelog first, because
+# breaking changes are explicitly promised in the README.
+#
+# Their own self-hosting guide tells you to fetch a compose file from
+# `releases/latest/download/`, which 404s for the same reason. Do not follow it.
+habitat_version: "v0.0.2-testing-12"
+
+habitat_repo_url: "https://github.com/habitat-network/habitat"
+
+# Port only. pear has NO bind-address flag: the listen host is not
+# configurable, and it serves on all interfaces. So unlike postgres, happyview
+# and the sync relay there is no literal-IP-vs-wildcard footgun to get wrong
+# here, and no habitat_host var to set: the cold-boot race those roles guard
+# against cannot be configured into existence.
+habitat_port: 8000
+
+habitat_user: habitat
+habitat_group: habitat
+habitat_home: /opt/habitat
+habitat_bin: /opt/habitat/bin/pear
+habitat_keygen_bin: /opt/habitat/bin/keygen
+habitat_src: /opt/habitat/src
+habitat_config_dir: /etc/habitat
+habitat_env_file: /etc/habitat/habitat.env
+
+habitat_db_name: habitat
+habitat_db_user: habitat
+# ParseDialect() in internal/db/db.go dispatches on the literal prefix "postgres",
+# so both postgres:// and postgresql:// select the GORM Postgres driver. Anything
+# else falls through to a "" dialect. The password is hex (see group_vars) so it
+# needs no percent-encoding here.
+habitat_database_url: "postgres://{{ habitat_db_user }}:{{ habitat_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ habitat_db_name }}"
+
+# Public origin. Habitat bakes this into identities: org DIDs are minted against
+# it and the OAuth server issues "https://"+domain as its issuer, so changing it
+# later orphans everything created under the old name. HABITAT_DOMAIN takes a
+# bare hostname with NO scheme; pear prepends https:// itself where it needs a
+# URL, which is why there is no habitat_public_url counterpart to happyview's
+# PUBLIC_URL. Must match the Caddy route domain in the proxy role.
+habitat_domain: "habitat.{{ cluster_domain }}"
+
+# --- Blob storage ------------------------------------------------------------
+# Local disk, not Garage. This is a finding, not a preference.
+#
+# `--blob_bucket` is documented as a gocloud.dev connection string accepting
+# `s3://`, and on that basis the S3 path looked like a solved problem. It is not:
+# cmd/pear/main.go calls blob.OpenBucket() but blank-imports NO gocloud blob
+# driver, and gocloud registers drivers only via those imports. Decisively,
+# `gocloud.dev/blob/s3blob` cannot compile without
+# github.com/aws/aws-sdk-go-v2/service/s3, and that module appears NOWHERE in
+# cmd/pear/go.mod, direct or indirect. So s3blob is not linked into this binary
+# and an `s3://` URL fails at runtime with "no driver registered", regardless of
+# what the flag help says.
+#
+# The role therefore asserts which drivers are actually linked at build time (see
+# tasks/main.yml) rather than letting this surface as a confusing runtime error.
+# If a future version links s3blob, point this at Garage and enable the bucket
+# tasks; the wiring is written and guarded, not missing.
+habitat_blob_dir: /var/lib/habitat/blobs
+
+# Garage-backed blobs, OFF until upstream links s3blob. Flipping this to true
+# enables the bucket/key provisioning tasks and repoints the bucket URL below;
+# the build-time assert is what stops it being turned on prematurely.
+habitat_blob_use_garage: false
+habitat_s3_bucket: "habitat-blobs"
+habitat_s3_key_name: "habitat"
+
+# Garage's S3 port and region are LOCAL defaults, deliberately duplicated rather
+# than read out of the object_store role: a role default is not a reliable host
+# fact from another play, the same reason corliss keeps its own
+# corliss_membership_registry_port. Both must match object_store's
+# garage_region / its S3 API port; keep them in sync by convention.
+habitat_s3_port: 3900
+habitat_s3_region: "garage"
+
+# The Garage query string is written from gocloud's s3blob URL options, but it is
+# UNVERIFIED against a running server for the reason above: s3blob isn't linked,
+# so there has been nothing to test it with. Treat the exact parameter spelling
+# (endpoint as host:port vs full URL, use_path_style vs s3ForcePathStyle) as
+# needing a check against the gocloud version in cmd/pear/go.mod on the day this
+# is switched on. A wrong endpoint does not error clearly; it tries real AWS.
+# Credentials travel via the standard AWS env vars in the env template, since
+# s3blob resolves them through the AWS default credential chain.
+#
+# Jinja's conditional expression is lazy, so hostvars['object-store'] is only
+# dereferenced when the flag is true, so this stays resolvable on a cluster
+# that has no object store assigned.
+habitat_blob_bucket: >-
+  {{
+    ('s3://' ~ habitat_s3_bucket
+     ~ '?region=' ~ habitat_s3_region
+     ~ '&endpoint=' ~ hostvars['object-store'].ansible_host ~ ':' ~ habitat_s3_port
+     ~ '&disable_https=true&use_path_style=true')
+    if habitat_blob_use_garage | bool
+    else ('file://' ~ habitat_blob_dir)
+  }}
+
+# --- Build toolchain ---------------------------------------------------------
+# Versions mirror build/debian/pear/Dockerfile, which is the authoritative recipe
+# upstream actually ships. Note it uses node:22-slim and pnpm 11.5.1 even though
+# .prototools pins node 26.7.0 / pnpm 11.25.0. The Dockerfile wins here because
+# it is the combination they build and publish with, and Node 22 is already the
+# version the happyview role installs on its CT.
+habitat_node_major: 22
+habitat_pnpm_version: "11.5.1"
+
+# Go toolchain. cmd/pear/go.mod declares `go 1.26.3` but the Dockerfile builds
+# with golang:1.27-bookworm, and Debian 13 ships older than either, so the
+# toolchain is fetched as a pinned, checksummed tarball, same posture as the
+# Garage binary and uv. Bump the version and the checksum together; the published
+# checksum is at https://go.dev/dl/ beside the tarball.
+habitat_go_version: "1.27.1"
+habitat_go_tarball: "go{{ habitat_go_version }}.linux-amd64.tar.gz"
+habitat_go_url: "https://go.dev/dl/{{ habitat_go_tarball }}"
+# get_url fails the run on a mismatch. Recompute after a bump from
+# https://go.dev/dl/?mode=json (the `sha256` field beside the tarball).
+habitat_go_sha256: "63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445"
+habitat_go_root: /usr/local/go

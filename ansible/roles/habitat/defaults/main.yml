@@ -49,7 +49,14 @@ habitat_db_user: habitat
 # so both postgres:// and postgresql:// select the GORM Postgres driver. Anything
 # else falls through to a "" dialect. The password is hex (see group_vars) so it
 # needs no percent-encoding here.
-habitat_database_url: "postgres://{{ habitat_db_user }}:{{ habitat_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ habitat_db_name }}"
+#
+# client_encoding=UTF8 is explicit belt-and-braces. pgx passes unrecognised URL
+# parameters through as startup parameters, and it refuses simple-protocol
+# queries unless the connection reports UTF8. The database is created UTF8 (see
+# tasks/main.yml), so this is normally redundant, but it also covers a
+# client_encoding set cluster-wide in postgresql.conf, which the database's own
+# encoding would not override.
+habitat_database_url: "postgres://{{ habitat_db_user }}:{{ habitat_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ habitat_db_name }}?client_encoding=UTF8"
 
 # Public origin. Habitat bakes this into identities: org DIDs are minted against
 # it and the OAuth server issues "https://"+domain as its issuer, so changing it

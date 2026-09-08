@@ -67,13 +67,62 @@
   # calls goose.Up when migrations are supplied, and cmd/pear blank-imports
   # cmd/pear/migrations), so the role owning the database is what lets it create
   # its own schema. Same reason the sync relay owns its database.
+  #
+  # ENCODING 'UTF8' is load-bearing and unique to this role. pear talks to
+  # Postgres through GORM's pgx driver in simple-protocol mode, and pgx REFUSES
+  # to run a simple-protocol query unless the connection reports
+  # client_encoding=UTF8, failing with:
+  #
+  #   simple protocol queries must be run with client_encoding=UTF8
+  #
+  # The postgres role never sets a locale, and bootstrap.sh fixes the locale only
+  # on the control node, so initdb on the postgres CT runs under C/POSIX and the
+  # cluster comes up SQL_ASCII. A plain CREATE DATABASE inherits that from
+  # template1, which is why every other service here works (sqlx, psycopg and
+  # gorm's lib/pq do not enforce this) while pear crash-loops on startup.
+  #
+  # TEMPLATE template0 is required to override the encoding at all: template1
+  # carries the cluster's own encoding and CREATE DATABASE refuses to change it.
+  # The locale is inherited from template0, which is compatible because C/POSIX
+  # accepts any encoding. On a cluster that was initdb'd UTF8 this is a no-op.
   ansible.builtin.command:
     cmd: >-
       su - postgres -c
       "psql -v ON_ERROR_STOP=1 -c \"CREATE DATABASE {{ habitat_db_name }}
-      OWNER {{ habitat_db_user }}\""
+      OWNER {{ habitat_db_user }} ENCODING 'UTF8' TEMPLATE template0\""
   delegate_to: postgres
   when: habitat_db_check.stdout | trim != "1"
+
+- name: Check the habitat database encoding
+  ansible.builtin.command:
+    cmd: >-
+      su - postgres -c
+      "psql -tAc \"SELECT pg_encoding_to_char(encoding) FROM pg_database
+      WHERE datname = '{{ habitat_db_name }}'\""
+  delegate_to: postgres
+  register: habitat_db_encoding
+  changed_when: false
+
+- name: Assert the habitat database is UTF8
+  # Catches a database created before the ENCODING clause above existed, or one
+  # created by hand. Deliberately an assert rather than a silent recreate: this
+  # role does not get to DROP DATABASE on its own. pear would otherwise start,
+  # migrate, and then crash-loop on the first instance_settings query, which is
+  # a much worse place to learn about it.
+  ansible.builtin.assert:
+    that:
+      - habitat_db_encoding.stdout | trim == "UTF8"
+    fail_msg: >-
+      The {{ habitat_db_name }} database is
+      {{ habitat_db_encoding.stdout | trim | default('missing', true) }}, not UTF8,
+      so pear will crash-loop with "simple protocol queries must be run with
+      client_encoding=UTF8". The cluster itself is probably SQL_ASCII, because
+      the postgres role sets no locale. This database holds nothing but goose
+      migrations, so recreate it on the postgres CT:
+      su - postgres -c "psql -c 'DROP DATABASE {{ habitat_db_name }}'"
+      then re-run this play. Fixing the whole cluster's encoding is a separate,
+      bigger job (initdb) that would affect every other service.
+    success_msg: "{{ habitat_db_name }} database encoding is UTF8."
 
 # --- Blob storage backend ---------------------------------------------------------
 # Blobs go to Garage over S3 by default, which is what the SCN spec asks for.

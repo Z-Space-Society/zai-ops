@@ -88,3 +88,27 @@ ssh root@10.1.1.<ctid> "su - postgres -c \"psql -c 'SELECT version()'\""
 - For how the CT is assigned a CTID, created and reached, see
   [`provision.yml`](../../ansible/provision.yml) and the
   [main docs](../README.md#service-ctid-assignment).
+
+> [!warning] The cluster encoding is SQL_ASCII, and this role does not set it
+> This role sets no locale and does not pass `--encoding` to `initdb`, and
+> `bootstrap.sh` fixes the locale only on the control node. So on a fresh
+> postgres CT `initdb` runs under C/POSIX and the cluster is created
+> **SQL_ASCII**, which every plain `CREATE DATABASE` then inherits from
+> `template1`.
+>
+> That has been invisible so far because sqlx, psycopg and `lib/pq` do not care.
+> **pgx does**: it refuses simple-protocol queries unless the connection reports
+> `client_encoding=UTF8`. [`habitat`](habitat.md) is the first pgx client here
+> and crash-looped on it, so that role creates its own database with
+> `ENCODING 'UTF8' TEMPLATE template0` and asserts the result.
+>
+> Check the current state:
+>
+> ```sh
+> su - postgres -c "psql -tAc \"SELECT datname, pg_encoding_to_char(encoding) FROM pg_database\""
+> ```
+>
+> Making the *cluster* UTF8 means a fresh `initdb`, which means every service's
+> data, so it is a deliberate migration rather than a config tweak. Until then,
+> any new service whose driver enforces UTF8 must create its database with an
+> explicit `ENCODING` clause and `TEMPLATE template0`.

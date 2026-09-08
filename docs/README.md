@@ -832,6 +832,23 @@ Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
   answer **526** under Full (strict) while every subdomain keeps working. Issue
   the cert for `example.com, *.example.com`.
 
+Hard-won lessons about **Postgres on this cluster**:
+
+- **The cluster is almost certainly SQL_ASCII, and one driver family cares.** The
+  [`postgres`](roles/postgres.md) role sets no locale and `bootstrap.sh` fixes the
+  locale only on CT 100, so `initdb` on the postgres CT runs under C/POSIX and the
+  cluster is created `SQL_ASCII`; a plain `CREATE DATABASE` inherits it from
+  `template1`. sqlx, psycopg and `lib/pq` do not care, which is why litellm,
+  open-webui, corliss, happyview and the sync relay have never noticed. **pgx
+  does**: it refuses simple-protocol queries unless the connection reports
+  `client_encoding=UTF8`, and [`habitat`](roles/habitat.md) hit exactly that. Any
+  new pgx-based service must create its database with
+  `ENCODING 'UTF8' TEMPLATE template0` (`template1` carries the cluster encoding
+  and cannot be overridden) and should assert the encoding rather than discover it
+  as a crash loop. Check with
+  `su - postgres -c "psql -tAc \"SELECT datname, pg_encoding_to_char(encoding) FROM pg_database\""`.
+  Re-`initdb`ing the cluster as UTF8 is the real fix and is an all-services job.
+
 Hard-won lessons about **upstream projects we build from source**:
 
 - **In a Go workspace, a submodule's `go.mod` does not tell you what the binary

@@ -48,7 +48,8 @@ build is more than a `cargo build --release`. The runtime footprint is light.
 | Task | Module | Why |
 | ---- | ------ | --- |
 | Probe + create the `habitat` PG role | `command`/`shell` → `su - postgres -c psql`, `delegate_to: postgres` | Postgres superuser is **peer-only** on that CT; DB setup must be delegated there. Probe `pg_roles` → `CREATE ROLE` (else `ALTER ROLE` to sync the password). Password via `$HABITAT_DB_PW` (`no_log`) so it reaches neither argv nor the Ansible log. |
-| Probe + create the `habitat` database | `command` → `su - postgres -c psql`, `delegate_to: postgres` | Probe `pg_database`, then `CREATE DATABASE OWNER habitat`. The **schema** is not created here: `pear` runs goose migrations on every startup, which is why the role must own the database. |
+| Probe + create the `habitat` database | `command` → `su - postgres -c psql`, `delegate_to: postgres` | Probe `pg_database`, then `CREATE DATABASE OWNER habitat ENCODING 'UTF8' TEMPLATE template0`. The **schema** is not created here: `pear` runs goose migrations on every startup, which is why the role must own the database. The encoding clause is load-bearing, see the UTF8 note below. |
+| Assert the database is UTF8 | `command`, `assert` | Catches a database created before the encoding clause existed. Fails the play rather than letting `pear` migrate and then crash-loop. |
 | Garage key + bucket | `command`, `delegate_to: object-store` | Import the access key, create the bucket, grant read/write. Each guarded by its own `grep -q` on the live `garage` listing. Deliberately *not* added to the object_store role's `garage-init.sh`, which is sentinel-guarded and will not re-run. Skipped if `habitat_blob_use_garage` is `false`. |
 | Create `habitat` group + user | `group`, `user` | Run the daemon unprivileged, no login shell. |
 | Create home, config + blob dirs | `ansible.builtin.file` | `/opt/habitat` + `/opt/habitat/bin` (root-owned), `/etc/habitat` (root-owned `0750`), `/var/lib/habitat/blobs` (**habitat-owned**, the only path the daemon writes). |
@@ -280,6 +281,35 @@ scn-member-registry deploy:
 > `git rev-parse HEAD` instead. And `depth: 1` is unreliable when `version` is
 > a bare SHA rather than a branch or tag tip, so drop it or fetch the branch
 > and reset.
+
+> [!danger] The database must be UTF8, and the cluster probably is not
+> `pear` reaches Postgres through GORM's **pgx** driver in simple-protocol mode,
+> and pgx refuses to run a simple-protocol query unless the connection reports
+> `client_encoding=UTF8`:
+>
+> ```
+> simple protocol queries must be run with client_encoding=UTF8
+> ```
+>
+> The failure mode is nasty: goose migrations run fine, so the connection is
+> obviously working, and then the first `instance_settings` query kills the
+> process. With `Restart=always` that becomes a crash loop, and the play fails
+> much later at "Wait for habitat to accept connections" with a timeout that
+> says nothing about encoding.
+>
+> The cause is cluster-wide, not habitat's. The [`postgres`](postgres.md) role
+> sets no locale, and `bootstrap.sh` fixes the locale only on the control node,
+> so `initdb` on the postgres CT runs under C/POSIX and the cluster comes up
+> **SQL_ASCII**. A plain `CREATE DATABASE` inherits that from `template1`. Every
+> other service here is unaffected because sqlx, psycopg and `lib/pq` do not
+> enforce it; habitat is simply the first pgx client in the stack.
+>
+> So this role creates its database with `ENCODING 'UTF8' TEMPLATE template0`
+> (`template0` is required: `template1` carries the cluster encoding and
+> `CREATE DATABASE` will not override it), asserts the encoding on every run,
+> and sets `client_encoding=UTF8` in the DSN as well. Fixing the *cluster*
+> encoding is a separate and much larger job, because it means a fresh `initdb`
+> and therefore every service's data.
 
 > [!warning] A leftover shallow clone breaks a re-pin, and the error does not say so
 > `depth: 1` was dropped when the pin moved from a tag to a commit SHA, but that

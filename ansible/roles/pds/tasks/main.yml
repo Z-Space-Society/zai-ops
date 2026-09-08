@@ -1,0 +1,190 @@
+---
+# Provision the in-house PDS (atproto-pds) natively under systemd.
+# Build-from-source like happyview: install the Rust toolchain, clone the
+# atproto-crates workspace at the pinned revision, cargo build the two
+# binaries, then clean the build tree (~6 GB) — a cold first run is 15–30 min.
+#
+# The PDS is SQLite-only with no Postgres / no other service dependency, so
+# unlike happyview/sync-relay this role has no delegated provisioning tasks on
+# the postgres CT. Ordering in provision.yml is cosmetic.
+
+# --- Service account + directories -----------------------------------------
+- name: Create the pds system group
+  ansible.builtin.group:
+    name: "{{ pds_group }}"
+    system: true
+
+- name: Create the pds system user
+  ansible.builtin.user:
+    name: "{{ pds_user }}"
+    group: "{{ pds_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ pds_home }}"
+    create_home: false
+
+- name: Create the pds home, bin, config and data directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    # home/bin: root-owned, holds the installed binaries.
+    # config dir: root-only (the env file is 0600 and only systemd reads it).
+    # data dir: OWNED BY THE DAEMON — unlike happyview (state in Postgres),
+    # the PDS writes accounts.sqlite + per-actor repos + blobs here at runtime.
+    - { path: "{{ pds_home }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ pds_bin_dir }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ pds_config_dir }}", owner: root, group: root, mode: "0750" }
+    - { path: "{{ pds_data_dir }}", owner: "{{ pds_user }}", group: "{{ pds_group }}", mode: "0750" }
+
+# --- Build dependencies ------------------------------------------------------
+- name: Install system build dependencies
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - ca-certificates
+      - curl
+      - git
+      - libssl-dev
+      - pkg-config
+    state: present
+    update_cache: true
+
+# Rust toolchain via rustup — minimal profile to keep install lean (no
+# rust-docs, rust-src, etc.). Installed under /root/.cargo; the build runs as
+# root. Same idiom as the happyview role.
+- name: Check whether the Rust toolchain is installed
+  ansible.builtin.command: rustc --version
+  register: pds_rust_installed
+  changed_when: false
+  failed_when: false
+  environment:
+    PATH: "/root/.cargo/bin:{{ ansible_env.PATH }}"
+
+- name: Install the Rust toolchain via rustup
+  ansible.builtin.shell:
+    cmd: >-
+      curl -fsSL https://sh.rustup.rs |
+      sh -s -- -y --profile minimal --default-toolchain {{ pds_rust_channel }}
+    creates: /root/.cargo/bin/rustc
+  when: pds_rust_installed.rc != 0
+
+# --- Clone + build ------------------------------------------------------------
+- name: Clone the atproto-crates workspace at the pinned revision
+  ansible.builtin.git:
+    repo: "{{ pds_repo_url }}"
+    dest: "{{ pds_src }}"
+    version: "{{ pds_revision }}"
+    force: true
+  register: pds_clone
+  # Bump pds_revision (defaults/main.yml) to upgrade: the clone's `changed`
+  # flag is the rebuild trigger below (same idiom as happyview). Full clone,
+  # no `depth:` — keeps a local head we can diff against the pin and inspect.
+
+- name: Check whether a pds binary is already installed
+  ansible.builtin.stat:
+    path: "{{ pds_bin }}"
+  register: pds_bin_stat
+
+- name: Build the pds binaries from source (cargo build --release)
+  # Build when: the clone just updated to a new revision, OR the binary isn't
+  # installed yet (first run). Skipped otherwise — no `creates:` guard so the
+  # deleted target/ dir below doesn't trick an idempotent re-run into
+  # rebuilding. Defaults stay ON: sqlite storage + the four features from
+  # defaults/main.yml; the rest of the workspace is a no-op to `--bin pds`.
+  ansible.builtin.command:
+    cmd: >-
+      /root/.cargo/bin/cargo build --release
+      --features {{ pds_build_features }}
+      --bin pds --bin atproto-pds-admin
+    chdir: "{{ pds_src }}"
+  environment:
+    PATH: "/usr/local/bin:/root/.cargo/bin:{{ ansible_env.PATH }}"
+    HOME: /root
+  when: (pds_clone is changed) or (not pds_bin_stat.stat.exists)
+  notify: restart pds
+
+- name: Install the built binaries
+  ansible.builtin.copy:
+    src: "{{ pds_src }}/target/release/{{ item.src }}"
+    dest: "{{ pds_bin_dir }}/{{ item.dest }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - { src: pds, dest: pds }
+    - { src: atproto-pds-admin, dest: atproto-pds-admin }
+  when: (pds_clone is changed) or (not pds_bin_stat.stat.exists)
+  notify: restart pds
+
+- name: Remove the Cargo build tree to reclaim disk space
+  # target/ holds all intermediate objects + deps (~6 GB). The binaries are
+  # already installed; keeping this would waste most of the CT's rootfs. The
+  # src tree (without target/) is kept for reference and revision checks.
+  ansible.builtin.file:
+    path: "{{ pds_src }}/target"
+    state: absent
+
+# --- Secret env + unit --------------------------------------------------------
+- name: Render the pds secret environment file
+  ansible.builtin.template:
+    src: pds.env.j2
+    dest: "{{ pds_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart pds
+
+- name: Install the pds systemd unit
+  ansible.builtin.template:
+    src: pds.service.j2
+    dest: /etc/systemd/system/pds.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart pds
+
+- name: Ensure pds is started and enabled
+  ansible.builtin.systemd:
+    name: pds
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply pending pds restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+
+# --- Smoke tests ---------------------------------------------------------------
+# Liveness — /_alive proves the process is serving (the reference-PDS shape).
+- name: Wait for pds to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ pds_port }}"
+    timeout: 90
+
+- name: Verify pds liveness endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ pds_port }}/_alive"
+    status_code: [200, 204]
+  register: pds_alive
+  until: pds_alive is succeeded
+  retries: 10
+  delay: 3
+
+# Readiness — /xrpc/_health opens the accounts database, so it proves storage
+# works, not just that the port is open (the postgres role's pg_isready shape).
+- name: Verify pds readiness endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ pds_port }}/xrpc/_health"
+    status_code: 200
+  register: pds_ready
+  until: pds_ready is succeeded
+  retries: 10
+  delay: 3

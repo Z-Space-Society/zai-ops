@@ -1,0 +1,94 @@
+---
+# Record who may administer the in-house PDS — the delegated-admin DIDs
+# (PDS_ADMIN_DIDS): each may sign a service-auth token with the #atproto key of
+# their own DID document and drive the com.atproto.admin.* surface.
+#
+#   ansible-playbook set-pds-admin.yml -e "did=did:plc:abc2…"
+#
+# (`zai-set-pds-admin <did>`, the operator command in bin/, is sugar over this —
+# no logic lives in the wrapper.)
+#
+# Why a setter and not group_vars: admin DIDs are this-cluster IDENTITY — the
+# same category as cluster_domain, the CTID assignments and the registry's own
+# identity — public information, definitely not secrets, so they go in the
+# git-ignored runtime inventory (inventory/local.yml, backed up like the vault,
+# never committed) and the committed tree stays generic (ADR-0001). Same
+# reasoning as set-registry.yml.
+#
+# Replaces the whole list: `zai-set-pds-admin did:plc:a` makes that DID the ONLY
+# admin. Pass comma-separated DIDs to set several at once.
+#
+# Read-modify-write the WHOLE structure and re-dump (never line-append): that
+# preserves cluster_domain, every service's CTID assignment AND the
+# inference-node roster that share this file, instead of corrupting it.
+
+- name: Record the in-house PDS's delegated-administrator DIDs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    runtime_inventory: "{{ playbook_dir }}/inventory/local.yml"
+    # DID syntax: `did:plc:` + 24 chars of lowercase base32 (no 0/1/8/9).
+    # `is match` anchors at the start, so the trailing '$' pins the end too.
+    plc_regex: '^did:plc:[a-z2-7]{24}$'
+  tasks:
+    - name: Require a DID
+      ansible.builtin.assert:
+        that:
+          - did is defined and (did | string | length) > 0
+        fail_msg: >-
+          Pass a did:plc, e.g. -e "did=did:plc:abc2…"
+
+    - name: Validate each DID's format
+      ansible.builtin.assert:
+        that: item is match(plc_regex)
+        fail_msg: >-
+          '{{ item }}' is not a valid did:plc — expected did:plc:<24 lowercase
+          base32 chars>.
+      loop: "{{ did.split(',') }}"
+
+    # errors='ignore' → empty string when the file doesn't exist yet; 'or {}'
+    # turns that (and an empty/whitespace file) into an empty mapping to merge into.
+    - name: Load the existing runtime inventory (empty if absent)
+      ansible.builtin.set_fact:
+        runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
+
+    - name: Resolve the DID list
+      ansible.builtin.set_fact:
+        pds_admin_dids: "{{ did.split(',') }}"
+
+    # Idempotent no-op: setting the list that's already recorded exits 0 cleanly.
+    - name: Detect an unchanged (no-op) list
+      ansible.builtin.set_fact:
+        is_noop: >-
+          {{ (runtime_data.get('all', {}).get('vars', {}).get('pds_admin_dids') | default(none))
+             == pds_admin_dids }}
+
+    - name: Report the no-op and finish
+      ansible.builtin.debug:
+        msg: "pds_admin_dids is already set to that list — nothing to do."
+      when: is_noop | bool
+
+    # Read-modify-write: merge ONLY this one variable into the whole structure,
+    # recursively, so the domain, every CTID assignment and the inference-node
+    # roster survive.
+    - name: Merge the list into the runtime structure
+      ansible.builtin.set_fact:
+        merged_inventory: >-
+          {{
+            runtime_data
+            | combine({'all': {'vars': {'pds_admin_dids': pds_admin_dids}}}, recursive=True)
+          }}
+      when: not (is_noop | bool)
+
+    - name: Write the runtime inventory
+      ansible.builtin.copy:
+        dest: "{{ runtime_inventory }}"
+        content: "{{ merged_inventory | to_nice_yaml(indent=2) }}"
+        mode: "0644"
+      when: not (is_noop | bool)
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: "pds_admin_dids recorded in {{ runtime_inventory }}."
+      when: not (is_noop | bool)

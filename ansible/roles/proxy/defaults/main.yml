@@ -55,3 +55,46 @@ caddy_proxy_hosts:
   # this is the one route a wildcard-only origin cert does NOT cover — the
   # cert must carry the apex as a SAN too.
   - { domain: "{{ cluster_domain }}", service: corliss, port: 8000 }
+
+# --- Caddy package source and version ---------------------------------------
+# Caddy comes from Debian BACKPORTS, not the base suite, and it is version-pinned
+# like every other third-party binary here (Garage by URL + SHA-256, uv by
+# tarball + checksum, corliss by git tag).
+#
+# Why backports: Debian 13 ships caddy 2.6.2-12, the same upstream version as
+# Debian 12, and several Caddyfile options this cluster needs landed in 2.7 or
+# later. `trusted_proxies` is the immediate one, and on 2.6.2 it is not merely
+# ignored but a hard config error:
+#
+#   Error: adapting config using caddyfile: parsing caddyfile tokens for
+#   'servers': unrecognized servers option 'trusted_proxies'
+#
+# Backports carries 2.11.2 and is still Debian-built and Debian-signed, so it
+# needs no third-party apt key and none of the signing-key friction that the
+# original "Debian's own package" choice was made to avoid. Caddy's official
+# Cloudsmith repo was the alternative and was rejected for this reason: it would
+# add a new trust root to get a capability backports already provides.
+#
+# The suite derives from the CT's own release so the blueprint stays generic.
+# The version string does not, and cannot: `~bpo13` names Debian 13. A base
+# image change means re-pinning here, which fails loudly at apt rather than
+# silently installing something else.
+caddy_backports_suite: "{{ ansible_distribution_release }}-backports"
+caddy_apt_version: "2.11.2-1~bpo13+1"
+
+# Addresses whose X-Forwarded-* headers Caddy should TRUST rather than overwrite.
+# Empty by default, which renders no `servers` block at all, so a cluster where
+# this Caddy is the outermost proxy behaves exactly as it did before this option
+# existed. Leave it empty there: trusting an untrusted hop lets a client forge
+# X-Forwarded-Proto.
+#
+# Set it only when something else terminates TLS in front of the proxy CT. Caddy
+# otherwise rewrites X-Forwarded-Proto to its own connection scheme, which is
+# `http` behind an external edge, so apps building absolute URLs emit http://
+# links for a client that arrived over https. That breaks Django redirects and
+# OIDC callbacks.
+#
+# A list of addresses or CIDRs, e.g. ["10.0.1.5"] for a single upstream edge, or
+# a LAN subnet. It cannot be derived from the inventory, because the edge is
+# outside the cluster by definition.
+caddy_trusted_proxies: []

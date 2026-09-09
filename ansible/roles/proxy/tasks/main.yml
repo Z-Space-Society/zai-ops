@@ -15,12 +15,68 @@
       run: zai-set-domain <domain>
   when: caddy_proxy_hosts | length > 0
 
-# Debian's own package — no third-party apt repo, so none of the signing-key /
-# sqv friction third-party repos need on Debian 13. Ships the `caddy` user,
-# /etc/caddy/, /var/lib/caddy and caddy.service.
-- name: Install Caddy
+# Caddy from Debian BACKPORTS, version-pinned. Still Debian-built and
+# Debian-signed, so this keeps the original "no third-party apt key" property
+# while getting past the 2.6.2 the base suite ships. See defaults/main.yml for
+# why that version floor matters. Ships the `caddy` user, /etc/caddy/,
+# /var/lib/caddy and caddy.service, exactly as the base-suite package does, so
+# nothing else in this role changes.
+#
+# deb822_repository needs python3-debian on the target; it is not installed on a
+# fresh Debian 13 CT.
+- name: Ensure python3-debian is present for deb822 repository management
   ansible.builtin.apt:
-    name: caddy
+    name: python3-debian
+    state: present
+    update_cache: true
+
+- name: Add the Debian backports suite
+  # Signed by the distro's own archive keyring, already on the box. Backports
+  # is NotAutomatic, so adding it alone changes nothing about any other package;
+  # the pin below is what makes it the source for caddy specifically.
+  ansible.builtin.deb822_repository:
+    name: debian-backports
+    types: [deb]
+    uris: http://deb.debian.org/debian
+    suites: ["{{ caddy_backports_suite }}"]
+    components: [main]
+    signed_by: /usr/share/keyrings/debian-archive-keyring.gpg
+    enabled: true
+    state: present
+  register: caddy_backports_repo
+
+- name: Pin caddy to the backports suite
+  # Scoped to caddy by name on purpose. Without a pin, backports' NotAutomatic
+  # priority (100) loses to the base suite (500) and the version below would be
+  # uninstallable; with a broad pin, backports would start supplying unrelated
+  # packages on this CT.
+  ansible.builtin.copy:
+    dest: /etc/apt/preferences.d/caddy-backports.pref
+    content: |
+      # {{ ansible_managed }}
+      Package: caddy
+      Pin: release n={{ caddy_backports_suite }}
+      Pin-Priority: 990
+    owner: root
+    group: root
+    mode: "0644"
+  register: caddy_backports_pin
+
+- name: Refresh the apt cache after a repository or pin change
+  ansible.builtin.apt:
+    update_cache: true
+  when: caddy_backports_repo is changed or caddy_backports_pin is changed
+
+- name: Install Caddy
+  # Pinned exactly, so an upgrade is a reviewable commit here rather than
+  # whatever the archive happens to hold on the day of a replay. Note this
+  # UPGRADES an existing 2.6.2 install and therefore restarts Caddy: on the
+  # LAN-facing edge that is a brief outage of every public route. The Caddyfile
+  # is validated with the new binary before it is deployed (the template task's
+  # validate:) and again afterwards, so a syntax incompatibility fails the play
+  # instead of leaving the edge down.
+  ansible.builtin.apt:
+    name: "caddy={{ caddy_apt_version }}"
     state: present
     update_cache: true
 

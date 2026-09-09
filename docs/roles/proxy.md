@@ -35,7 +35,8 @@ built and smoke-tested first; add the cert/key to the vault and re-run to flip o
 
 | Task | Module | Why |
 | ---- | ------ | --- |
-| Install Caddy | `apt` (`state: present`) | One package; pulls the `caddy` user, `/etc/caddy/`, `/var/lib/caddy`, and `caddy.service`. No third-party repo → no signing-key/sqv friction. |
+| Add backports + pin caddy | `apt` (`python3-debian`), `deb822_repository`, `copy` (apt preferences) | Debian 13's base suite ships caddy **2.6.2**; several options this cluster needs landed in 2.7+. Backports carries 2.11.2 and is still Debian-signed, so no third-party key. The pin is scoped to `caddy` by name so backports supplies nothing else. |
+| Install Caddy | `apt` (`caddy={{ caddy_apt_version }}`) | Version-pinned, like Garage and uv. Pulls the `caddy` user, `/etc/caddy/`, `/var/lib/caddy`, and `caddy.service`. **This upgrades an existing 2.6.2 install and restarts Caddy**, which is a brief outage of every public route on the LAN-facing edge. |
 | Install Origin CA cert + key | `copy` (`content:`, `no_log`) | Cloudflare Origin CA material from the vault. Key `0600` owned by `caddy`; cert world-readable. Done before the Caddyfile so the `tls` files exist at validate time. |
 | Deploy the Caddyfile | `template` (`validate: caddy validate`) | Renders `caddy_proxy_hosts`. `validate` is the `nginx -t` analog — a bad config fails the task instead of deploying. |
 | Start + enable `caddy` | `systemd` | Running now + on boot. |
@@ -56,6 +57,9 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 | `caddy_cert_path` | `/etc/caddy/cloudflare-origin.pem` | Where the Origin CA cert lands; the `tls` directive points here. |
 | `caddy_key_path` | `/etc/caddy/cloudflare-origin.key` | Where the Origin CA private key lands (`0600`, owned by `caddy`). |
 | `caddy_tls_enabled` | `{{ cloudflare_origin_cert is defined }}` | Auto: serve HTTPS when the Origin CA cert is in the vault, else HTTP-only. Override to force either way. |
+| `caddy_backports_suite` | `{{ ansible_distribution_release }}-backports` | Derived from the CT's own release, so the blueprint stays generic. |
+| `caddy_apt_version` | `2.11.2-1~bpo13+1` | Exact apt version pin. **Not** generic: `~bpo13` names Debian 13, so a base-image change means re-pinning here. It fails loudly at apt rather than installing something else. |
+| `caddy_trusted_proxies` | `[]` | Addresses whose `X-Forwarded-*` headers Caddy trusts instead of overwriting. Empty renders no `servers` block at all, so a cluster where this Caddy is the outermost proxy is unaffected. See [Notes](#notes). |
 | `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code, skip_if_cookie }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). `skip_if_cookie` names a cookie whose presence lets the request fall through to the real app instead of redirecting — see [Notes](#notes) below, it's load-bearing for open-webui, not optional. |
 
 The committed default carries one live route, with the **domain derived from
@@ -102,6 +106,34 @@ curl -kH 'Host: chat.example.com' https://10.1.1.<ctid>/
 ```
 
 ## Notes
+
+- **`caddy_trusted_proxies` is only for clusters behind another proxy.** Caddy
+  sets `X-Forwarded-*` from the connection it received and, by default, ignores
+  what the client sent. That is correct for a directly-exposed edge: it stops a
+  client forging `X-Forwarded-Proto: https`. It is wrong when a legitimate proxy
+  sits in front, because that proxy's headers are the truthful ones and get
+  overwritten with this connection's scheme, which is `http`. Apps then build
+  `http://` absolute URLs for a client that arrived over HTTPS, breaking Django
+  redirects and OIDC callbacks.
+
+  The motivating topology is the home lab: a Caddy on a NAS holds the only public
+  443, terminates TLS, and reverse-proxies plain HTTP over the LAN to the proxy
+  CT, which routes per service by Host header. Production at Z-Space does not need
+  it, because Cloudflare is the edge and this Caddy terminates the origin TLS
+  itself. **Leave it empty unless something else really is in front**, and list
+  only that edge's address.
+
+- **Caddy is pinned to a backports version, and the first replay upgrades it.**
+  Going from 2.6.2 to 2.11.2 restarts Caddy on the only LAN-facing CT. The
+  Caddyfile is validated with the new binary before deployment and again after,
+  so an incompatibility fails the play rather than leaving the edge down, but the
+  restart itself is unavoidable. Do it deliberately rather than as a side effect
+  of an unrelated replay, and do it on a staging cluster first.
+
+  Caddy's official Cloudsmith repo was the alternative and was rejected: it would
+  add a third-party trust root to obtain a capability backports already provides.
+  If the goal ever becomes tracking upstream Caddy generally rather than clearing
+  a version floor, that trade changes.
 
 - **Empty `caddy_proxy_hosts` is safe** — the `:80` site (health probe + HTTPS
   redirect) keeps the Caddyfile valid before any upstream is assigned, mirroring

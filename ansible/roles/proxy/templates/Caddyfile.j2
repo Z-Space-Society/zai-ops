@@ -14,6 +14,22 @@
 
     # Default admin endpoint, localhost-only — `caddy reload` uses it. Not LAN-exposed.
     admin localhost:2019
+{% if caddy_trusted_proxies %}
+
+    # Preserve the X-Forwarded-* headers sent by a proxy in FRONT of this one,
+    # instead of overwriting them with this connection's own scheme. Needed when
+    # something else terminates TLS upstream: without it every app behind here
+    # sees X-Forwarded-Proto: http and builds http:// absolute URLs for a client
+    # that arrived over https, which breaks Django redirects and OIDC callbacks.
+    #
+    # Only these addresses are trusted. Overwriting is the correct default for a
+    # directly-exposed edge, because it stops a client forging the header.
+    #
+    # Requires Caddy >= 2.7; on 2.6.2 this is a hard config error, not a warning.
+    servers {
+        trusted_proxies static {{ caddy_trusted_proxies | join(' ') }}
+    }
+{% endif %}
 }
 
 {% if caddy_tls_enabled | bool %}

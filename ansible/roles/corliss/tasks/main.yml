@@ -5,6 +5,44 @@
 # Z-Space-Society/Corliss at the pinned corliss_version. Updating the app is a
 # tag bump in defaults/main.yml plus a replay of this role (ADR-0006).
 
+# --- Fail fast on the litellm ordering dependency ---------------------------
+# corliss_litellm_provisioner_key (defaults/main.yml) is a `file` lookup on a
+# secret the LITELLM role mints by calling litellm's live API. It cannot be
+# generated here, so corliss cannot be provisioned before litellm.
+#
+# Without this gate the run dies ~26 tasks in, at "Render the corliss secret
+# environment file", with:
+#
+#   The lookup plugin 'ansible.builtin.file' failed: Unable to access the file
+#   '/root/.zai-secrets/corliss_litellm_provisioner_key': File not found.
+#
+# That task carries no_log: true, so it hides its own context, and nothing in
+# the message names litellm. Checked here instead, before any work is done.
+#
+# stat runs on the control node because that is where the secrets dir lives and
+# where a `file` lookup would resolve, regardless of this play's target.
+- name: Check whether litellm has minted the corliss provisioner key
+  ansible.builtin.stat:
+    path: "{{ _zai_secrets_dir }}/corliss_litellm_provisioner_key"
+  delegate_to: localhost
+  register: corliss_provisioner_key_stat
+
+- name: Assert the litellm provisioner key exists
+  ansible.builtin.assert:
+    that:
+      - corliss_provisioner_key_stat.stat.exists
+    fail_msg: >-
+      {{ _zai_secrets_dir }}/corliss_litellm_provisioner_key does not exist, so
+      corliss cannot render its environment file. Only the litellm role can
+      create it: it mints a proxy_admin virtual key against litellm's live API
+      and persists it to the control node. Provision litellm first, then retry:
+      ansible-playbook provision.yml --limit litellm
+      This is a hard ordering dependency, which is why provision.yml runs the
+      litellm play before this one. If this cluster is deliberately not running
+      a gateway, corliss cannot currently be deployed without one; that is a
+      known gap rather than a misconfiguration.
+    success_msg: "litellm provisioner key is present."
+
 # --- Provision the corliss role + database on the postgres CT ---------------
 # Identical delegated `su - postgres -c psql` idiom to litellm/open-webui/
 # happyview — the postgres CT's superuser is reachable only via local peer auth

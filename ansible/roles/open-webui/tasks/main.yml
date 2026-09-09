@@ -11,6 +11,36 @@
 # Like litellm it is Postgres-backed and fronted by Caddy; it talks to the litellm CT
 # as its OpenAI-compatible backend for both chat and RAG embeddings.
 
+# --- Fail fast on the litellm ordering dependency ----------------------------------
+# openwebui_openai_api_key (defaults/main.yml) is a `file` lookup on a secret the
+# LITELLM role mints by calling litellm's live API, so it cannot be generated here.
+# Its own default already documents that "this play will fail here if litellm's play
+# has never successfully minted the key"; this turns that from a comment into a
+# check, so the run stops before doing any work instead of dying at the env-file
+# template with a lookup error that names no role.
+#
+# Same shape and same fix as the corliss role. stat runs on the control node because
+# that is where the secrets dir lives and where a `file` lookup would resolve.
+- name: Check whether litellm has minted the Open WebUI virtual key
+  ansible.builtin.stat:
+    path: "{{ _zai_secrets_dir }}/openwebui_litellm_key"
+  delegate_to: localhost
+  register: openwebui_litellm_key_stat
+
+- name: Assert the litellm virtual key exists
+  ansible.builtin.assert:
+    that:
+      - openwebui_litellm_key_stat.stat.exists
+    fail_msg: >-
+      {{ _zai_secrets_dir }}/openwebui_litellm_key does not exist, so Open WebUI
+      cannot render its environment file. Only the litellm role can create it: it
+      mints a scoped non-admin virtual key against litellm's live API and persists
+      it to the control node. Provision litellm first, then retry:
+      ansible-playbook provision.yml --limit litellm
+      Open WebUI has no model backend without the gateway, so this is a hard
+      dependency rather than an ordering preference.
+    success_msg: "litellm virtual key is present."
+
 # --- Provision the openwebui role + database on the postgres CT --------------------
 # Identical idiom to the litellm role: the postgres CT is a BARE server whose
 # superuser is reachable only via local peer auth (`su - postgres -c psql`) ON that

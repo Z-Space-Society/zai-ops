@@ -283,10 +283,12 @@ generate, and the source of the hard provisioning dependency below.
   `--limit open-webui` run still needs postgres already up.
 - **[`litellm`](litellm.md)** must be provisioned first too, and not just for chat to
   work at runtime — `openwebui_openai_api_key` is a file lookup against a secret only
-  litellm's play produces (see above), so **this role's own provisioning now fails**
-  (missing-file error) if litellm has never successfully run. A full `provision.yml`
-  run guarantees the order (litellm before open-webui); a `--limit open-webui` run
-  needs litellm already provisioned at least once, not merely reachable.
+  litellm's play produces (see above), so **this role's own provisioning fails**
+  if litellm has never successfully run. An assert in the first two tasks now catches
+  that up front, naming litellm and the command to run, rather than letting it surface
+  as a missing-file error at the env-file template. A full `provision.yml` run
+  guarantees the order (litellm before open-webui); a `--limit open-webui` run needs
+  litellm already provisioned at least once, not merely reachable.
 - **[`redis`](redis.md)** must be provisioned first, and this is the hardest
   runtime dependency of the three. Provisioning needs the `redis` host merely
   *assigned* (its `ansible_host` renders `REDIS_URL`), but at runtime OpenWebUI

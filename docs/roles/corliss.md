@@ -233,9 +233,13 @@ LiteLLM until deleted by hand, so it is worth pruning when that happens.
 - **[`litellm`](litellm.md)** must have run at least once — this role reads the
   provisioner key that role mints, and the tier teams it creates are what
   Corliss scopes members' keys to. A full `provision.yml` run guarantees the
-  order (the litellm play sits immediately above this one); a `--limit corliss`
-  run on a cluster where litellm has never run fails the file lookup outright,
-  which is the loud failure and the right one.
+  order (the litellm play sits immediately above this one).
+  A `--limit corliss` run on a cluster where litellm has never run is now
+  **stopped by an assert in the first two tasks**, naming litellm and the
+  command to run. Previously it got ~26 tasks in and died at "Render the corliss
+  secret environment file" with a bare `file` lookup error, inside a
+  `no_log: true` task that hid its own context and named no role. Still a loud
+  failure, but an informative one, and before any work is done.
 - **Outbound HTTPS from the CT** — the clone reaches github.com through the
   host's NAT (`gw=10.1.1.1`), like every other role's package downloads.
 - **[`open-webui`](open-webui.md)** is the one OIDC relying party today. It

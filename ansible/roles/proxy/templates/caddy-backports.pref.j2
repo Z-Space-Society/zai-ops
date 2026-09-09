@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+#
+# Scoped to caddy by name on purpose. Backports is NotAutomatic (priority 100),
+# which loses to the base suite (500), so without this pin the version the proxy
+# role asks for would be uninstallable. With a broader pin, backports would start
+# supplying unrelated packages on this CT.
+Package: caddy
+Pin: release n={{ caddy_backports_suite }}
+Pin-Priority: 990

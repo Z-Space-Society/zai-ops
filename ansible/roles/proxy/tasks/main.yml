@@ -46,17 +46,14 @@
   register: caddy_backports_repo
 
 - name: Pin caddy to the backports suite
-  # Scoped to caddy by name on purpose. Without a pin, backports' NotAutomatic
-  # priority (100) loses to the base suite (500) and the version below would be
-  # uninstallable; with a broad pin, backports would start supplying unrelated
-  # packages on this CT.
-  ansible.builtin.copy:
+  # A template, not copy with inline content, for a specific reason:
+  # `ansible_managed` is populated by the template module only and is undefined
+  # in a copy task, so the inline version failed at arg finalisation with
+  # "'ansible_managed' is undefined". Every other rendered file in this repo is
+  # a .j2 carrying that header; this one now matches.
+  ansible.builtin.template:
+    src: caddy-backports.pref.j2
     dest: /etc/apt/preferences.d/caddy-backports.pref
-    content: |
-      # {{ ansible_managed }}
-      Package: caddy
-      Pin: release n={{ caddy_backports_suite }}
-      Pin-Priority: 990
     owner: root
     group: root
     mode: "0644"

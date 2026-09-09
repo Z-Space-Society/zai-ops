@@ -828,6 +828,20 @@ Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
   answer **526** under Full (strict) while every subdomain keeps working. Issue
   the cert for `example.com, *.example.com`.
 
+Hard-won lessons writing **Ansible tasks** in this repo:
+
+- **`ansible_managed` only exists in the `template` module.** It is undefined in a
+  `copy` task with inline `content:`, and the failure comes at argument
+  finalisation rather than at render time:
+
+  ```
+  Error while resolving value for 'content': 'ansible_managed' is undefined
+  ```
+
+  which names the `content` key and does not read like a templating problem.
+  Every managed config here is a `.j2` carrying a `# {{ ansible_managed }}`
+  header; keep short files that way too rather than inlining them into `copy`.
+
 Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
 
 - **Forced first-login password change needs a real temp password.** Over SSH

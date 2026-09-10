@@ -20,7 +20,8 @@
     email {{ caddy_acme_email }}
 {% endif %}
 {% else %}
-    # No Origin CA cert in the vault yet — serve plain HTTP only (no ACME).
+    # none mode: plain HTTP only, no ACME. Either no cert can be issued yet, or
+    # an external edge in front of this one terminates TLS.
     auto_https off
 {% endif %}
 

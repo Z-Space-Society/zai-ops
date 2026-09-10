@@ -1,0 +1,135 @@
+---
+# Record how the proxy edge gets its certificate: the caddy_tls_mode setter.
+#
+#   ansible-playbook set-tls.yml -e "tls_mode=origin_ca"
+#   ansible-playbook set-tls.yml -e "tls_mode=acme" -e "acme_email=ops@example.org"
+#
+# (`zai-set-tls <mode> [email]`, the operator command in bin/, is sugar over
+# this. No logic lives in the wrapper.) The proxy role reads caddy_tls_mode and
+# caddy_acme_email; docs/roles/proxy.md "TLS modes" explains each mode.
+#
+# Why a setter and not group_vars: the right mode depends on what sits in front
+# of the proxy CT (Cloudflare, an external edge, or nothing), and that is a fact
+# about this cluster, the same category as cluster_domain and the CTID
+# assignments. It goes in the git-ignored runtime inventory (inventory/local.yml)
+# so the committed tree stays generic (ADR-0001). Without it the only ways to
+# pick a mode were -e on every run, which the next plain replay silently drops,
+# or hand-editing local.yml, which is not reproducible.
+#
+# The role defaults to acme, so origin_ca and none are only ever what someone ran
+# this to choose.
+#
+# Read-modify-write the WHOLE structure and re-dump (never line-append): that
+# preserves cluster_domain, every service's CTID assignment AND the
+# inference-node roster that share this file, instead of corrupting it.
+
+- name: Record the proxy TLS mode
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    runtime_inventory: "{{ playbook_dir }}/inventory/local.yml"
+    tls_modes: ['origin_ca', 'acme', 'none']
+    # Deliberately loose. Let's Encrypt judges the address itself; this only
+    # catches a shifted argument (a mode or an ansible option) landing here.
+    email_regex: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    requested_email: "{{ acme_email | default('') | string }}"
+  tasks:
+    - name: Require a known TLS mode
+      ansible.builtin.assert:
+        that:
+          - tls_mode is defined
+          - (tls_mode | string) in tls_modes
+        fail_msg: >-
+          '{{ tls_mode | default('') }}' is not a TLS mode. Expected one of:
+          {{ tls_modes | join(', ') }}, e.g. zai-set-tls origin_ca
+
+    # The contact renders only in acme mode, so accepting one with another mode
+    # would record a value nothing reads.
+    - name: Accept a contact email only with acme, and only a plausible one
+      ansible.builtin.assert:
+        that:
+          - requested_email | length == 0 or tls_mode == 'acme'
+          - requested_email | length == 0 or requested_email is match(email_regex)
+        fail_msg: >-
+          '{{ requested_email }}' is not usable here: the contact email is for
+          acme mode only and must look like an address, e.g.
+          zai-set-tls acme ops@example.org
+
+    # The proxy role asserts the same material. Checking here as well means a
+    # cluster cannot record a mode it has no cert for and find out only at the
+    # next proxy replay. localhost reads group_vars/all like every host, so the
+    # vault is loaded.
+    - name: Require the Origin CA cert and key for origin_ca
+      ansible.builtin.assert:
+        that:
+          - cloudflare_origin_cert is defined
+          - cloudflare_origin_key is defined
+        fail_msg: >-
+          origin_ca needs cloudflare_origin_cert and cloudflare_origin_key in the
+          vault (group_vars/all/vault.yml). Add them first, or choose acme or none.
+      when: tls_mode == 'origin_ca'
+
+    # errors='ignore' → empty string when the file doesn't exist yet; 'or {}'
+    # turns that (and an empty/whitespace file) into an empty mapping to merge into.
+    - name: Load the existing runtime inventory (empty if absent)
+      ansible.builtin.set_fact:
+        runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
+
+    # The whole TLS setting, rebuilt from what is recorded: every other all.vars
+    # key kept, caddy_acme_email dropped and re-added only for acme with an email.
+    # So leaving acme, or re-running acme without an email, removes a stale
+    # contact instead of leaving it behind.
+    - name: Build the runtime vars for this TLS setting
+      ansible.builtin.set_fact:
+        current_vars: "{{ runtime_data.get('all', {}).get('vars') or {} }}"
+        new_vars: >-
+          {{
+            ((runtime_data.get('all', {}).get('vars') or {})
+             | dict2items
+             | rejectattr('key', 'equalto', 'caddy_acme_email')
+             | items2dict)
+            | combine({'caddy_tls_mode': tls_mode | string})
+            | combine({'caddy_acme_email': requested_email} if requested_email | length > 0 else {})
+          }}
+
+    # Idempotent no-op: recording the setting that's already recorded exits 0
+    # cleanly and leaves the file alone.
+    - name: Detect an unchanged (no-op) setting
+      ansible.builtin.set_fact:
+        is_noop: "{{ new_vars == current_vars }}"
+
+    - name: Report the no-op and finish
+      ansible.builtin.debug:
+        msg: "caddy_tls_mode '{{ tls_mode }}' with that email setting is already recorded. Nothing to do."
+      when: is_noop | bool
+
+    # Replace all.vars as a whole rather than merging recursively like the other
+    # setters. A recursive combine can add or overwrite a key but never remove
+    # one, and removing a stale caddy_acme_email is the point. Nothing else is
+    # lost: new_vars was built from the recorded vars, and the rest of `all`
+    # (the CTID assignments and the inference roster under all.children) is
+    # carried over untouched.
+    - name: Merge the TLS setting into the runtime structure
+      ansible.builtin.set_fact:
+        merged_inventory: >-
+          {{
+            runtime_data
+            | combine({'all': (runtime_data.get('all') or {}) | combine({'vars': new_vars})})
+          }}
+      when: not (is_noop | bool)
+
+    - name: Write the runtime inventory
+      ansible.builtin.copy:
+        dest: "{{ runtime_inventory }}"
+        content: "{{ merged_inventory | to_nice_yaml(indent=2) }}"
+        mode: "0644"
+      when: not (is_noop | bool)
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          caddy_tls_mode is now '{{ tls_mode }}'{{ (' with contact ' ~ requested_email) if requested_email | length > 0 else '' }}
+          in {{ runtime_inventory }}. Replay the proxy to apply it:
+          ansible-playbook provision.yml --limit proxy
+      when: not (is_noop | bool)

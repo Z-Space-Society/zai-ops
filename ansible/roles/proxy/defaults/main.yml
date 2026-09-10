@@ -10,7 +10,9 @@ caddy_cert_path: /etc/caddy/cloudflare-origin.pem
 caddy_key_path: /etc/caddy/cloudflare-origin.key
 
 # How this edge gets its certificate. Which mode is right depends on what sits in
-# front of the proxy CT, and that is a fact about the deployment, not the role:
+# front of the proxy CT, and that is a fact about the deployment, not the role,
+# so it is recorded per cluster with `zai-set-tls` (set-tls.yml writes it to the
+# runtime inventory, inventory/local.yml):
 #
 #   origin_ca  Cloudflare PROXIES the domain (orange cloud) and runs Full (strict)
 #              to this origin. The long-lived Origin CA cert comes from the vault.
@@ -19,14 +21,22 @@ caddy_key_path: /etc/caddy/cloudflare-origin.key
 #              no Cloudflare at all). Caddy obtains and renews its own Let's
 #              Encrypt cert per hostname over HTTP-01, so public :80 MUST reach
 #              the proxy CT. Nothing about the cert lives in the vault or git.
-#   none       Plain HTTP on :80. Either no cert exists yet (bring the CT up and
-#              smoke-test it first), or an external edge terminates TLS in front
-#              of this one (see caddy_trusted_proxies).
+#   none       Plain HTTP on :80. Either no cert can be issued yet (bring the CT
+#              up and smoke-test it before DNS and the :80/:443 forwards exist),
+#              or an external edge terminates TLS in front of this one (see
+#              caddy_trusted_proxies).
 #
-# The default keeps the pre-mode behaviour: a vault holding the Origin CA cert
-# gets origin_ca, anything else gets none. So an existing cluster renders exactly
-# what it did before, and acme is only ever an explicit per-cluster choice.
-caddy_tls_mode: "{{ 'origin_ca' if cloudflare_origin_cert is defined else 'none' }}"
+# acme is the default, so a cluster that never runs the setter is its own edge.
+# That is the shape new clusters take (staging, COAI replication), and the
+# direction is off Cloudflare. origin_ca and none each need `zai-set-tls`.
+#
+# This deliberately reverses #10/#11, which inferred the mode from the vault
+# (origin_ca when cloudflare_origin_cert was defined, none otherwise). That made
+# the mode a side effect of what the vault held, and left acme no way to persist.
+# A cluster that relied on the inference must run `zai-set-tls` before its next
+# proxy replay; tasks/main.yml fails the run when a vault cert suggests that step
+# was skipped.
+caddy_tls_mode: acme
 
 # Derived, not a knob: "does this edge serve :443 at all". Kept because the :80
 # redirect and the https:// site addresses care only about that, not about where

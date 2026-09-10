@@ -186,12 +186,13 @@ already uses for the API token.
 - The repo holds **generic** automation (roles, playbooks) and the **blueprint
   constants** every cluster reuses — the `10.1.1.0/24` net and the
   `10.1.1.{ctid}` addressing *convention* (but not the specific numbers).
-- This-cluster specifics — *which inference nodes exist, which CTID each service
-  got, the cluster's public base domain, and the Proxmox node name* — live in
-  `ansible/inventory/local.yml`, written by
+- This-cluster specifics live in `ansible/inventory/local.yml`: *which inference
+  nodes exist, which CTID each service got, the cluster's public base domain, how
+  its proxy gets a TLS certificate, and the Proxmox node name*. They are written by
   [`enroll-inference-node.yml`](#playbooks) (inference roster),
   [`assign.yml`](#service-ctid-assignment) (`zai-assign`, service CTIDs),
   [`set-domain.yml`](#service-ctid-assignment) (`zai-set-domain`, `cluster_domain`),
+  [`set-tls.yml`](#cluster-tls-mode) (`zai-set-tls`, `caddy_tls_mode`),
   and [`set-node.yml`](#playbooks) (`zai-set-node`, `proxmox_node_name`),
   and never committed. The committed `hosts.yml` carries **no container numbers** at
   all — services are keyed by logical name (`proxy`, `litellm`, …) and their IP
@@ -265,6 +266,33 @@ and inference roster sharing the file survive. Re-recording the current value is
 idempotent no-op. From then on `cluster_domain` resolves for every playbook;
 later proxy routes build on it (e.g. `api.{{ cluster_domain }}`).
 
+### Cluster TLS mode
+
+How the [`proxy`](roles/proxy.md) edge gets its certificate depends on what sits
+in front of it, so it is per-cluster data too, set with `zai-set-tls`:
+
+```bash
+zai-set-tls origin_ca                 # Cloudflare proxies the domain (needs the vault cert/key)
+zai-set-tls none                      # external edge in front, or pre-DNS smoke test
+zai-set-tls acme ops@example.org      # explicit acme, optional Let's Encrypt contact
+```
+
+`acme` is the role default, so a cluster that never runs it is its own edge and
+Caddy obtains Let's Encrypt certs. `zai-set-tls` is thin sugar over
+[`set-tls.yml`](#playbooks). The playbook validates that the mode is one of the
+three, that an email comes only with `acme`, and that `origin_ca` has
+`cloudflare_origin_cert` and `cloudflare_origin_key` in the vault. It then
+**read-modify-writes** `all.vars.caddy_tls_mode` (and `caddy_acme_email`) in the
+same `inventory/local.yml`, keeping the CTID assignments, inference roster and
+`cluster_domain`. The email is rebuilt with the mode rather than merged, so
+switching away from `acme`, or re-running `acme` without an email, removes a stale
+contact. Re-recording the current setting is an idempotent no-op. Replay the proxy
+to apply it.
+
+The mode used to be inferred from the vault. An existing cluster must record its
+mode after pulling that change and before its next proxy replay; see
+[the migration table](roles/proxy.md#migration-record-the-mode-before-the-first-replay).
+
 ---
 
 ## Inference nodes
@@ -312,6 +340,7 @@ later; the repo bakes in neither.
 | `verify-proxmox.yml`  | CT 100 (local) | Read-only check that the API token authenticates    |
 | `assign.yml`          | CT 100 (local) | Bind a service to a CTID in runtime inventory (the `zai-assign` engine) |
 | `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the `zai-set-domain` engine) |
+| `set-tls.yml`         | CT 100 (local) | Record the proxy's TLS mode, and the acme contact email, in runtime inventory (the `zai-set-tls` engine) |
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox node name in runtime inventory (the `zai-set-node` engine; `bootstrap.sh` calls it automatically) |
 | `set-registry.yml`    | CT 100 (local) | Record the membership registry's per-cluster identity in runtime inventory (the `zai-set-registry` engine) |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
@@ -343,6 +372,7 @@ PATH when the control node is configured. The convention:
 | ------- | ---- | --------- |
 | `zai-assign <service> <ctid>` | Bind a service to a CTID in runtime inventory | [`assign.yml`](#playbooks) |
 | `zai-set-domain <domain>` | Record the cluster's public base domain in runtime inventory | [`set-domain.yml`](#playbooks) |
+| `zai-set-tls <mode> [email]` | Record how the proxy gets its certificate (`origin_ca`, `acme` or `none`; the email is for `acme` only) in runtime inventory. Never run means `acme`. See [Cluster TLS mode](#cluster-tls-mode) | [`set-tls.yml`](#playbooks) |
 | `zai-set-node <node>` | Record the Proxmox node name in runtime inventory (bootstrap sets it automatically) | [`set-node.yml`](#playbooks) |
 | `zai-set-registry <key> <value>` | Record a membership-registry identity (`client_key`, `service_did`) in runtime inventory. Both are read by [corliss](roles/corliss.md) — `service_did` for its roster read, `client_key` for its registry reconciliation — each one registry identity recorded once. Was `zai-set-console`; renamed when the `manage_console` role was deleted and corliss became the only consumer. The third key it used to take, `registry_space_uri`, went with the console | [`set-registry.yml`](#playbooks) |
 | `zai-make-admin <handle>` | Promote an ATProto handle to corliss admin, keyed on DID | [`make-admin.yml`](#playbooks) |

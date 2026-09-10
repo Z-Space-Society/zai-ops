@@ -139,8 +139,9 @@ flowchart LR
         c1["ansible-playbook site.yml<br/>configure the control node"]
         c2["ansible-playbook verify-proxmox.yml<br/>confirm the token authenticates"]
         c3["zai-set-domain example.com<br/>required before the proxy"]
+        ct["zai-set-tls origin_ca / none<br/>only if not acme, the default"]
         c4["zai-set-registry client_key / service_did<br/>optional — blank is a working state"]
-        c1 --> c2 --> c3 --> c4
+        c1 --> c2 --> c3 --> ct --> c4
     end
 
     subgraph phase3["3 · assign — records numbers only, creates nothing"]

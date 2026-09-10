@@ -42,6 +42,7 @@ itself from this repo.
    ansible-playbook site.yml             # configure the control node
    ansible-playbook verify-proxmox.yml   # confirm the API token authenticates
    zai-set-domain example.com            # the cluster's public base domain
+   zai-set-tls origin_ca                 # only if Cloudflare proxies the domain (acme is the default)
 
    # the membership registry's identity (see below — neither blocks
    # provisioning, but corliss reads both)
@@ -58,6 +59,11 @@ itself from this repo.
      routes are built from `cluster_domain`, and every service's public URL
      (`chat.`, `api.`, `view.`, …) derives from it, so setting it once moves
      them all together.
+   - **`zai-set-tls`**: how the proxy gets its TLS certificate. Skip it and the
+     cluster is its own edge (`acme`: Caddy obtains Let's Encrypt certs, so
+     public `:80` must reach the proxy CT). Run `zai-set-tls origin_ca` if
+     Cloudflare proxies the domain, or `zai-set-tls none` to stand the proxy up
+     HTTP-only before DNS exists. See [TLS modes](docs/roles/proxy.md#tls-modes).
    - **`zai-set-registry client_key`** — the registry's public, origin-bound
      HappyView client key, passed to [corliss](docs/roles/corliss.md) for its
      membership reconciliation reads. Optional and blank is fully working:

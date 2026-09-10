@@ -55,7 +55,9 @@ What it does, in order (each phase prints a numbered banner):
    the host at `10.1.1.1`, plus a NAT/masquerade rule so internal-only CTs can
    reach the internet. See [Networking](#networking).
 5. **Enable IPv4 forwarding** — persisted in `/etc/sysctl.d/99-zai-forward.conf`.
-6. **Prepare the container template** — download `debian-13-standard` if absent.
+6. **Prepare the container template** — if no `debian-13-standard` amd64 template
+   is on `local`, download the newest one in the `pveam` index. Resolved by
+   pattern, not pinned (see [Known gotchas](#known-gotchas)).
 7. **Create the control node** — CT 100 (`ansible-control`), unprivileged,
    2 cores / 2 GB / 8 GB, `net0` on `vmbr0` (DHCP). Skipped if it already exists.
 8. **Attach to the internal network** — give CT 100 a `vmbr1` NIC at `10.1.1.100`.
@@ -483,6 +485,17 @@ Hard-won lessons with `community.proxmox.proxmox`. The collection is pinned to
 by `bootstrap.sh` and re-asserted by the `control_node` role, *not* the 1.3.0
 bundled with Debian 13's `ansible` 12 (see the timeout lesson). These will recur
 on the remaining service CTs:
+
+- **Never pin the container template's point release.** Proxmox's `pveam` index
+  only carries the current build of each template, so the day
+  `debian-13-standard_13.6-1` shipped, the pinned `13.1-2` disappeared and a
+  fresh `bootstrap.sh` died at step 6 with `400 Parameter verification failed.
+  template: no such template`. Both consumers now resolve the newest
+  `debian-13-standard_*_amd64.tar.zst` by pattern: `bootstrap.sh` against
+  `local` first and the `pveam` index only if `local` has none, and
+  `provision.yml` against `local` over the API
+  (`proxmox_storage_contents_info`). A host that already holds an older build
+  keeps using it; nothing forces a newer image under existing CTs.
 
 - **Cloudflare 403s server-side Python fetches of our own public endpoints.**
   Browser Integrity Check is on by default for the zone and refuses known

@@ -135,22 +135,36 @@ fi
 # --- Config ---
 CTID="${1:-100}"
 HOSTNAME=ansible-control
-TEMPLATE=debian-13-standard_13.1-2_amd64.tar.zst   # confirm: pveam available | grep debian-13
 TEMPLATE_STORAGE=local
 ROOTFS_STORAGE=local-lvm
 BRIDGE=vmbr0
 REPO_URL=https://github.com/Z-Space-Society/zai-ops.git
 
 # --- Ensure the template is downloaded ---
+# Resolved by pattern, never pinned: Proxmox drops the old point release from the
+# index as soon as a new one ships (13.1-2 vanished for 13.6-1), so a pinned
+# filename fails `pveam download` with "no such template" on the next fresh host.
+# A template already on local storage wins, so a re-run needs no index fetch and
+# doesn't pull a newer image under an existing CT. provision.yml resolves the
+# same pattern against the same storage, so both always agree.
+TEMPLATE_RE='^debian-13-standard_.*_amd64\.tar\.zst$'
+newest_template() { awk -v re="$TEMPLATE_RE" '$1 ~ re { print $1 }' | sort -V | tail -n 1; }
+
 step "Preparing container template"
-if ! pveam list "$TEMPLATE_STORAGE" | grep -q "$TEMPLATE"; then
-  info "downloading $TEMPLATE …"
+TEMPLATE=$(pveam list "$TEMPLATE_STORAGE" | awk '{ sub(/^.*vztmpl\//, "", $1); print $1 }' | newest_template)
+if [ -z "$TEMPLATE" ]; then
   pveam update >/dev/null
+  TEMPLATE=$(pveam available --section system | awk '{ print $2 }' | newest_template)
+  if [ -z "$TEMPLATE" ]; then
+    printf '%sFAILED: no debian-13-standard amd64 template in the pveam index.%s\n' "$RED" "$RESET" >&2
+    exit 1
+  fi
+  info "downloading $TEMPLATE …"
   pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
 else
   info "template already present"
 fi
-done_ok "template ready"
+done_ok "template ready ($TEMPLATE)"
 
 # --- Create the container (idempotent: skip if it exists) ---
 step "Creating container $CTID ($HOSTNAME)"

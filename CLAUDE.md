@@ -74,7 +74,10 @@ out and update the docs.
 - **Native services, no Docker on LXC.** Service containers run under systemd
   directly. CTs are unprivileged with `features: [nesting=1]`.
 - **Template:** `debian-13-standard` for all CTs. Template storage `local`,
-  rootfs storage `local-lvm` (overridable via `ct_rootfs_storage`).
+  rootfs storage `local-lvm` (overridable via `ct_rootfs_storage`). Never pin
+  the point release: `pveam` drops old builds from its index, so `bootstrap.sh`
+  and `provision.yml` both resolve the newest `debian-13-standard_*_amd64` by
+  pattern.
 - **Inventory is data-driven.** Per-CT create specs (cores/memory/disk/netif)
   live on the host entry in `inventory/hosts.yml`; the create play reads them.
 - **Operator commands live in `bin/`, run in place from git.** Things a human runs

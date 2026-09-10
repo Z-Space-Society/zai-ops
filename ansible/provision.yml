@@ -67,6 +67,41 @@
           run: zai-assign {{ inventory_hostname }} <ctid>
       when: ct_netif is defined
 
+    - name: List the container templates on local storage
+      # The template is resolved, never pinned: Proxmox drops the old point
+      # release from its index when a new one ships, so a pinned filename breaks
+      # the next fresh host. bootstrap.sh downloads the newest debian-13-standard
+      # onto `local`; pick the newest one found there, the same pattern bootstrap
+      # matches. Needs Datastore.Audit, which ZaiProvision has.
+      community.proxmox.proxmox_storage_contents_info:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: false
+        node: "{{ proxmox_node_name }}"
+        storage: local
+      register: local_templates
+      run_once: true
+
+    - name: Pick the newest debian-13-standard template
+      ansible.builtin.set_fact:
+        ct_ostemplate: >-
+          {{ local_templates.proxmox_storage_content
+             | map(attribute='volid')
+             | select('match', '^local:vztmpl/debian-13-standard_.*_amd64\.tar\.zst$')
+             | community.general.version_sort
+             | last | default('') }}
+      run_once: true
+
+    - name: Fail fast if no template is on local storage
+      ansible.builtin.assert:
+        that: ct_ostemplate | length > 0
+        fail_msg: >-
+          No debian-13-standard amd64 template on {{ proxmox_node_name }}:local.
+          Re-run bootstrap.sh on the host; it downloads the newest one.
+      run_once: true
+
     - name: Create the LXC container
       # disk MUST be the `<storage>:<size>` string form (e.g. local-lvm:8), NOT a
       # bare size with a separate `storage:` — the latter renders a pathless
@@ -76,7 +111,7 @@
       community.proxmox.proxmox:
         vmid: "{{ ctid }}"
         hostname: "{{ ct_hostname }}"
-        ostemplate: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst"
+        ostemplate: "{{ ct_ostemplate }}"
         disk: "{{ ct_rootfs_storage }}:{{ ct_disk }}"
         cores: "{{ ct_cores }}"
         memory: "{{ ct_memory }}"

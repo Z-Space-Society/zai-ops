@@ -16,20 +16,40 @@ Caddy is a single Go binary in Debian's own repos, so this role is one
 workaround a third-party repo would need. Its config is a declarative `Caddyfile`
 rendered from `caddy_proxy_hosts`, so **proxy routes live in git**, not in a
 web-UI database. The CT therefore holds no unreproducible state: config is
-committed, the TLS cert is in the vault — nothing for the [`backup`](backup.md)
-role to capture.
+committed, and the TLS cert is either in the vault or reissued by Caddy on
+demand. Nothing for the [`backup`](backup.md) role to capture.
 
-**Origin TLS, no ACME.** Caddy serves `:443` using a **Cloudflare Origin CA**
-certificate (a long-lived static cert/key from the vault), with `:80` redirecting
-to `:443`. That lets Cloudflare run **Full (strict)** to the origin. Caddy's
-automatic-HTTPS/ACME is disabled — the Debian package ships no DNS plugin and
-ACME would fail behind Cloudflare regardless.
+## TLS modes
 
-**TLS auto-enables on the cert.** `caddy_tls_enabled` defaults to "is
-`cloudflare_origin_cert` in the vault?". Until you add the cert the role stands
-Caddy up **HTTP-only** (routes proxy on `:80`, `auto_https off`), so the CT can be
-built and smoke-tested first; add the cert/key to the vault and re-run to flip on
-`:443` + the `:80`→`:443` redirect. No code change between the two — just the vault.
+Where the certificate comes from is a fact about what sits in front of the proxy
+CT, so it is a per-cluster choice, `caddy_tls_mode`:
+
+| Mode | Use when | What Caddy does |
+| ---- | -------- | --------------- |
+| `origin_ca` | Cloudflare **proxies** the domain (orange cloud) | Serves `:443` with the long-lived **Cloudflare Origin CA** cert/key from the vault, so Cloudflare can run **Full (strict)** to the origin. ACME never runs. The cert is trusted by Cloudflare and nobody else. |
+| `acme` | DNS points **straight at this edge** (grey cloud, or no Cloudflare) | Obtains and renews its own **Let's Encrypt** cert, one per hostname in `caddy_proxy_hosts`, over HTTP-01. No vault material. Public `:80` must reach the proxy CT. |
+| `none` | No cert yet, or an external edge terminates TLS in front | Plain HTTP on `:80` (`auto_https off`). Pair with `caddy_trusted_proxies` in the external-edge case. |
+
+In both cert-bearing modes `:80` redirects to `:443` (except `/healthz`), and
+`caddy_tls_enabled` is true. That boolean is now derived from the mode, not set.
+
+**The default reproduces the old behaviour exactly.** Unset, `caddy_tls_mode` is
+`origin_ca` if `cloudflare_origin_cert` is in the vault and `none` otherwise.
+So a Cloudflare-fronted cluster still stands up HTTP-only for smoke-testing, and
+flips to `:443` when the cert/key land in the vault and the role re-runs, with no
+code change. `acme` is never picked automatically. Set it per cluster, in the
+git-ignored runtime inventory alongside `cluster_domain` (it is a this-cluster
+fact, so it does not belong in committed `group_vars`):
+
+```yaml
+# inventory/local.yml, under the proxy host or a group it belongs to
+caddy_tls_mode: acme
+caddy_acme_email: ops@example.org
+```
+
+A cluster that wants **HTTP-only while a vault cert exists** now sets
+`caddy_tls_mode: none`. Overriding `caddy_tls_enabled` no longer does anything
+useful, because the template and tasks branch on the mode.
 
 ## Tasks
 
@@ -37,7 +57,8 @@ built and smoke-tested first; add the cert/key to the vault and re-run to flip o
 | ---- | ------ | --- |
 | Add backports + pin caddy | `apt` (`python3-debian`), `deb822_repository`, `copy` (apt preferences) | Debian 13's base suite ships caddy **2.6.2**; several options this cluster needs landed in 2.7+. Backports carries 2.11.2 and is still Debian-signed, so no third-party key. The pin is scoped to `caddy` by name so backports supplies nothing else. |
 | Install Caddy | `apt` (`caddy={{ caddy_apt_version }}`) | Version-pinned, like Garage and uv. Pulls the `caddy` user, `/etc/caddy/`, `/var/lib/caddy`, and `caddy.service`. **This upgrades an existing 2.6.2 install and restarts Caddy**, which is a brief outage of every public route on the LAN-facing edge. |
-| Install Origin CA cert + key | `copy` (`content:`, `no_log`) | Cloudflare Origin CA material from the vault. Key `0600` owned by `caddy`; cert world-readable. Done before the Caddyfile so the `tls` files exist at validate time. |
+| Assert the TLS mode | `assert` | The template branches on the exact mode string, so a typo would render a config for no mode, and `caddy validate` checks syntax, not intent. Also catches a forced `origin_ca` with no vault cert, which would otherwise fail inside a `no_log` task that hides the error. |
+| Install Origin CA cert + key | `copy` (`content:`, `no_log`) | `origin_ca` mode only. Gated on the mode, not `caddy_tls_enabled`, because `acme` serves TLS with no vault material. Key `0600` owned by `caddy`; cert world-readable. Done before the Caddyfile so the `tls` files exist at validate time. |
 | Deploy the Caddyfile | `template` (`validate: caddy validate`) | Renders `caddy_proxy_hosts`. `validate` is the `nginx -t` analog — a bad config fails the task instead of deploying. |
 | Start + enable `caddy` | `systemd` | Running now + on boot. |
 | Validate the deployed config | `command: caddy validate` (`changed_when: false`) | Final guard that the live file is valid. |
@@ -54,9 +75,11 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `caddy_cert_path` | `/etc/caddy/cloudflare-origin.pem` | Where the Origin CA cert lands; the `tls` directive points here. |
-| `caddy_key_path` | `/etc/caddy/cloudflare-origin.key` | Where the Origin CA private key lands (`0600`, owned by `caddy`). |
-| `caddy_tls_enabled` | `{{ cloudflare_origin_cert is defined }}` | Auto: serve HTTPS when the Origin CA cert is in the vault, else HTTP-only. Override to force either way. |
+| `caddy_tls_mode` | `{{ 'origin_ca' if cloudflare_origin_cert is defined else 'none' }}` | `origin_ca`, `acme` or `none`. See [TLS modes](#tls-modes). The default is the pre-mode behaviour; set `acme` explicitly per cluster. The role asserts the value is one of the three, and that `origin_ca` has its vault cert/key. |
+| `caddy_tls_enabled` | `{{ caddy_tls_mode != 'none' }}` | Derived: does this edge serve `:443`? Drives the `:80` redirect and the `https://` site addresses. Set the mode, not this. |
+| `caddy_acme_email` | `""` | Let's Encrypt account contact, `acme` mode only, rendered as the global `email` option when non-empty. Not a secret. Let's Encrypt no longer sends expiry reminders, so it is not a renewal alarm. |
+| `caddy_cert_path` | `/etc/caddy/cloudflare-origin.pem` | `origin_ca` only. Where the Origin CA cert lands; the `tls` directive points here. |
+| `caddy_key_path` | `/etc/caddy/cloudflare-origin.key` | `origin_ca` only. Where the Origin CA private key lands (`0600`, owned by `caddy`). |
 | `caddy_backports_suite` | `{{ ansible_distribution_release }}-backports` | Derived from the CT's own release, so the blueprint stays generic. |
 | `caddy_apt_version` | `2.11.2-1~bpo13+1` | Exact apt version pin. **Not** generic: `~bpo13` names Debian 13, so a base-image change means re-pinning here. It fails loudly at apt rather than installing something else. |
 | `caddy_trusted_proxies` | `[]` | Addresses whose `X-Forwarded-*` headers Caddy trusts instead of overwriting. Empty renders no `servers` block at all, so a cluster where this Caddy is the outermost proxy is unaffected. See [Notes](#notes). |
@@ -76,9 +99,10 @@ caddy_proxy_hosts:
 
 ## Secrets (one manual step)
 
-The role reads `cloudflare_origin_cert` and `cloudflare_origin_key` from the
-vault (`ansible/group_vars/all/vault.yml` — git-ignored, so it exists only on
-the control node).
+`acme` and `none` read no secrets. In `origin_ca` mode the role reads
+`cloudflare_origin_cert` and `cloudflare_origin_key` from the vault
+(`ansible/group_vars/all/vault.yml`, git-ignored, so it exists only on the
+control node).
 Generate a cert once in the Cloudflare dashboard (SSL/TLS → Origin Server →
 Create Certificate), paste cert + key into the vault, then set the Cloudflare
 SSL mode to **Full (strict)**. Cover **both the apex and the wildcard**
@@ -104,6 +128,19 @@ curl -kI https://10.1.1.<ctid>/           # TLS served by the origin cert
 # after adding a real entry to caddy_proxy_hosts and re-running:
 curl -kH 'Host: chat.example.com' https://10.1.1.<ctid>/
 ```
+
+In `acme` mode the point is a chain browsers trust, so verify by hostname from
+**outside** the LAN, and never with `-k`:
+
+```bash
+curl -sI https://chat.example.com/ | head -1       # must succeed without -k
+echo | openssl s_client -connect chat.example.com:443 -servername chat.example.com \
+  2>/dev/null | openssl x509 -noout -issuer -dates   # issuer: Let's Encrypt
+ssh root@10.1.1.<ctid> 'journalctl -u caddy --no-pager | grep -iE "obtain|challenge|acme"'
+```
+
+If issuance fails, check public `:80` first (see
+[Known gotchas](../README.md#known-gotchas)).
 
 ## Notes
 
@@ -134,6 +171,40 @@ curl -kH 'Host: chat.example.com' https://10.1.1.<ctid>/
   add a third-party trust root to obtain a capability backports already provides.
   If the goal ever becomes tracking upstream Caddy generally rather than clearing
   a version floor, that trade changes.
+
+- **`acme` needs public `:80`, and that is not this role's to provide.** HTTP-01
+  means Let's Encrypt connects to each hostname on port 80 from the internet, so
+  the forward from the public address to the proxy CT is the first thing to
+  check when issuance fails. The role cannot see or assert it. The same goes
+  for the other direction: the proxy CT needs outbound HTTPS to Let's Encrypt's
+  API to place the order at all. Caddy also tries
+  TLS-ALPN-01 over `:443` by default, so a broken `:80` forward may not stop
+  issuance outright. Don't rely on that: the `:80` redirect needs the port
+  regardless, and a cluster that half-works is harder to debug than one that
+  fails.
+
+- **`acme` keeps cert state on the CT, and rebuilds spend Let's Encrypt quota.**
+  The certs and the ACME account key live in Caddy's data directory
+  (`/var/lib/caddy/.local/share/caddy`), not in git or the vault. That is still
+  reproducible, since a rebuilt CT simply issues again, so it stays out of
+  [`backup`](backup.md). The cost is rate limits: Let's Encrypt issues at most 5
+  certs for the same exact set of hostnames per 7 days. Rebuilding a staging
+  proxy CT repeatedly in one week can lock out issuance until the window rolls.
+  Iterate destructively in `none` mode, then switch.
+
+- **open-webui's internal hairpin works in every mode.** It resolves the public
+  origin to the proxy CT and installs the Origin CA roots, but it points
+  `SSL_CERT_FILE` at the **merged** system bundle (see
+  [`open-webui`](open-webui.md)). That bundle also carries the public roots a
+  Let's Encrypt cert chains to, so under `acme` the extra roots are just unused.
+
+- **DNS-01 with a wildcard cert is the intended follow-on, and is not built.**
+  It would mean one `*.example.com` + apex cert instead of one per hostname, and
+  no inbound `:80` requirement at all. It is a separate piece of work because
+  Caddy needs the `caddy-dns/cloudflare` module, which the Debian package does
+  not carry. That means an `xcaddy` build, which breaks the "Debian-built,
+  Debian-signed, version-pinned apt package" property above, plus a Cloudflare
+  API token scoped to DNS edits on the zone, in the vault.
 
 - **Empty `caddy_proxy_hosts` is safe** — the `:80` site (health probe + HTTPS
   redirect) keeps the Caddyfile valid before any upstream is assigned, mirroring

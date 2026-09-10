@@ -841,6 +841,26 @@ Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
   answer **526** under Full (strict) while every subdomain keeps working. Issue
   the cert for `example.com, *.example.com`.
 
+Lessons on **Caddy obtaining its own certs** (the [`proxy`](roles/proxy.md)
+role's `caddy_tls_mode: acme`). Both of these look like bugs in the rendered
+Caddyfile and are not, so don't "fix" them:
+
+- **`auto_https disable_redirects` does not disable certificate management.**
+  The name suggests it switches automatic HTTPS off. It removes only Caddy's
+  automatic HTTP-to-HTTPS redirect, and Caddy still obtains and renews every
+  cert. The redirect is off on purpose, because the Caddyfile's own `:80` block
+  already does it (with a `/healthz` exception) in both cert-bearing modes. The
+  setting that really stops issuance is `auto_https off`, which is `none` mode.
+- **The explicit `:80` site block does not shadow the HTTP-01 challenge.** Its
+  catch-all `redir https://{host}{uri}` looks as if it would bounce Let's
+  Encrypt's `/.well-known/acme-challenge/` request to HTTPS. It never sees it:
+  Caddy wires its challenge handler in ahead of site routes on the HTTP port.
+- **When issuance fails, check public `:80` first.** HTTP-01 means Let's Encrypt
+  connects to the domain on port 80 from the internet, so the forward from the
+  public address to the proxy CT has to exist and actually work. That is
+  deployment config the role cannot see or assert. `journalctl -u caddy` shows
+  the CA's own error, which names the address it tried and what came back.
+
 Hard-won lessons writing **Ansible tasks** in this repo:
 
 - **`ansible_managed` only exists in the `template` module.** It is undefined in a

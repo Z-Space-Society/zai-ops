@@ -31,6 +31,23 @@
       none, and origin_ca needs cloudflare_origin_cert and cloudflare_origin_key
       in the vault.
 
+# acme is the default, so a cluster that relied on the old vault inference would
+# quietly switch from origin_ca to acme on its first replay after pulling: no
+# Origin CA cert served, Let's Encrypt attempted from behind Cloudflare, and 52x
+# errors on every public route. A vault holding the cert is the sign of such a
+# cluster, so refuse to render until the mode is chosen. hostvars carries the
+# inventory (where zai-set-tls records the mode, in local.yml) and -e, but not
+# role defaults, so this passes only for a mode someone actually picked.
+- name: Require a recorded caddy_tls_mode when the vault holds an Origin CA cert
+  ansible.builtin.assert:
+    that: >-
+      cloudflare_origin_cert is not defined or
+      hostvars[inventory_hostname]['caddy_tls_mode'] is defined
+    fail_msg: >-
+      The vault holds cloudflare_origin_cert but no caddy_tls_mode is recorded,
+      and the default is now acme. Run: zai-set-tls origin_ca (Cloudflare
+      proxies this domain), or zai-set-tls acme to confirm acme.
+
 # Caddy from Debian BACKPORTS, version-pinned. Still Debian-built and
 # Debian-signed, so this keeps the original "no third-party apt key" property
 # while getting past the 2.6.2 the base suite ships. See defaults/main.yml for

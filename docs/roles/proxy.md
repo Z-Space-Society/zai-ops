@@ -31,25 +31,64 @@ CT, so it is a per-cluster choice, `caddy_tls_mode`:
 | `none` | No cert yet, or an external edge terminates TLS in front | Plain HTTP on `:80` (`auto_https off`). Pair with `caddy_trusted_proxies` in the external-edge case. |
 
 In both cert-bearing modes `:80` redirects to `:443` (except `/healthz`), and
-`caddy_tls_enabled` is true. That boolean is now derived from the mode, not set.
+`caddy_tls_enabled` is true. That boolean is derived from the mode, not set.
+Overriding it does nothing useful, because the template and tasks branch on the
+mode.
 
-**The default reproduces the old behaviour exactly.** Unset, `caddy_tls_mode` is
-`origin_ca` if `cloudflare_origin_cert` is in the vault and `none` otherwise.
-So a Cloudflare-fronted cluster still stands up HTTP-only for smoke-testing, and
-flips to `:443` when the cert/key land in the vault and the role re-runs, with no
-code change. `acme` is never picked automatically. Set it per cluster, in the
-git-ignored runtime inventory alongside `cluster_domain` (it is a this-cluster
-fact, so it does not belong in committed `group_vars`):
+**`acme` is the default.** A cluster that never records a mode is its own edge.
+The other two are an explicit per-cluster choice, recorded with the
+[`zai-set-tls`](../README.md#cluster-tls-mode) operator command in the
+git-ignored runtime inventory alongside `cluster_domain`:
 
-```yaml
-# inventory/local.yml, under the proxy host or a group it belongs to
-caddy_tls_mode: acme
-caddy_acme_email: ops@example.org
+```bash
+zai-set-tls origin_ca                 # Cloudflare proxies the domain (needs the vault cert/key)
+zai-set-tls none                      # external edge in front, or pre-DNS smoke test
+zai-set-tls acme ops@example.org      # explicit acme, optional Let's Encrypt contact
 ```
 
-A cluster that wants **HTTP-only while a vault cert exists** now sets
-`caddy_tls_mode: none`. Overriding `caddy_tls_enabled` no longer does anything
-useful, because the template and tasks branch on the mode.
+Then replay the proxy (`ansible-playbook provision.yml --limit proxy`) to apply
+it. The setter is the only supported way to choose the mode.
+`-e caddy_tls_mode=...` is not persisted, so the next plain replay renders the
+default again, and that failure is silent: the Caddyfile still validates and
+deploys. The email is cleared whenever the mode leaves `acme`, or when `acme` is
+recorded again without one.
+
+A new cluster that wants to **stand the proxy up HTTP-only** and smoke-test it
+before DNS and the public `:80`/`:443` forwards exist runs `zai-set-tls none`
+first. Under the `acme` default, that proxy redirects to an HTTPS it has no cert
+for, and Caddy keeps retrying issuance.
+
+### Changed decision: the default used to be inferred from the vault
+
+[#10](https://github.com/Z-Space-Society/zai-ops/issues/10) recommended, and
+[#11](https://github.com/Z-Space-Society/zai-ops/pull/11) implemented, a default
+that reproduced the pre-mode behaviour: `origin_ca` when `cloudflare_origin_cert`
+was in the vault, `none` otherwise, and `acme` never picked automatically.
+[#12](https://github.com/Z-Space-Society/zai-ops/issues/12) deliberately reverses
+that. The direction is off Cloudflare, and a cluster that is its own edge is the
+shape new clusters take (staging, COAI replication). Inference also made the
+mode a side effect of what the vault held rather than one visible value, and left
+`acme` with no way to persist short of hand-editing `local.yml`, so staging ran on
+`-e` and one plain replay would drop it to plain HTTP, breaking Django CSRF and
+ATProto OAuth.
+
+### Migration: record the mode before the first replay
+
+Every existing cluster that is not `acme` changes behaviour on its first proxy
+replay after pulling the change, unless its mode is recorded first. The setter
+ships in the same change, so on each control node the order is: **pull, run
+`zai-set-tls`, then replay the proxy.** Never replay in between.
+
+| Cluster | Before | Run after pulling, before any replay | If skipped |
+| ------- | ------ | ------------------------------------ | ---------- |
+| **Heron** (production, Cloudflare-proxied) | `origin_ca`, inferred | `zai-set-tls origin_ca` | **Production outage.** Sites render as `acme`: the Origin CA cert is no longer served and Caddy attempts Let's Encrypt from behind Cloudflare, so every public route returns Cloudflare 52x errors until fixed. The guard below turns this into a failed run. |
+| **Ronchamp** (staging, direct) | `acme` via `-e` | `zai-set-tls acme <email>` (optional, the default covers it) | Nothing breaks. The `-e` becomes unnecessary. |
+| **alhambra** (home lab, NAS Caddy in front), if still provisioned from this repo | `none`, inferred | `zai-set-tls none` | The proxy CT starts redirecting to HTTPS and attempting ACME behind the NAS edge, which cannot validate. Every route breaks. Not guarded: no vault cert signals it. |
+
+The role backs up the Cloudflare case. If the vault holds `cloudflare_origin_cert`
+and no mode is recorded (in `local.yml` or via `-e`), the run fails and names
+`zai-set-tls origin_ca` instead of rendering `acme`. A `none` cluster leaves no
+such trace, so nothing guards alhambra's step.
 
 ## Tasks
 
@@ -57,7 +96,7 @@ useful, because the template and tasks branch on the mode.
 | ---- | ------ | --- |
 | Add backports + pin caddy | `apt` (`python3-debian`), `deb822_repository`, `copy` (apt preferences) | Debian 13's base suite ships caddy **2.6.2**; several options this cluster needs landed in 2.7+. Backports carries 2.11.2 and is still Debian-signed, so no third-party key. The pin is scoped to `caddy` by name so backports supplies nothing else. |
 | Install Caddy | `apt` (`caddy={{ caddy_apt_version }}`) | Version-pinned, like Garage and uv. Pulls the `caddy` user, `/etc/caddy/`, `/var/lib/caddy`, and `caddy.service`. **This upgrades an existing 2.6.2 install and restarts Caddy**, which is a brief outage of every public route on the LAN-facing edge. |
-| Assert the TLS mode | `assert` | The template branches on the exact mode string, so a typo would render a config for no mode, and `caddy validate` checks syntax, not intent. Also catches a forced `origin_ca` with no vault cert, which would otherwise fail inside a `no_log` task that hides the error. |
+| Assert the TLS mode | `assert` | The template branches on the exact mode string, so a typo would render a config for no mode, and `caddy validate` checks syntax, not intent. Also catches a forced `origin_ca` with no vault cert, which would otherwise fail inside a `no_log` task that hides the error. A second assert fails the run when the vault holds `cloudflare_origin_cert` but no mode is recorded, so a Cloudflare cluster that skipped `zai-set-tls origin_ca` gets a failed run instead of silently rendering `acme`. It checks `hostvars`, which carries the inventory and `-e` but not role defaults. |
 | Install Origin CA cert + key | `copy` (`content:`, `no_log`) | `origin_ca` mode only. Gated on the mode, not `caddy_tls_enabled`, because `acme` serves TLS with no vault material. Key `0600` owned by `caddy`; cert world-readable. Done before the Caddyfile so the `tls` files exist at validate time. |
 | Deploy the Caddyfile | `template` (`validate: caddy validate`) | Renders `caddy_proxy_hosts`. `validate` is the `nginx -t` analog — a bad config fails the task instead of deploying. |
 | Start + enable `caddy` | `systemd` | Running now + on boot. |
@@ -75,9 +114,9 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `caddy_tls_mode` | `{{ 'origin_ca' if cloudflare_origin_cert is defined else 'none' }}` | `origin_ca`, `acme` or `none`. See [TLS modes](#tls-modes). The default is the pre-mode behaviour; set `acme` explicitly per cluster. The role asserts the value is one of the three, and that `origin_ca` has its vault cert/key. |
+| `caddy_tls_mode` | `acme` | `origin_ca`, `acme` or `none`. See [TLS modes](#tls-modes). Recorded per cluster with `zai-set-tls`, never by hand. The role asserts the value is one of the three, that `origin_ca` has its vault cert/key, and that a vault holding the cert has a recorded mode. |
 | `caddy_tls_enabled` | `{{ caddy_tls_mode != 'none' }}` | Derived: does this edge serve `:443`? Drives the `:80` redirect and the `https://` site addresses. Set the mode, not this. |
-| `caddy_acme_email` | `""` | Let's Encrypt account contact, `acme` mode only, rendered as the global `email` option when non-empty. Not a secret. Let's Encrypt no longer sends expiry reminders, so it is not a renewal alarm. |
+| `caddy_acme_email` | `""` | Let's Encrypt account contact, `acme` mode only, rendered as the global `email` option when non-empty. Not a secret. Recorded by `zai-set-tls acme <email>` and removed whenever the recorded mode leaves `acme`. Let's Encrypt no longer sends expiry reminders, so it is not a renewal alarm. |
 | `caddy_cert_path` | `/etc/caddy/cloudflare-origin.pem` | `origin_ca` only. Where the Origin CA cert lands; the `tls` directive points here. |
 | `caddy_key_path` | `/etc/caddy/cloudflare-origin.key` | `origin_ca` only. Where the Origin CA private key lands (`0600`, owned by `caddy`). |
 | `caddy_backports_suite` | `{{ ansible_distribution_release }}-backports` | Derived from the CT's own release, so the blueprint stays generic. |
@@ -190,7 +229,8 @@ If issuance fails, check public `:80` first (see
   [`backup`](backup.md). The cost is rate limits: Let's Encrypt issues at most 5
   certs for the same exact set of hostnames per 7 days. Rebuilding a staging
   proxy CT repeatedly in one week can lock out issuance until the window rolls.
-  Iterate destructively in `none` mode, then switch.
+  Iterate destructively in `none` mode (`zai-set-tls none`), then switch with
+  `zai-set-tls acme`.
 
 - **open-webui's internal hairpin works in every mode.** It resolves the public
   origin to the proxy CT and installs the Origin CA roots, but it points

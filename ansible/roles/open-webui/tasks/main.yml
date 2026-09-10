@@ -148,6 +148,10 @@
   register: openwebui_uv_installed
   changed_when: false
   failed_when: false
+  # Runs under --check too. Check mode skips a plain command task, which left
+  # stdout empty, so the install block below always ran and its extract failed
+  # on a tarball the simulated download never fetched. Read-only, so it is safe.
+  check_mode: false
 
 # Install uv reproducibly from the pinned, checksummed release tarball — NOT a
 # `curl | sh` of a moving installer. The gnu tarball extracts to a single
@@ -210,6 +214,9 @@
   register: openwebui_base_py
   changed_when: false
   failed_when: not (openwebui_base_py.stdout | trim).startswith(openwebui_home)
+  # Read-only, so it runs under --check too. Check mode would otherwise skip it,
+  # leaving the guard to judge an empty stdout instead of the real interpreter.
+  check_mode: false
 
 # pip install runs inside the venv (PEP 668 doesn't apply). uv resolves + installs
 # OpenWebUI and its (large) dependency set over the host NAT. uv prints "Audited …"

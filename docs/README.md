@@ -812,6 +812,18 @@ ship, so uv fetches a managed CPython:
   absolute path (`ExecStart`, the `manage.py` tasks, the chown), so a project
   sync without that variable puts the environment somewhere none of them look
   while still exiting 0.
+- **`--check` skips plain `command` probes, so anything keyed on their output
+  misfires.** A `command` task without `creates`/`removes` does not run in check
+  mode, and its registered stdout comes back empty. corliss and open-webui gate
+  the uv install on `uv --version`, so every check run simulated a download
+  (nothing fetched) and then failed at extract with `Source
+  '/tmp/uv-<version>.tar.gz' does not exist`, on CTs whose uv was already
+  current. Read-only probes set `check_mode: false` so check mode sees the real
+  box. A different shape of the same limit is not a bug: when a task needs an
+  earlier task's real effect, check mode cannot follow. A proxy CT that has
+  never had the Caddy backports repo fails `--check` at "Install Caddy",
+  because the repo was only simulated. Run the real replay once and the check
+  works from then on.
 
 Hard-won lessons about **binding a listen socket at boot**:
 

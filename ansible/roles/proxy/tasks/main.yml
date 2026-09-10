@@ -15,6 +15,22 @@
       run: zai-set-domain <domain>
   when: caddy_proxy_hosts | length > 0
 
+# The template branches on the exact mode string, so a typo would render a
+# Caddyfile meant for no mode at all, and `caddy validate` checks syntax, not
+# intent. Forcing origin_ca without the vault material would otherwise fail
+# inside a no_log task, which hides the undefined-variable error it hit.
+- name: Require a known caddy_tls_mode, with the material origin_ca needs
+  ansible.builtin.assert:
+    that:
+      - caddy_tls_mode in ['origin_ca', 'acme', 'none']
+      - >-
+        caddy_tls_mode != 'origin_ca' or
+        (cloudflare_origin_cert is defined and cloudflare_origin_key is defined)
+    fail_msg: >-
+      caddy_tls_mode is '{{ caddy_tls_mode }}': it must be origin_ca, acme or
+      none, and origin_ca needs cloudflare_origin_cert and cloudflare_origin_key
+      in the vault.
+
 # Caddy from Debian BACKPORTS, version-pinned. Still Debian-built and
 # Debian-signed, so this keeps the original "no third-party apt key" property
 # while getting past the 2.6.2 the base suite ships. See defaults/main.yml for
@@ -77,11 +93,12 @@
     state: present
     update_cache: true
 
-# Cloudflare Origin CA cert + key (long-lived, no ACME) come from the vault, only
-# once they're present (caddy_tls_enabled). Installed before the Caddyfile so the
-# `tls` directive's files exist when the config is validated/started. Key is 0600
-# owned by the caddy daemon user; the cert is world-readable (it's public). Until
-# the cert lands in the vault the role serves HTTP-only and skips these.
+# Cloudflare Origin CA cert + key (long-lived, no ACME) come from the vault, in
+# origin_ca mode only. Gated on the mode, not caddy_tls_enabled: acme serves TLS
+# too but has no vault material, so these vars are undefined there. Installed
+# before the Caddyfile so the `tls` directive's files exist when the config is
+# validated/started. Key is 0600 owned by the caddy daemon user; the cert is
+# world-readable (it's public).
 - name: Install the Cloudflare Origin CA certificate
   ansible.builtin.copy:
     content: "{{ cloudflare_origin_cert }}"
@@ -90,7 +107,7 @@
     group: caddy
     mode: "0644"
   no_log: true
-  when: caddy_tls_enabled | bool
+  when: caddy_tls_mode == 'origin_ca'
   notify: reload caddy
 
 - name: Install the Cloudflare Origin CA private key
@@ -101,7 +118,7 @@
     group: caddy
     mode: "0600"
   no_log: true
-  when: caddy_tls_enabled | bool
+  when: caddy_tls_mode == 'origin_ca'
   notify: reload caddy
 
 # Render the routes. `validate` is the nginx -t analog — a bad Caddyfile (e.g. an

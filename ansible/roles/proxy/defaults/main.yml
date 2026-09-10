@@ -9,11 +9,35 @@
 caddy_cert_path: /etc/caddy/cloudflare-origin.pem
 caddy_key_path: /etc/caddy/cloudflare-origin.key
 
-# Origin TLS auto-enables once the Cloudflare Origin CA cert is in the vault. Until
-# then the role stands Caddy up HTTP-only (proxying on :80) so the CT can be brought
-# up and smoke-tested before the cert exists — add cloudflare_origin_cert/_key to
-# the vault and re-run to flip on :443 + the :80→:443 redirect. Override to force.
-caddy_tls_enabled: "{{ cloudflare_origin_cert is defined }}"
+# How this edge gets its certificate. Which mode is right depends on what sits in
+# front of the proxy CT, and that is a fact about the deployment, not the role:
+#
+#   origin_ca  Cloudflare PROXIES the domain (orange cloud) and runs Full (strict)
+#              to this origin. The long-lived Origin CA cert comes from the vault.
+#              Only Cloudflare trusts that cert, so it is useless anywhere else.
+#   acme       The domain resolves straight to this edge (DNS-only, grey cloud, or
+#              no Cloudflare at all). Caddy obtains and renews its own Let's
+#              Encrypt cert per hostname over HTTP-01, so public :80 MUST reach
+#              the proxy CT. Nothing about the cert lives in the vault or git.
+#   none       Plain HTTP on :80. Either no cert exists yet (bring the CT up and
+#              smoke-test it first), or an external edge terminates TLS in front
+#              of this one (see caddy_trusted_proxies).
+#
+# The default keeps the pre-mode behaviour: a vault holding the Origin CA cert
+# gets origin_ca, anything else gets none. So an existing cluster renders exactly
+# what it did before, and acme is only ever an explicit per-cluster choice.
+caddy_tls_mode: "{{ 'origin_ca' if cloudflare_origin_cert is defined else 'none' }}"
+
+# Derived, not a knob: "does this edge serve :443 at all". Kept because the :80
+# redirect and the https:// site addresses care only about that, not about where
+# the cert came from. Set caddy_tls_mode instead of overriding this.
+caddy_tls_enabled: "{{ caddy_tls_mode != 'none' }}"
+
+# Let's Encrypt account contact, acme mode only, rendered as Caddy's global
+# `email` option when set. Not a secret, so it belongs here or in group_vars, not
+# the vault. Do not treat it as a renewal alarm: Let's Encrypt no longer sends
+# expiry reminders, so a failing renewal shows up in `journalctl -u caddy` first.
+caddy_acme_email: ""
 
 # Data-driven proxy routes — the reproducibility win. Each entry maps a
 # public domain to an internal service; the upstream IP is DERIVED from that

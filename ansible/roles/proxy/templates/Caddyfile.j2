@@ -2,11 +2,23 @@
 # Caddy reverse proxy — routes are git-tracked (caddy_proxy_hosts), not UI state.
 
 {
-{% if caddy_tls_enabled | bool %}
+{% if caddy_tls_mode == 'origin_ca' %}
     # We supply origin TLS ourselves (Cloudflare Origin CA cert); never let Caddy
     # try to obtain its own certs over ACME — the Debian package has no DNS
     # plugin and ACME would fail behind Cloudflare anyway.
     auto_https disable_redirects
+{% elif caddy_tls_mode == 'acme' %}
+    # Caddy obtains and renews its own Let's Encrypt certs here, because nothing
+    # in front of this edge terminates TLS and browsers must trust it directly.
+    #
+    # disable_redirects reads as if it turns that off. It does not: it removes
+    # only Caddy's automatic HTTP-to-HTTPS redirect, and certificate management
+    # carries on. The :80 block below already provides that redirect itself,
+    # with the /healthz exception, identically in both cert-bearing modes.
+    auto_https disable_redirects
+{% if caddy_acme_email %}
+    email {{ caddy_acme_email }}
+{% endif %}
 {% else %}
     # No Origin CA cert in the vault yet — serve plain HTTP only (no ACME).
     auto_https off
@@ -32,7 +44,7 @@
 {% endif %}
 }
 
-{% if caddy_tls_enabled | bool %}
+{% if caddy_tls_mode == 'origin_ca' %}
 # Reusable snippet: the wildcard Cloudflare Origin CA cert covers every route.
 (origin_tls) {
     tls {{ caddy_cert_path }} {{ caddy_key_path }}
@@ -43,6 +55,13 @@
 # else to HTTPS. handle blocks are mutually exclusive and evaluated in order, so
 # /healthz returns "ok" instead of being caught by the redirect. Keeps the config
 # valid (and the CT answerable) even when caddy_proxy_hosts is empty.
+{% if caddy_tls_mode == 'acme' %}
+#
+# This block does not shadow the ACME HTTP-01 challenge, though it looks as if
+# the catch-all redirect would bounce /.well-known/acme-challenge/ to HTTPS. Caddy
+# wires its challenge handler in ahead of site routes on the HTTP port, so a
+# challenge for a name it manages is answered before either handle runs.
+{% endif %}
 :80 {
     handle /healthz {
         respond "ok" 200
@@ -54,10 +73,17 @@
 {% endif %}
 }
 
+{% if caddy_tls_mode == 'acme' %}
+# Each site below is a bare hostname with no `tls` directive, and that absence is
+# the mechanism: it is what puts the name under Caddy's own certificate
+# management. A `tls` file pair here would take the name back out of it.
+{% endif %}
 {% for h in caddy_proxy_hosts %}
 {% if caddy_tls_enabled | bool %}
 {{ h.domain }} {
+{% if caddy_tls_mode == 'origin_ca' %}
     import origin_tls
+{% endif %}
 {% else %}
 http://{{ h.domain }} {
 {% endif %}

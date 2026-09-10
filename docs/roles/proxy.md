@@ -175,7 +175,9 @@ If issuance fails, check public `:80` first (see
 - **`acme` needs public `:80`, and that is not this role's to provide.** HTTP-01
   means Let's Encrypt connects to each hostname on port 80 from the internet, so
   the forward from the public address to the proxy CT is the first thing to
-  check when issuance fails. The role cannot see or assert it. Caddy also tries
+  check when issuance fails. The role cannot see or assert it. The same goes
+  for the other direction: the proxy CT needs outbound HTTPS to Let's Encrypt's
+  API to place the order at all. Caddy also tries
   TLS-ALPN-01 over `:443` by default, so a broken `:80` forward may not stop
   issuance outright. Don't rely on that: the `:80` redirect needs the port
   regardless, and a cluster that half-works is harder to debug than one that

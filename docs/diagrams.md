@@ -114,7 +114,8 @@ connects to each directly, because neither has a page anyone lands on. See
 
 ## Build and provision flow
 
-One host-level script, then everything from inside CT 100. The two-pass shape —
+Clone the repo onto the host and run the host bootstrap from it, then everything
+from inside CT 100. The two-pass shape —
 assign every CTID first, provision second — is what lets each role render
 cross-service references regardless of provisioning order.
 
@@ -122,9 +123,11 @@ cross-service references regardless of provisioning order.
 flowchart LR
     start(["Freshly flashed<br/>Proxmox host"])
 
-    subgraph phase1["1 · bootstrap.sh — the only host-level step, run as root"]
+    subgraph phase1["1 · on the host, as root: clone, then host/bootstrap.sh"]
         direction TB
+        b0["apt install git, the one manual step<br/>clone zai-ops to /opt/zai-ops on the host"]
         b1["apt repos, full-upgrade, suppress subscription nag"]
+        b0 --> b1
         b2["create vmbr1 10.1.1.0/24, no uplink<br/>host at 10.1.1.1 + NAT masquerade"]
         b3["fetch debian-13-standard template"]
         b4["create CT 100 ansible-control<br/>attach vmbr1 at 10.1.1.100"]

@@ -3,9 +3,10 @@
 Guidance for Claude when working in this repo (zai-ops — infrastructure-as-code
 for the Z-Space AI Cluster).
 
-**Prime directive:** full reproducibility. Flash Proxmox, run one script, and
-the stack rebuilds itself from this repo. Every change must preserve that —
-nothing manual that isn't captured in `bootstrap.sh` or Ansible.
+**Prime directive:** full reproducibility. Flash Proxmox, clone this repo onto
+it, run the bootstrap, and the stack rebuilds itself from this repo. Every change
+must preserve that: nothing manual that isn't captured in a `host/` script or
+Ansible.
 
 ## Documentation maintenance (IMPORTANT)
 
@@ -31,9 +32,13 @@ When you finish a task, double-check whether any doc above needs the same edit.
 These are settled. Don't silently reverse them; if a change requires it, call it
 out and update the docs.
 
-- **One host script, then Ansible.** `bootstrap.sh` (run as root on the Proxmox
-  host) is the only host-level step. It builds CT 100, the Ansible control node;
-  everything after is driven by Ansible *from inside CT 100*.
+- **Host scripts from a host clone, then Ansible.** The operator installs git on
+  the Proxmox host and clones this repo to `/opt/zai-ops` there, the one manual
+  step. `host/bootstrap.sh` (run as root) builds CT 100, the Ansible control
+  node; everything after is driven by Ansible *from inside CT 100*. Anything else
+  that must run on the host itself (`host/import-github-user.sh`) lives beside it
+  in `host/`, run by path, never put on PATH. CT 100 still has no SSH path to the
+  host. See ADR-0008.
 - **CT 100 builds the rest over the API.** Service containers are *created* via
   the Proxmox API (`community.proxmox.proxmox`) and *configured* over SSH. No
   host-side per-CT scripting.
@@ -81,7 +86,8 @@ out and update the docs.
 - **Inventory is data-driven.** Per-CT create specs (cores/memory/disk/netif)
   live on the host entry in `inventory/hosts.yml`; the create play reads them.
 - **Operator commands live in `bin/`, run in place from git.** Things a human runs
-  by hand (`zai-assign`, `zai-backup`) live in the repo's `bin/`, put on PATH via
+  by hand on CT 100 (`zai-assign`, `zai-backup`) live in the repo's `bin/` (scripts
+  that run on the Proxmox host go in `host/` instead), put on PATH via
   two hooks — `/etc/profile.d/zai-ops.sh` for login/ssh shells, and the same
   snippet sourced from `/etc/bash.bashrc` for the interactive *non-login* shell
   `pct enter` gives (profile.d alone leaves `zai-*` not-found there; see Known
@@ -124,7 +130,7 @@ the timeout gotcha below):
 
 ## Conventions
 
-- **Idempotency is required.** Re-running `bootstrap.sh` or any playbook must be
+- **Idempotency is required.** Re-running a `host/` script or any playbook must be
   safe. Guard host-level edits; prefer modules over shell.
 - **Validate before declaring done.** YAML must parse; proxy changes run
   `caddy validate`. Don't claim a play works without the `PLAY RECAP` showing

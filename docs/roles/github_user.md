@@ -66,3 +66,8 @@ diff <(sudo cat ~jsayles/.ssh/authorized_keys) <(curl -s https://github.com/jsay
   `password_hash` filter: Debian 13's Python 3.13 removed the stdlib `crypt`
   module the filter relied on (it would otherwise need `python3-passlib` on the
   control node).
+- **The Proxmox host is not a target.** Ansible has no inventory entry for it,
+  and CT 100 has no SSH path to it. For a login on the host itself, run
+  [`host/import-github-user.sh`](../../host/import-github-user.sh) there as root
+  (see [ADR-0008](../decisions/0008-host-scripts-from-host-clone.md)). It does the
+  same thing in shell, except each new account gets its own temp password.

@@ -36,7 +36,7 @@ on the box, `0600`, no manual entry required.
 - **Host key checking**: `ansible.cfg` uses trust-on-first-use
   (`StrictHostKeyChecking=accept-new`) with a pinned `known_hosts`, not
   `host_key_checking=False`.
-- **Secrets never touch process argv**: `bootstrap.sh` pipes secrets over
+- **Secrets never touch process argv**: `host/bootstrap.sh` pipes secrets over
   stdin into `pct exec`, since command-line arguments are readable via
   `/proc/<pid>/cmdline` for the life of the process.
 - **Internal-only network**: all service containers except the edge proxy

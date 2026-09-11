@@ -31,15 +31,19 @@ one script, and the stack rebuilds itself from this repo.
 > flow](diagrams.md#build-and-provision-flow) — the five phases from bare host to
 > steady state, and which orderings are real data dependencies.
 
-There is exactly **one** host-level script, [`bootstrap.sh`](../bootstrap.sh),
-run as root on a freshly-flashed Proxmox host. Everything after the control
-node exists is driven by Ansible from inside it. Invoke it directly (base
-Proxmox has no git):
+The host bootstrap is [`host/bootstrap.sh`](../host/bootstrap.sh), run as root
+on a freshly-flashed Proxmox host from the host's own clone of this repo.
+Everything after the control node exists is driven by Ansible from inside it.
+Base Proxmox has no git, so installing it is the one manual step (see
+[ADR-0008](decisions/0008-host-scripts-from-host-clone.md) and
+[Host scripts](#host-scripts)):
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/Z-Space-Society/zai-ops/main/bootstrap.sh)"
+apt-get update; apt-get install -y git   # 401s from the enterprise repo are expected; step 1 disables it
+git clone https://github.com/Z-Space-Society/zai-ops.git /opt/zai-ops
+/opt/zai-ops/host/bootstrap.sh
 # override the CT ID (default 100):
-# bash -c "$(curl -fsSL .../bootstrap.sh)" _ 199
+# /opt/zai-ops/host/bootstrap.sh 199
 ```
 
 What it does, in order (each phase prints a numbered banner):
@@ -386,6 +390,22 @@ Deployed *service* tooling (the `garage` binary, `garage-init.sh`) is a differen
 category — it lives on its service CT, not the control node, and isn't an operator
 command. Only control-node operator commands belong in `bin/`.
 
+### Host scripts
+
+Scripts that must run on the Proxmox host itself live in [`host/`](../host/), run
+as root by path from the host's clone at `/opt/zai-ops`. They are not on PATH.
+The split from `bin/` is where the script runs: `bin/` drives Ansible from CT 100,
+while `host/` does what CT 100 can't reach. CT 100 talks to Proxmox only through
+the API token and has no SSH path to the host, so anything needing host accounts,
+`pct` or `pveum` belongs here. The host's clone and CT 100's are independent, so
+`git pull` on the host before running one. See
+[ADR-0008](decisions/0008-host-scripts-from-host-clone.md).
+
+| Script | Does |
+| ------ | ---- |
+| `host/bootstrap.sh [ctid]` | Build CT 100 and hand it the API token. See [Bootstrap process](#bootstrap-process) |
+| `host/import-github-user.sh <user>...` | Create a sudo account on the host from each user's GitHub public keys. The host-side counterpart of [`add-github-user.yml`](roles/github_user.md). Import only: a re-run adds keys new on GitHub and never removes any |
+
 ---
 
 ## Roles
@@ -396,7 +416,7 @@ command. Only control-node operator commands belong in `bin/`.
 | [`proxy`](roles/proxy.md)                  | `proxy`    | Caddy reverse proxy — the LAN-facing edge; single apt package, git-tracked routes |
 | [`nvidia_cuda`](roles/nvidia_cuda.md)      | inference nodes | NVIDIA driver + CUDA toolkit (bare-metal Debian 13) |
 | [`llama_server`](roles/llama_server.md)    | inference nodes | Build llama.cpp (CUDA) + install the `llama-server` unit |
-| [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo |
+| [`github_user`](roles/github_user.md)      | CT 100 + inference nodes | Create a human admin account from GitHub public keys, with sudo. For the Proxmox host itself, see [Host scripts](#host-scripts) |
 | [`object_store`](roles/object_store.md)    | `object-store` | Single-node Garage (S3-compatible) — the on-box backup target |
 | [`postgres`](roles/postgres.md)            | `postgres` | PostgreSQL 17 (Debian-native) — the internal database server |
 | [`redis`](roles/redis.md)                  | `redis`    | Redis (Debian-native) — the revocation store that lets Open WebUI invalidate an already-issued session JWT, so a corliss back-channel logout actually ends a chat session. **Once wired, it is a hard dependency of the whole chat surface, not just of logout** |

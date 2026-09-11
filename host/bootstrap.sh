@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 #
 # bootstrap.sh — Create the ZAI Ansible control node (defaults to CT 100).
-# Run on a freshly-flashed Proxmox host as root (the default first-boot login).
-# Pass a container ID to override the default.
+# Run on a freshly-flashed Proxmox host as root (the default first-boot login),
+# from the host's clone of this repo. Pass a container ID to override the default.
 #
-# This is the one host-level script in the repo. Everything after the
-# control node exists is driven by Ansible from inside it.
+# The host bootstrap. Other scripts that run on the host live beside it in host/
+# (ADR-0008). Everything after the control node exists is driven by Ansible from
+# inside it.
 #
-# bash bootstrap.sh		#  Will create CT 100
-# bash bootstrap.sh 199	#  Will create CT 199
+# /opt/zai-ops/host/bootstrap.sh		#  Will create CT 100
+# /opt/zai-ops/host/bootstrap.sh 199	#  Will create CT 199
 set -euo pipefail
 
 # --- Pretty output ---------------------------------------------------------

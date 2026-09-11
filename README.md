@@ -13,20 +13,23 @@ itself from this repo.
 
 1. Flash Proxmox onto the target host.
 
-2. SSH in as root and run the host bootstrap script. Base Proxmox has no
-   git, so fetch the single script directly with curl. This creates CT 100,
-   the Ansible control node, fixes its locale, installs Ansible + this repo,
-   and mints a Proxmox API token for Ansible (stored in an encrypted vault on
-   the control node).
+2. SSH in as root, install git, clone this repo onto the host, and run the host
+   bootstrap script from that clone. Base Proxmox has no git, so installing it
+   is the one manual step. The bootstrap creates CT 100, the Ansible control
+   node, fixes its locale, installs Ansible + this repo, and mints a Proxmox API
+   token for Ansible (stored in an encrypted vault on the control node). See
+   [ADR-0008](docs/decisions/0008-host-scripts-from-host-clone.md).
 
    ```bash
-   bash -c "$(curl -fsSL https://raw.githubusercontent.com/Z-Space-Society/zai-ops/main/bootstrap.sh)"
+   apt-get update; apt-get install -y git   # 401s from the enterprise repo are expected; the bootstrap disables it
+   git clone https://github.com/Z-Space-Society/zai-ops.git /opt/zai-ops
+   /opt/zai-ops/host/bootstrap.sh
    ```
 
    to override the CT ID (default 100), pass it as an argument:
 
    ```bash
-   bash -c "$(curl -fsSL https://raw.githubusercontent.com/Z-Space-Society/zai-ops/main/bootstrap.sh)" _ 199
+   /opt/zai-ops/host/bootstrap.sh 199
    ```
 
    The script prints a **vault password** on its last line. Back it up
@@ -180,6 +183,14 @@ itself from this repo.
    ansible-playbook add-github-user.yml -e github_user=alice
    ```
 
+   Ansible doesn't reach the Proxmox host itself. For a login there, run the host
+   script as root from the host's clone. It takes one or more users, and a re-run
+   only adds keys that are new on GitHub:
+
+   ```bash
+   /opt/zai-ops/host/import-github-user.sh jsayles bmann
+   ```
+
 ## Networking
 
 The bootstrap creates an isolated internal bridge `vmbr1` (`10.1.1.0/24`, no
@@ -232,7 +243,9 @@ architecture, networking, and a note for every role.
 
 ## Structure
 
-- `bootstrap.sh` — Host-level script to create CT 100 (the one host entry point)
+- `host/`: scripts run as root on the Proxmox host, from its clone at `/opt/zai-ops`
+  - `bootstrap.sh`: creates CT 100 (the host entry point)
+  - `import-github-user.sh`: creates a sudo account on the host from GitHub keys
 - `ansible/`
   - `site.yml` — configures the control node (CT 100)
   - `verify-proxmox.yml` — checks the API token authenticates

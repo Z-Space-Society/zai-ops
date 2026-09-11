@@ -103,6 +103,10 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # copy is newer than its source, so an override dropped from a theme would go on
 # being served. A pin below v1.2.0 is unaffected by either.
 #
+# The same release makes the nav usable on a phone, where no menu could be
+# opened (their triggers opened on hover and could not take focus) and the row
+# ran off the screen. Template and CSS only.
+#
 # v1.1.1 fixes the workspace list, which reported one member for every
 # workspace however many it had. Display only: the rosters themselves were
 # always right, and nothing needs re-entering. Also adds a Django admin page for

@@ -171,6 +171,9 @@
     dest: "{{ corliss_src }}"
     version: "{{ corliss_version }}"
     force: true
+  # Read by collectstatic below, which clears stale collected files when the
+  # checkout moved.
+  register: corliss_clone
   notify: restart corliss
 
 # --- uv + a managed CPython (the app pins 3.14 in its committed .python-version;
@@ -295,13 +298,24 @@
 # whitenoise (installed above) serves them straight out of gunicorn — no
 # separate nginx-for-statics box needed. No DB/secrets required for this
 # command, just a loadable settings module.
+#
+# PUBLIC_BASE_URL is here because Corliss picks its theme (a folder in the
+# checkout's themes/ named for the domain) from that URL's host, and this task
+# never reads the env file. Without it the theme resolves from localhost, and the
+# theme's CSS is never collected while its templates still render.
+#
+# --clear only when the checkout moved. collectstatic skips a file whose
+# collected copy is newer than its source, so an override removed from a theme
+# would otherwise go on being served. Clearing on every run would report changed
+# and restart the daemon every time.
 - name: Collect corliss's static assets
   ansible.builtin.command:
-    cmd: "{{ corliss_venv }}/bin/python manage.py collectstatic --noinput"
+    cmd: "{{ corliss_venv }}/bin/python manage.py collectstatic --noinput{{ ' --clear' if corliss_clone is changed else '' }}"
   args:
     chdir: "{{ corliss_src }}"
   environment:
     SECRET_KEY: "{{ corliss_secret_key }}"
+    PUBLIC_BASE_URL: "{{ corliss_url }}"
   register: corliss_collectstatic
   changed_when: "'0 static files copied' not in corliss_collectstatic.stdout"
   notify: restart corliss

@@ -3,8 +3,8 @@
 # import-github-user.sh: create a sudo account on this Proxmox host from a
 # GitHub user's public keys. Run as root, from the host's clone of zai-ops:
 #
-#   /opt/zai-ops/host/import-github-user.sh jsayles
-#   /opt/zai-ops/host/import-github-user.sh jsayles bmann
+#   /root/zai-ops/host/import-github-user.sh jsayles
+#   /root/zai-ops/host/import-github-user.sh jsayles bmann
 #
 # The host-side counterpart to add-github-user.yml, which reaches CT 100 and the
 # inference nodes but never the host: Ansible has no inventory entry for it and

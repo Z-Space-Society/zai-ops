@@ -33,8 +33,9 @@ These are settled. Don't silently reverse them; if a change requires it, call it
 out and update the docs.
 
 - **Host scripts from a host clone, then Ansible.** The operator installs git on
-  the Proxmox host and clones this repo to `/opt/zai-ops` there, the one manual
-  step. `host/bootstrap.sh` (run as root) builds CT 100, the Ansible control
+  the Proxmox host and clones this repo to `/root/zai-ops` there, the one manual
+  step. Deliberately not `/opt/zai-ops`, which is CT 100's clone, so the two are
+  never mistaken for each other. `host/bootstrap.sh` (run as root) builds CT 100, the Ansible control
   node; everything after is driven by Ansible *from inside CT 100*. Anything else
   that must run on the host itself (`host/import-github-user.sh`) lives beside it
   in `host/`, run by path, never put on PATH. CT 100 still has no SSH path to the

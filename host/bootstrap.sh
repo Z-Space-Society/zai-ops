@@ -8,8 +8,8 @@
 # (ADR-0008). Everything after the control node exists is driven by Ansible from
 # inside it.
 #
-# /opt/zai-ops/host/bootstrap.sh		#  Will create CT 100
-# /opt/zai-ops/host/bootstrap.sh 199	#  Will create CT 199
+# /root/zai-ops/host/bootstrap.sh		#  Will create CT 100
+# /root/zai-ops/host/bootstrap.sh 199	#  Will create CT 199
 set -euo pipefail
 
 # --- Pretty output ---------------------------------------------------------

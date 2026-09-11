@@ -32,14 +32,18 @@ Base Proxmox does not ship git, which is why the curl form existed.
 
 ## Decision
 
-- **The host holds a clone at `/opt/zai-ops`.** Installing git is the one manual
+- **The host holds a clone at `/root/zai-ops`.** Installing git is the one manual
   step, then the operator clones and runs from that clone:
 
   ```bash
   apt-get update; apt-get install -y git
-  git clone https://github.com/Z-Space-Society/zai-ops.git /opt/zai-ops
-  /opt/zai-ops/host/bootstrap.sh
+  git clone https://github.com/Z-Space-Society/zai-ops.git /root/zai-ops
+  /root/zai-ops/host/bootstrap.sh
   ```
+
+  Root's home, not `/opt`, on purpose. CT 100's clone lives at `/opt/zai-ops`,
+  and a second copy at the same path one shell away (`pct enter`) is easy to
+  mistake for the first.
 
   On a fresh host the enterprise repo is still enabled and 401s during that
   update. The bootstrap disables it.

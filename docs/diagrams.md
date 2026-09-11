@@ -125,7 +125,7 @@ flowchart LR
 
     subgraph phase1["1 · on the host, as root: clone, then host/bootstrap.sh"]
         direction TB
-        b0["apt install git, the one manual step<br/>clone zai-ops to /opt/zai-ops on the host"]
+        b0["apt install git, the one manual step<br/>clone zai-ops to /root/zai-ops on the host"]
         b1["apt repos, full-upgrade, suppress subscription nag"]
         b0 --> b1
         b2["create vmbr1 10.1.1.0/24, no uplink<br/>host at 10.1.1.1 + NAT masquerade"]

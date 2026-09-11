@@ -40,10 +40,10 @@ Base Proxmox has no git, so installing it is the one manual step (see
 
 ```bash
 apt-get update; apt-get install -y git   # 401s from the enterprise repo are expected; step 1 disables it
-git clone https://github.com/Z-Space-Society/zai-ops.git /opt/zai-ops
-/opt/zai-ops/host/bootstrap.sh
+git clone https://github.com/Z-Space-Society/zai-ops.git /root/zai-ops
+/root/zai-ops/host/bootstrap.sh
 # override the CT ID (default 100):
-# /opt/zai-ops/host/bootstrap.sh 199
+# /root/zai-ops/host/bootstrap.sh 199
 ```
 
 What it does, in order (each phase prints a numbered banner):
@@ -393,7 +393,7 @@ command. Only control-node operator commands belong in `bin/`.
 ### Host scripts
 
 Scripts that must run on the Proxmox host itself live in [`host/`](../host/), run
-as root by path from the host's clone at `/opt/zai-ops`. They are not on PATH.
+as root by path from the host's clone at `/root/zai-ops`. They are not on PATH.
 The split from `bin/` is where the script runs: `bin/` drives Ansible from CT 100,
 while `host/` does what CT 100 can't reach. CT 100 talks to Proxmox only through
 the API token and has no SSH path to the host, so anything needing host accounts,

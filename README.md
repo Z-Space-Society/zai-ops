@@ -22,14 +22,14 @@ itself from this repo.
 
    ```bash
    apt-get update; apt-get install -y git   # 401s from the enterprise repo are expected; the bootstrap disables it
-   git clone https://github.com/Z-Space-Society/zai-ops.git /opt/zai-ops
-   /opt/zai-ops/host/bootstrap.sh
+   git clone https://github.com/Z-Space-Society/zai-ops.git /root/zai-ops
+   /root/zai-ops/host/bootstrap.sh
    ```
 
    to override the CT ID (default 100), pass it as an argument:
 
    ```bash
-   /opt/zai-ops/host/bootstrap.sh 199
+   /root/zai-ops/host/bootstrap.sh 199
    ```
 
    The script prints a **vault password** on its last line. Back it up
@@ -188,7 +188,7 @@ itself from this repo.
    only adds keys that are new on GitHub:
 
    ```bash
-   /opt/zai-ops/host/import-github-user.sh jsayles bmann
+   /root/zai-ops/host/import-github-user.sh jsayles bmann
    ```
 
 ## Networking
@@ -243,7 +243,7 @@ architecture, networking, and a note for every role.
 
 ## Structure
 
-- `host/`: scripts run as root on the Proxmox host, from its clone at `/opt/zai-ops`
+- `host/`: scripts run as root on the Proxmox host, from its clone at `/root/zai-ops`
   - `bootstrap.sh`: creates CT 100 (the host entry point)
   - `import-github-user.sh`: creates a sudo account on the host from GitHub keys
 - `ansible/`

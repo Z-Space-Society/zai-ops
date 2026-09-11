@@ -916,6 +916,14 @@ Hard-won lessons writing **Ansible tasks** in this repo:
   which names the `content` key and does not read like a templating problem.
   Every managed config here is a `.j2` carrying a `# {{ ansible_managed }}`
   header; keep short files that way too rather than inlining them into `copy`.
+- **`collectstatic` keeps a stale file when the collected copy is newer.** It
+  compares modification times and skips a source that is older than what is
+  already in `STATIC_ROOT`. So when a file that shadowed another is removed (a
+  Corliss theme dropping its `theme.css`), the app's older original is skipped
+  and the theme's copy goes on being served, with nothing in the output to say
+  so. The corliss role adds `--clear` when its checkout changed, and only then,
+  since clearing every run would report changed and restart the daemon each
+  time.
 
 Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
 

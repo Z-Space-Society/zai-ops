@@ -90,6 +90,23 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v1.2.0 adds themes. A theme is a folder in Corliss's own `themes/`, named for
+# the domain it dresses, and Corliss picks it from PUBLIC_BASE_URL's host. A
+# cluster is themed by that folder existing and needs nothing set here: Ronchamp
+# picks up `themes/staging.sharedcomputer.network/`, and Heron has no folder and
+# renders exactly as before. No new env keys, no migration.
+#
+# The collectstatic task changed with it, twice. It is handed PUBLIC_BASE_URL,
+# because it never reads the env file and would otherwise resolve the theme from
+# localhost and collect none of its static files. And it runs with --clear
+# whenever the checkout moved, because collectstatic skips a file whose collected
+# copy is newer than its source, so an override dropped from a theme would go on
+# being served. A pin below v1.2.0 is unaffected by either.
+#
+# The same release makes the nav usable on a phone, where no menu could be
+# opened (their triggers opened on hover and could not take focus) and the row
+# ran off the screen. Template and CSS only.
+#
 # v1.1.1 fixes the workspace list, which reported one member for every
 # workspace however many it had. Display only: the rosters themselves were
 # always right, and nothing needs re-entering. Also adds a Django admin page for
@@ -315,7 +332,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v1.1.1
+corliss_version: v1.2.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

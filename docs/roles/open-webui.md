@@ -69,6 +69,7 @@ must:
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config (it migrates the DB on this first start) *before* the smoke test. |
 | Wait for the port + health check | `wait_for` (`127.0.0.1:8080`) + `uri` (`/health`) | `/health` is unauthenticated and proves the app booted and reached the migrated DB — not merely that the port is open. Generous retries cover first-boot migrations. |
+| Record the manifest | `include_role: manifest` (`open-webui`, `openwebui_version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `open-webui.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
 ### Handlers
 

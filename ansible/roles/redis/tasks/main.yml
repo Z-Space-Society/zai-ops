@@ -67,3 +67,21 @@
   register: redis_policy
   changed_when: false
   failed_when: redis_policy.stdout is not search(redis_maxmemory_policy)
+
+# --- Manifest (docs/roles/manifest.md) ----------------------------------------
+# Distro package: record what apt actually installed, not a pin. Debian point
+# releases keep landing without failing a replay, and /systems/ still shows the
+# drift.
+- name: Read the installed Redis package version
+  ansible.builtin.command:
+    cmd: "dpkg-query -W -f='${Version}' {{ redis_package }}"
+  register: redis_installed
+  changed_when: false
+  check_mode: false
+
+- name: Record Redis's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_service: redis
+    manifest_version: "{{ redis_installed.stdout }}"

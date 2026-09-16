@@ -426,6 +426,10 @@ the API token and has no SSH path to the host, so anything needing host accounts
 | [`happyview`](roles/happyview.md)          | `happyview` | HappyView AT Protocol AppView platform (Rust binary, built from source) — Postgres-backed, fronted by Caddy |
 | [`sync_relay`](roles/sync_relay.md) | `sync-relay` | Automerge sync server (Rust binary, built from source) — the server end of the automerge-repo WebSocket protocol behind shared notes, Postgres-backed. **Deliberately has no Caddy route:** the Phase A build enforces no membership, so `vmbr1` is the entire access boundary. See [ADR-0007](decisions/0007-sync-relay-and-space-membership.md) |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
+| [`manifest`](roles/manifest.md)            | every service play (last task) | Writes `<service>.json` to Garage: installed version, zai-ops revision, timestamp. Read by Corliss's `/systems/`. See [ADR-0009](decisions/0009-service-manifests-in-garage.md) |
+
+Adding a service? Follow [Adding a service](adding-a-service.md): a role is not
+done until it writes a manifest and Corliss has a health check for it.
 
 ---
 
@@ -455,6 +459,10 @@ decision record.
   `/root/.vault_pass`, no manual entry. They're part of restored state: a fresh
   CT 100 regenerates different values, so restore `/root/.zai-secrets` before
   re-running Ansible.
+- The two [service manifest](roles/manifest.md) keys
+  (`manifest_writer_*`, `manifest_reader_*`) follow the same pattern. The writer
+  stays on CT 100; the reader is rendered into Corliss's env. Neither has any
+  grant on `zai-backups`.
 - corliss's break-glass local admin password (`corliss_admin_password`)
   follows the same auto-generated, `/root/.zai-secrets`-persisted pattern —
   it's **DR-critical**: the only way into corliss's `/admin/` if ATProto/OIDC
@@ -546,6 +554,14 @@ on the remaining service CTs:
   `provision.yml` against `local` over the API
   (`proxmox_storage_contents_info`). A host that already holds an older build
   keeps using it; nothing forces a newer image under existing CTs.
+
+- **`[WARNING]: GetObjectTagging is not implemented by your storage provider`
+  is expected on manifest writes.** `amazon.aws.s3_object` reads an object's
+  tags after every upload, with no option to skip it, and Garage has no object
+  tagging. The module warns and carries on; the write has already succeeded.
+  Ansible prints the identical warning once per run, however many services
+  write. Leave it: silencing it means turning off Ansible warnings globally. See
+  [`manifest`](roles/manifest.md).
 
 - **Cloudflare 403s server-side Python fetches of our own public endpoints.**
   Browser Integrity Check is on by default for the zone and refuses known

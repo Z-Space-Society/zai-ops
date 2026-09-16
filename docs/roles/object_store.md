@@ -11,7 +11,9 @@ role is named for the *function* so the daemon can change without a rename.
 ## Purpose
 
 Provides an on-box S3 endpoint for the [`backup`](backup.md) job's restic
-repository. It is **internal-only** — reached over `vmbr1`, never LAN-facing.
+repository, and holds the per-service manifests Corliss's `/systems/` reads (see
+[`manifest`](manifest.md) and
+[ADR-0009](../decisions/0009-service-manifests-in-garage.md)). It is **internal-only** — reached over `vmbr1`, never LAN-facing.
 Single-node Garage: one replica, one zone.
 
 > **Backup-scope caveat:** the store lives on the same physical disk as
@@ -32,6 +34,10 @@ Single-node Garage: one replica, one zone.
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with the final config *before* cluster init runs. |
 | Wait for the S3 API | `ansible.builtin.wait_for` (`127.0.0.1:3900`) | Don't init until the daemon answers. |
 | Install + run the init script | `template` + `command` (`creates:`) | One-time: assign layout, import the key, create + grant the bucket. Idempotent via a sentinel. |
+| Look up + import the manifest keys | `command` → `garage key info` / `garage key import` (`no_log`) | Two scoped keys for [service manifests](manifest.md): a writer for the manifest role, a read-only key for Corliss. Imported from generated secrets so a rebuild restores the same credentials. **Not** in `garage-init.sh`: its sentinel means additions there never run on an initialised cluster. |
+| Look up + create the manifest bucket | `command` → `garage bucket info` / `garage bucket create` | `zai-manifests`, separate from `zai-backups` so neither manifest key can touch the restic repo. Converges every run. |
+| Grant the manifest keys | `command` → `garage bucket allow` (`changed_when: false`) | Writer read+write (s3_object checks the existing object before a PUT), reader read-only. Re-allowing is a no-op in Garage. |
+| Record the manifest | `include_role: manifest` (`garage`, `garage_version`) | After the bucket exists, so Garage's own manifest lands on the first run. See [`manifest`](manifest.md). |
 
 ### Handlers
 
@@ -66,11 +72,13 @@ Defined in [`defaults/main.yml`](../../ansible/roles/object_store/defaults/main.
 | `garage_region` | `garage` | S3 region; must match the `backup` role. |
 | `object_store_bucket` | `zai-backups` | Bucket restic writes to. |
 | `object_store_key_name` | `zai-backup` | Name of the imported access key. |
+| `manifest_writer_key_name` / `manifest_reader_key_name` | `zai-manifest-writer` / `zai-manifest-reader` | The two scoped manifest keys. The bucket name, `manifest_bucket`, is in `group_vars/all/main.yml` because the manifest and corliss roles read it too. |
 
 ### Secrets (auto-generated — no manual step)
 
-`garage_rpc_secret`, `garage_admin_token`, `object_store_access_key`, and
-`object_store_secret_key` are **generated on first run** by the `password`
+`garage_rpc_secret`, `garage_admin_token`, `object_store_access_key`,
+`object_store_secret_key`, and the four `manifest_{writer,reader}_{access,secret}_key`
+values are **generated on first run** by the `password`
 lookups in [`group_vars/all/main.yml`](../../ansible/group_vars/all/main.yml) and
 persisted under `/root/.zai-secrets` on CT 100. Re-runs reuse them, so the key
 stays stable across rebuilds (restic keeps its repo). Because the lookup runs on
@@ -82,7 +90,8 @@ play (CT 100) resolve to the *same* credentials. Nothing to paste into the vault
 ```bash
 ssh root@10.1.1.105 'systemctl is-active garage'
 ssh root@10.1.1.105 'garage status'          # one healthy node
-ssh root@10.1.1.105 'garage bucket list'     # → zai-backups
+ssh root@10.1.1.105 'garage bucket list'     # → zai-backups, zai-manifests
+ssh root@10.1.1.105 'garage bucket info zai-manifests'   # writer RW, reader R
 ```
 
 ## Notes
@@ -91,5 +100,7 @@ ssh root@10.1.1.105 'garage bucket list'     # → zai-backups
   `3903` are bound to localhost.
 - The same `object_store_access_key` / `object_store_secret_key` feed restic in
   the [`backup`](backup.md) role — one credential, both sides.
+- The manifest keys have no grant on `zai-backups`, and the backup key has none
+  on `zai-manifests`. Manifests are not in any backup: a replay rebuilds them.
 - For how the CT is created and reached, see the
   [main docs](../README.md#networking) and [`provision.yml`](../../ansible/provision.yml).

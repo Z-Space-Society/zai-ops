@@ -442,3 +442,12 @@
   until: corliss_health is succeeded
   retries: 10
   delay: 3
+
+# --- Manifest (docs/roles/manifest.md) ----------------------------------------
+# After the smoke test, so a service that failed it never claims a version.
+- name: Record Corliss's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_service: corliss
+    manifest_version: "{{ corliss_version }}"

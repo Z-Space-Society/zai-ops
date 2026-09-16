@@ -101,3 +101,66 @@
   environment:
     ZAI_OS_ACCESS_KEY: "{{ object_store_access_key }}"
     ZAI_OS_SECRET_KEY: "{{ object_store_secret_key }}"
+
+# --- Service manifests (docs/decisions/0009) ---------------------------------
+# A second bucket holding one JSON manifest per service, written by each service
+# play and read by Corliss's /systems/. Deliberately NOT in garage-init.sh: that
+# script is gated by a one-time sentinel, so anything added to it never runs on a
+# cluster that is already initialised. These tasks converge on every run instead.
+#
+# Two keys, neither of which can reach zai-backups: the writer lives only on the
+# control node (the manifest role), the reader only in Corliss's env. The backup
+# key stays out of service plays entirely.
+- name: Look up the manifest access keys
+  ansible.builtin.command:
+    cmd: "garage key info {{ item.name }}"
+  loop: "{{ _manifest_keys }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: manifest_key_info
+  failed_when: false
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+# Imported from the generated secrets (not Garage-minted) so a rebuild restores
+# the same credentials and Corliss's env keeps working without a re-render.
+- name: Import the manifest access keys
+  ansible.builtin.command:
+    cmd: "garage key import --yes -n {{ item.item.name }} {{ item.item.access }} {{ item.item.secret }}"
+  loop: "{{ manifest_key_info.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc != 0
+  no_log: true
+
+- name: Look up the manifest bucket
+  ansible.builtin.command:
+    cmd: "garage bucket info {{ manifest_bucket }}"
+  register: manifest_bucket_info
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Create the manifest bucket
+  ansible.builtin.command:
+    cmd: "garage bucket create {{ manifest_bucket }}"
+  when: manifest_bucket_info.rc != 0
+
+# Grants are declarative in Garage: re-allowing an existing permission is a
+# no-op, so this converges rather than reporting a change every run. The writer
+# needs --read too: s3_object checks for the existing object before its PUT.
+- name: Grant the manifest keys on the manifest bucket
+  ansible.builtin.command:
+    cmd: "garage bucket allow {{ item.grant }} {{ manifest_bucket }} --key {{ item.name }}"
+  loop: "{{ _manifest_keys }}"
+  loop_control:
+    label: "{{ item.name }} {{ item.grant }}"
+  changed_when: false
+
+- name: Record Garage's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_service: garage
+    manifest_version: "{{ garage_version }}"

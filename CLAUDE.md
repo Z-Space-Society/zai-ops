@@ -18,6 +18,8 @@ docs for "later":
   table in `docs/README.md`. For a new role, create its note from the pattern in
   the existing role docs (purpose · task-by-task table with the *why* · variables
   · dependencies · verify · notes).
+- **New service** → follow [`docs/adding-a-service.md`](docs/adding-a-service.md):
+  the role ends with a manifest write, and Corliss gets a health check for it.
 - **New/changed playbook** → update the Playbooks table in `docs/README.md` (and
   the run steps in the top-level `README.md` if the operator flow changes).
 - **Networking, bootstrap phases, addressing, or trust model change** → update

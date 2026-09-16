@@ -1,0 +1,18 @@
+---
+# Where manifests go. The bucket name and both keys live in
+# group_vars/all/main.yml because the object_store and corliss roles read them
+# too. These two are this role's own: they are only needed where a write happens.
+
+# Garage's S3 API on the object-store CT, over vmbr1. Same endpoint the backup
+# role gives restic.
+manifest_endpoint_url: "http://{{ hostvars['object-store'].ansible_host }}:3900"
+
+# Must match garage_region in the object_store role. Restated rather than read
+# from there: role defaults are only visible to plays that apply the role, and
+# the service plays calling this one don't apply object_store (the backup role
+# restates it for the same reason).
+manifest_region: "garage"
+
+# Required from the caller, no defaults on purpose (the tasks assert on them):
+#   manifest_service  the object key, <service>.json; see docs/roles/manifest.md
+#   manifest_version  what the play actually installed

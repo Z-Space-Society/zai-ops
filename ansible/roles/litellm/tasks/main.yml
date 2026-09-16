@@ -552,3 +552,12 @@
   retries: 10
   delay: 3
   when: litellm_embedding_enabled
+
+# --- Manifest (docs/roles/manifest.md) ----------------------------------------
+# After the smoke test, so a service that failed it never claims a version.
+- name: Record LiteLLM's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_service: litellm
+    manifest_version: "{{ litellm_version }}"

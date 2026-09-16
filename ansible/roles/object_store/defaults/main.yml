@@ -36,3 +36,19 @@ garage_region: "garage"
 # manual step, and stable across rebuilds so the restic repo survives.
 object_store_bucket: "zai-backups"
 object_store_key_name: "zai-backup"
+
+# Service manifests (docs/decisions/0009). The bucket name is shared with the
+# manifest role and the corliss role, so it lives in group_vars/all/main.yml as
+# `manifest_bucket`; the key names only matter here. Credentials are the
+# generated manifest_{writer,reader}_{access,secret}_key secrets.
+manifest_writer_key_name: "zai-manifest-writer"
+manifest_reader_key_name: "zai-manifest-reader"
+_manifest_keys:
+  - name: "{{ manifest_writer_key_name }}"
+    access: "{{ manifest_writer_access_key }}"
+    secret: "{{ manifest_writer_secret_key }}"
+    grant: "--read --write"
+  - name: "{{ manifest_reader_key_name }}"
+    access: "{{ manifest_reader_access_key }}"
+    secret: "{{ manifest_reader_secret_key }}"
+    grant: "--read"

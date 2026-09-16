@@ -638,8 +638,8 @@ console_client_key: ""
 # The Automerge sync server behind collaborative spaces. Probed at /health, which
 # reports liveness WITHOUT touching Postgres — deliberately, so a database blip
 # cannot get the relay restarted out from under live sync connections. So "up"
-# means the process is serving, not that its storage works; Corliss says as much
-# on the row rather than overclaiming.
+# means the process is serving, not that its storage works. Since Corliss v1.2.1
+# the row no longer says so; read a green dot there with that in mind.
 #
 # The port is a LOCAL default rather than a reach into the sync_relay role's
 # vars — same convention as corliss_litellm_port above, for the reason

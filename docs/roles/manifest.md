@@ -102,5 +102,9 @@ ansible localhost -m amazon.aws.s3_object -a "mode=getstr bucket=zai-manifests o
 ## Notes
 
 - Manifests are not backed up. A replay of each service play rebuilds them.
+- `[WARNING]: GetObjectTagging is not implemented by your storage provider.` is
+  expected. The module reads tags after every upload and Garage has no tagging;
+  the write has already succeeded. See
+  [Known gotchas](../README.md#known-gotchas).
 - A manifest can outlive its subject: a CT rebuilt without replaying its play
   keeps the old one. The Status column on `/systems/` is what qualifies it.

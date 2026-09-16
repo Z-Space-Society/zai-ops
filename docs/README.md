@@ -555,6 +555,14 @@ on the remaining service CTs:
   (`proxmox_storage_contents_info`). A host that already holds an older build
   keeps using it; nothing forces a newer image under existing CTs.
 
+- **`[WARNING]: GetObjectTagging is not implemented by your storage provider`
+  is expected on manifest writes.** `amazon.aws.s3_object` reads an object's
+  tags after every upload, with no option to skip it, and Garage has no object
+  tagging. The module warns and carries on; the write has already succeeded.
+  Ansible prints the identical warning once per run, however many services
+  write. Leave it: silencing it means turning off Ansible warnings globally. See
+  [`manifest`](roles/manifest.md).
+
 - **Cloudflare 403s server-side Python fetches of our own public endpoints.**
   Browser Integrity Check is on by default for the zone and refuses known
   non-browser User-Agents with `error code: 1010` — `Python-urllib/3.x` among

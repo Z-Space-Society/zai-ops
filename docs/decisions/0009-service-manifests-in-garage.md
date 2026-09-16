@@ -72,8 +72,10 @@ Options weighed and rejected:
 
 - **Report, never raise.** A failed manifest write logs a warning and the
   service play carries on. A metadata write must not fail a service deploy. On
-  a fresh cluster the proxy play runs before object-store, so the proxy's first
-  write has nowhere to go and fills in on the next replay.
+  a `--limit` run on a cluster whose object-store has never been provisioned,
+  the write has nowhere to go and fills in on the next replay. (`provision.yml`
+  runs object-store first for this reason; until v0.7.0 had deployed, the proxy
+  play ran ahead of it and Caddy's first write on Heron warned.)
 
 - **Manifests are not backed up.** A replay rebuilds every one of them, so they
   hold nothing unreproducible.

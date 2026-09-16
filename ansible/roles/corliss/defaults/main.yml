@@ -90,6 +90,19 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v1.2.1 fills in /systems/' zai-ops and Version columns: which zai-ops revision
+# provisioned each service and which version it runs, read from the manifests
+# every service play writes to Garage since zai-ops v0.7.0 (ADR-0009).
+#
+# **Needs the three keys in the "Service manifests" section at the foot of this
+# file**: MANIFEST_BUCKET, MANIFEST_ACCESS_KEY and MANIFEST_SECRET_KEY. Unlike the
+# health-probe keys they carry a credential, the read-only manifest key, which is
+# why they are a block of their own. Blank leaves the two columns reading "not
+# recorded" and changes nothing else. A pin below v1.2.1 ignores them.
+#
+# The columns are only as complete as the manifests: a service whose play has
+# not run on zai-ops v0.7.0 or later shows "not recorded" until it replays.
+#
 # v1.2.0 adds themes. A theme is a folder in Corliss's own `themes/`, named for
 # the domain it dresses, and Corliss picks it from PUBLIC_BASE_URL's host. A
 # cluster is themed by that folder existing and needs nothing set here: Ronchamp
@@ -332,7 +345,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v1.2.0
+corliss_version: v1.2.1
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -657,3 +670,18 @@ corliss_garage_s3_url: "http://{{ hostvars['object-store'].ansible_host }}:{{ co
 # than an origin, because unlike the three above this names an endpoint Caddy
 # publishes rather than the root of a service.
 corliss_caddy_health_url: "http://{{ hostvars['proxy'].ansible_host }}/healthz"
+
+# --- Service manifests: the zai-ops and Version columns on /systems/ ----------
+#
+# Read from the manifest bucket the object_store role creates and every service
+# play writes to (docs/roles/manifest.md, ADR-0009), over the same GARAGE_S3_URL
+# the Garage probe dials. Kept out of the health-probe block above because this
+# one carries a credential and that block's promise is that it carries none.
+#
+# The reader key is read-only on the manifest bucket and has no grant on
+# zai-backups, so what Corliss holds cannot read the backups or write anything.
+# The bucket and both key halves are generated group_vars, shared with the
+# object_store role that imports them, so the two cannot disagree.
+corliss_manifest_bucket: "{{ manifest_bucket }}"
+corliss_manifest_access_key: "{{ manifest_reader_access_key }}"
+corliss_manifest_secret_key: "{{ manifest_reader_secret_key }}"

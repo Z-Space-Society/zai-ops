@@ -37,7 +37,7 @@ never claims a version.
 | ---- | ------ | --- |
 | Assert the caller passed a service and a version | `ansible.builtin.assert` | A missing var is a bug in the calling role, so this one raises. |
 | Write the manifest to Garage | `amazon.aws.s3_object` (`mode: put`, delegated to localhost) | `permission: []` and `encrypt: false` because Garage has no ACLs or SSE-S3 and the module turns both on by default. `overwrite: always` because every manifest carries a fresh timestamp. `failed_when: false`: a metadata write must never fail a service deploy. Skipped when `object-store` has no CTID. Under `--check` the module reports without writing. |
-| Warn that the manifest was not written | `ansible.builtin.debug` | Makes a skipped or failed write visible in the run output without failing the play. |
+| Warn that the manifest was not written | `ansible.builtin.debug` | Makes a skipped or failed write visible in the run output without failing the play. Prints the module's `msg`, or its whole result (minus `invocation`) when there is none: Heron's first v0.7.0 run failed a write with no `msg`, and the warning said nothing useful. |
 
 ## Manifest keys
 
@@ -84,7 +84,8 @@ From [`group_vars/all/main.yml`](../../ansible/group_vars/all/main.yml):
 ## Dependencies
 
 - `object_store` must have run once, to create the bucket and import the writer
-  key. Until it has, every write warns and the plays carry on.
+  key. `provision.yml` runs that play first; a `--limit` run on a cluster where
+  it never has warns on every write and carries on.
 - `python3-boto3` on CT 100 (installed by [`control_node`](control_node.md)).
   The `amazon.aws` collection ships in Debian 13's ansible 12 bundle.
 

@@ -358,3 +358,12 @@
   until: openwebui_health is succeeded
   retries: 20
   delay: 5
+
+# --- Manifest (docs/roles/manifest.md) ----------------------------------------
+# After the smoke test, so a service that failed it never claims a version.
+- name: Record Open WebUI's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_service: open-webui
+    manifest_version: "{{ openwebui_version }}"

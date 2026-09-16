@@ -88,6 +88,7 @@ nobody gains an entitlement the registry never granted.
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config before the smoke test. |
 | Wait for the port + health check | `wait_for` (`127.0.0.1:8000`) + `uri` (`/.well-known/openid-configuration`) | The discovery doc proves the app booted, reached the migrated DB, *and* the signing keys loaded (`signing.py` fails closed on a missing key) — not merely that the port is open. |
+| Record the manifest | `include_role: manifest` (`corliss`, `corliss_version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `corliss.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
 ### Handlers
 

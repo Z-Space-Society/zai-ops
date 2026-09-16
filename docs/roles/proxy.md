@@ -101,6 +101,8 @@ such trace, so nothing guards alhambra's step.
 | Deploy the Caddyfile | `template` (`validate: caddy validate`) | Renders `caddy_proxy_hosts`. `validate` is the `nginx -t` analog — a bad config fails the task instead of deploying. |
 | Start + enable `caddy` | `systemd` | Running now + on boot. |
 | Validate the deployed config | `command: caddy validate` (`changed_when: false`) | Final guard that the live file is valid. |
+| Read the installed package version | `command` → `dpkg-query -W -f='${Version}' caddy` (`changed_when: false`, `check_mode: false`) | Records what this CT has. `caddy_apt_version` is what the pin should produce, not proof it did. |
+| Record the manifest | `include_role: manifest` (`caddy`, `installed version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `caddy.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
 ### Handlers
 

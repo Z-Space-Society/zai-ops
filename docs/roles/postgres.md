@@ -33,6 +33,8 @@ third-party apt repo hits on Debian 13 (see
 | Flush handlers | `meta: flush_handlers` | Bring the server up with the final config *before* validating. |
 | Verify listener | `command: pg_isready -h {{ ansible_host }}` | Proves `listen_addresses` took effect on the internal IP (the feature shipped). |
 | Assert HBA parses | `command` → `pg_hba_file_rules` | Fail on a malformed rule — the pg_hba analogue of `caddy validate`. |
+| Read the installed package version | `command` → `dpkg-query -W -f='${Version}' postgresql-{{ postgres_version }}` (`changed_when: false`, `check_mode: false`) | Records what apt actually installed rather than a pin, so a Debian point release shows up as drift on `/systems/` without failing a replay. `postgres_version` pins only the major. |
+| Record the manifest | `include_role: manifest` (`postgres`, `installed version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `postgres.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
 ### Handlers
 

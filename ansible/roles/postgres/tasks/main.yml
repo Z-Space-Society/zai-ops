@@ -69,3 +69,21 @@
   register: postgres_hba_errors
   changed_when: false
   failed_when: postgres_hba_errors.stdout | trim | int > 0
+
+# --- Manifest (docs/roles/manifest.md) ----------------------------------------
+# Distro package: record what apt actually installed, not a pin. Debian point
+# releases keep landing without failing a replay, and /systems/ still shows the
+# drift.
+- name: Read the installed PostgreSQL package version
+  ansible.builtin.command:
+    cmd: "dpkg-query -W -f='${Version}' postgresql-{{ postgres_version }}"
+  register: postgres_installed
+  changed_when: false
+  check_mode: false
+
+- name: Record PostgreSQL's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_service: postgres
+    manifest_version: "{{ postgres_installed.stdout }}"

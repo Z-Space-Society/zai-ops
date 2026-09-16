@@ -246,3 +246,12 @@
   until: sync_relay_health is succeeded
   retries: 10
   delay: 3
+
+# --- Manifest (docs/roles/manifest.md) ----------------------------------------
+# After the smoke test, so a service that failed it never claims a version.
+- name: Record the sync relay's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_service: sync-relay
+    manifest_version: "{{ sync_relay_version }}"

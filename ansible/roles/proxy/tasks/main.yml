@@ -166,3 +166,21 @@
   ansible.builtin.command:
     cmd: caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
   changed_when: false
+
+# --- Manifest (docs/roles/manifest.md) ----------------------------------------
+# Read back from dpkg rather than restating caddy_apt_version: the manifest
+# records what this CT has, which is what the pin is supposed to produce but not
+# the same claim. Same shape as the postgres and redis roles.
+- name: Read the installed Caddy package version
+  ansible.builtin.command:
+    cmd: "dpkg-query -W -f='${Version}' caddy"
+  register: caddy_installed
+  changed_when: false
+  check_mode: false
+
+- name: Record Caddy's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_service: caddy
+    manifest_version: "{{ caddy_installed.stdout }}"

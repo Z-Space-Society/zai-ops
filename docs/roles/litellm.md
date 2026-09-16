@@ -75,6 +75,7 @@ source build) so the lean proxy CT never grows a C++ toolchain; the GGUF is smal
 | Mint the Corliss provisioner key | `stat` + `uri` (POST `/user/new`, `user_role: proxy_admin`, `auto_create_key: true`) + `copy`, all `delegate_to: localhost` | Corliss issues members' keys, which needs admin scope — so unlike Open WebUI's key this belongs to a `proxy_admin` user. Still not the master key. Generate-once by the same `stat`-first guard, for the same reason: a successful call returns a brand-new secret every time. |
 | Render the `zai-litellm-key` admin env | `file` + `copy`, `delegate_to: localhost` | Writes `/etc/zai-litellm/admin.env` (`0600`) on the control node — `LITELLM_API_BASE` + `LITELLM_MASTER_KEY`, the bits [`bin/zai-litellm-key`](../../bin/zai-litellm-key) can't carry in git. Same idiom as the backup role's `/etc/zai-backup/restic.env`. Re-rendered every run (not generate-once — it's just the current master key + address, not a secret with its own lifecycle). |
 | *(floor embedder)* Wait + embedding smoke test | `wait_for` + `uri` (POST `/v1/embeddings`) | Runs after the flush (so a changed unit is restarted). A returned vector proves the server booted in embeddings mode and the model loaded. |
+| Record the manifest | `include_role: manifest` (`litellm`, `litellm_version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `litellm.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
 ### Handlers
 

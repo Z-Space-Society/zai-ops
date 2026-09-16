@@ -54,6 +54,7 @@ reclaim ~6 GB. The CT is therefore sized at 2 GB RAM / 16 GB disk for build head
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config before the smoke test. |
 | Wait for port + root endpoint | `wait_for` (`127.0.0.1:3000`) + `uri` (`/`) | Proves the app booted and bound the port. |
+| Record the manifest | `include_role: manifest` (`happyview`, `happyview_version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `happyview.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
 ### Handlers
 

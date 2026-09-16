@@ -1,0 +1,72 @@
+---
+# Record what a service play just installed, as <service>.json in the Garage
+# manifest bucket. Corliss's /systems/ reads these to show which zai-ops revision
+# provisioned each service and which version it runs. See
+# docs/decisions/0009-service-manifests-in-garage.md.
+#
+# Called by each service role as its LAST task, after its smoke test:
+#
+#   - name: Record <service>'s manifest
+#     ansible.builtin.include_role:
+#       name: manifest
+#     vars:
+#       manifest_service: <key Corliss reads>
+#       manifest_version: <what was actually installed>
+#
+# It must live inside the play that installs the thing. Rendered from anywhere
+# else it would report today's blueprint values rather than what this CT got.
+
+# A caller that forgets a var is a bug in the role, not a runtime condition, so
+# this one raises.
+- name: Assert the manifest was called with a service and a version
+  ansible.builtin.assert:
+    that:
+      - manifest_service is defined and (manifest_service | string | length) > 0
+      - manifest_version is defined and (manifest_version | string | length) > 0
+    quiet: true
+
+# Everything below reports and never raises: a metadata write must not fail a
+# service deploy. On a fresh cluster the proxy play runs before object-store, so
+# its first write has nowhere to go; the next replay fills it in.
+- name: Write the manifest to Garage
+  amazon.aws.s3_object:
+    mode: put
+    bucket: "{{ manifest_bucket }}"
+    object: "{{ manifest_service }}.json"
+    content: "{{ _manifest | to_json }}"
+    metadata:
+      Content-Type: application/json
+    endpoint_url: "{{ manifest_endpoint_url }}"
+    region: "{{ manifest_region }}"
+    access_key: "{{ manifest_writer_access_key }}"
+    secret_key: "{{ manifest_writer_secret_key }}"
+    # Garage has no ACLs and no SSE-S3; both default on in this module.
+    permission: []
+    encrypt: false
+    # Every manifest carries a fresh provisioned_at, so there is never an
+    # identical object to skip; don't pay for the ETag comparison.
+    overwrite: always
+  vars:
+    _manifest:
+      service: "{{ manifest_service }}"
+      version: "{{ manifest_version | string | trim }}"
+      zai_ops: "{{ zai_ops_revision }}"
+      provisioned_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+  delegate_to: localhost
+  register: manifest_write
+  failed_when: false
+  # The module marks secret_key no_log itself, so a failure message stays
+  # legible without hiding the whole task.
+  when: hostvars['object-store']['ctid'] is defined
+
+# A PUT that went through always reports changed (overwrite: always), so
+# "not changed" is the failure signal once failed_when has masked `failed`.
+- name: Warn that the manifest was not written
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ manifest_service }}.json was not written to Garage
+      ({{ 'object-store has no CTID assigned' if manifest_write is skipped
+          else manifest_write.msg | default('no error message') }}).
+      The service is deployed; /systems/ will show a blank or stale version for
+      it until this play is replayed.
+  when: manifest_write is skipped or manifest_write is not changed

@@ -61,6 +61,8 @@ is a property of the data, not an oversight.
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up on the final config *before* proving it works — otherwise the checks below can pass against the still-running old config and report a bind or auth change that never took. Same idiom as [`postgres`](postgres.md). |
 | Verify PING on the internal address | `command` → `redis-cli -h {{ ansible_host }}` (`failed_when`), password via `REDISCLI_AUTH` | The listener on the **internal** address is the feature being shipped: open-webui reaches it from a different CT, so a loopback PING would prove nothing about the thing that has to work. Authenticating proves `requirepass` and the password open-webui will put in its `REDIS_URL` agree. The password rides an env var rather than `-a` so it stays out of `ps` on the CT — and so the task needs no `no_log`, which would hide the error in the one run where it matters. |
 | Assert `maxmemory-policy` | `command` → `config get` (`failed_when`) | The one setting whose wrong value fails **silently and dangerously** — see below. Asserted against the *running server*, not assumed from the template having rendered. |
+| Read the installed package version | `command` → `dpkg-query -W -f='${Version}' {{ redis_package }}` (`changed_when: false`, `check_mode: false`) | Records what apt actually installed rather than a pin, so a Debian point release shows up as drift on `/systems/` without failing a replay. |
+| Record the manifest | `include_role: manifest` (`redis`, `installed version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `redis.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
 ### Handlers
 

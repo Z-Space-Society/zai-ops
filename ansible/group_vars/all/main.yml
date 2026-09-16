@@ -54,6 +54,26 @@ object_store_access_key: "GK{{ lookup('ansible.builtin.password', _zai_secrets_d
 object_store_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/object_store_secret_key chars=digits,abcdef length=64') }}"
 restic_repo_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/restic_repo_password chars=digits,abcdef length=64') }}"
 
+# Service manifests (docs/decisions/0009): one JSON object per service in its own
+# Garage bucket, written at the end of each service play and read by Corliss's
+# /systems/. Two scoped keys, neither with any grant on zai-backups: the writer
+# is used only by the manifest role on the control node, the reader is rendered
+# only into Corliss's env. Same generate-once posture as the backup key above.
+# The bucket name lives here, not in a role default, because three roles read it
+# (object_store creates it, manifest writes to it, corliss reads from it).
+manifest_bucket: "zai-manifests"
+manifest_writer_access_key: "GK{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/manifest_writer_access_key chars=digits,abcdef length=24') }}"
+manifest_writer_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/manifest_writer_secret_key chars=digits,abcdef length=64') }}"
+manifest_reader_access_key: "GK{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/manifest_reader_access_key chars=digits,abcdef length=24') }}"
+manifest_reader_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/manifest_reader_secret_key chars=digits,abcdef length=64') }}"
+
+# The zai-ops revision a manifest records: the control node's own checkout
+# (/opt/zai-ops on CT 100), read at the moment the play runs. --dirty is the
+# point, not decoration: a "-dirty" suffix means the blueprint was hand-edited on
+# CT 100, which breaks "the artifact is the repo", and /systems/ should say so.
+# --always keeps it a value (a bare sha) even on a clone with no tags fetched.
+zai_ops_revision: "{{ lookup('ansible.builtin.pipe', 'git -C ' ~ playbook_dir ~ ' describe --tags --always --dirty') }}"
+
 # LiteLLM proxy secrets. master_key is the proxy's admin/root API key (the `sk-…`
 # clients and the admin UI authenticate with); db_password is the password for the
 # `litellm` Postgres role the litellm role creates on the postgres CT. Both resolve

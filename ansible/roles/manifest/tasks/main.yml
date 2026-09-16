@@ -26,8 +26,9 @@
     quiet: true
 
 # Everything below reports and never raises: a metadata write must not fail a
-# service deploy. On a fresh cluster the proxy play runs before object-store, so
-# its first write has nowhere to go; the next replay fills it in.
+# service deploy. provision.yml runs object-store first so a fresh cluster's
+# writes have a bucket to land in; a --limit run on a cluster whose object-store
+# has never been provisioned still warns, and the next replay fills it in.
 - name: Write the manifest to Garage
   amazon.aws.s3_object:
     mode: put
@@ -66,7 +67,13 @@
     msg: >-
       WARNING: {{ manifest_service }}.json was not written to Garage
       ({{ 'object-store has no CTID assigned' if manifest_write is skipped
-          else manifest_write.msg | default('no error message') }}).
+          else manifest_write.msg | default(_manifest_failure | to_json) }}).
       The service is deployed; /systems/ will show a blank or stale version for
       it until this play is replayed.
+  vars:
+    # The module's result minus its echoed arguments. When a failure carries no
+    # `msg` (Heron's first run did exactly this) the rest of the result is the
+    # only account of what went wrong. secret_key is censored by the module
+    # either way, but `invocation` is dropped because it is noise, not evidence.
+    _manifest_failure: "{{ manifest_write | dict2items | rejectattr('key', 'equalto', 'invocation') | items2dict }}"
   when: manifest_write is skipped or manifest_write is not changed

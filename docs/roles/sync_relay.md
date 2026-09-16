@@ -111,7 +111,7 @@ corliss role can render its env file** — that derivation is unguarded on purpo
 
 It also inherits the caveat above: `/health` reports liveness without touching
 Postgres, so a green dot on `/systems/` says the process is serving, not that its
-storage works. Corliss says so on the row rather than letting the dot overclaim.
+storage works. Since Corliss v1.2.1 the row no longer carries a note saying so.
 
 ## Storage
 

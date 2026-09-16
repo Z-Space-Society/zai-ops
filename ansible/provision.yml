@@ -147,17 +147,22 @@
         timeout: 120
       when: ct_netif is defined
 
-- name: Configure the reverse-proxy edge
-  hosts: proxy
-  gather_facts: true
-  roles:
-    - proxy
-
+# object-store runs FIRST of the configure plays. It creates the manifest bucket
+# and keys every service play writes to (ADR-0009), and it is also the restic
+# target backup.yml needs. It depends on nothing else here. The proxy play used
+# to run ahead of it, so on a fresh cluster Caddy's manifest write had nowhere to
+# go and warned until the next replay (seen on Heron's v0.7.0 deploy).
 - name: Configure the object store
   hosts: object-store
   gather_facts: true
   roles:
     - object_store
+
+- name: Configure the reverse-proxy edge
+  hosts: proxy
+  gather_facts: true
+  roles:
+    - proxy
 
 - name: Configure the Postgres database server
   hosts: postgres

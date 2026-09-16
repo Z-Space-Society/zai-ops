@@ -192,7 +192,7 @@ assignment](README.md#service-ctid-assignment).
 
 | Must come first | Because |
 | --------------- | ------- |
-| `object-store` | it is the restic backend `backup.yml` writes to |
+| `object-store` | it is the restic backend `backup.yml` writes to, and it creates the bucket and key every service play's [manifest](roles/manifest.md) write needs, so `provision.yml` runs it first |
 | `postgres` | `happyview`, `litellm`, `sync-relay`, `corliss` and `open-webui` each create their own role + database on it |
 | `redis` | `open-webui` builds its `REDIS_URL` from that CT's address |
 

@@ -231,3 +231,15 @@ pds_jwt_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/pds_
 pds_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/pds_admin_password chars=ascii_letters,digits length=32') }}"
 # pds_oauth_jwk_set: unset for now — server self-generates its OAuth signing key
 # pds_plc_rotation_key_private: unset for now — wire before the SCN DID migration
+
+# PDS outbound email — Forward Email relay (cluster SMTP convention,
+# one-alias-per-app). The SMTP URL is built from the domain catch-all SMTP
+# creds, which *an operator provisions* into /root/.zai-secrets
+# (pds_email_smtp_password — no generator; it is the Forward Email catch-all
+# secret for the domain). `pds_email_smtp_user` defaults to *@<domain> (right
+# for production) and the From alias to pds.<domain> — override both in the
+# runtime inventory when a cluster differs (e.g. staging sends as
+# pds-staging@sharedcomputer.network via *@sharedcomputer.network). Both the
+# URL and the From must be set for the server to enable delivery.
+pds_email_smtp_user: "*@{{ cluster_domain }}"
+pds_email_smtp_url: "smtp://{{ pds_email_smtp_user }}:{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_email_smtp_password') }}@smtp.forwardemail.net:465?tls=required"

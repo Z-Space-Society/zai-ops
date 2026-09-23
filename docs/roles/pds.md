@@ -71,6 +71,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | `pds_handle_domains` | `[".{{ cluster_domain }}"]` | handle namespace accounts get (SCN: `*.sharedcomputer.network`) |
 | `pds_crawlers` | `["https://bsky.network"]` | who may crawl/announce (TODO(decision): own relay?) |
 | `pds_admin_dids` | SCN roster (4 DIDs) | delegated admins — the [[zai-ops-pds-plan]] roster (@sharedcomputer.network, @bmann.ca, @hadsie.com, @jacob.cascadia.social); override per cluster with `zai-set-pds-admin` |
+| `pds_email_from_address` | `pds.{{ cluster_domain }}` | per-app From alias (Forward Email, one-alias-per-app); override per cluster (staging: `pds-staging@sharedcomputer.network`) |
 | `pds_data_dir` | `/var/lib/pds` | accounts.sqlite + repos + blobs; the unit's only `ReadWritePaths` |
 | `pds_*_limit` | 16 MiB / 1 GiB | blob upload + import limits |
 
@@ -96,6 +97,19 @@ boots without them (verified 2026-09-23 against the workspace source — the
 OAuth signing key is generated on first boot when the JWK set is absent; a
 P-256/K-256 private did:key is required only when we must update hosted
 identities' DID documents ourselves).
+
+### Outbound email (SMTP)
+
+The cluster sends mail through the **Forward Email** relay
+(`smtp.forwardemail.net:465`, catch-all SMTP creds, one alias per app —
+see the forwardemail skill). The catch-all password is provisioned into
+`/root/.zai-secrets/pds_email_smtp_password` by an operator (it is the
+domain's Forward Email catch-all secret — no generator); the SMTP URL is built
+from it in `group_vars/all/main.yml`. `pds_email_from_address` is the per-app
+alias (default `pds.<domain>`; staging overrides to `pds-staging@…`). Both the
+URL and the From must be set for delivery; with either unset the server
+disables email (password reset / account deletion / email confirmation report
+success without sending — dev-log only, per the server's own boot warning).
 
 ## Dependencies
 

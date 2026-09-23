@@ -78,6 +78,15 @@ pds_admin_dids:
   - "did:plc:tmxbvcho3zysvtadtextctxw"   # @hadsie.com
   - "did:plc:hhyrsndukexwr6qucdngcf4r"   # @jacob.cascadia.social
 
+# Outbound mail — the cluster SMTP convention (Forward Email relay,
+# one-alias-per-app): the SMTP URL is built in group_vars/all/main.yml from the
+# catch-all SMTP creds in /root/.zai-secrets; `pds_email_from_address` is the
+# per-app alias used as the From. Default pds.<domain>; override per cluster
+# (e.g. pds-staging@sharedcomputer.network on staging). When *both* the URL and
+# the From are unset the server disables email (password reset / confirmation
+# report success without sending — dev-log only).
+pds_email_from_address: "pds.{{ cluster_domain }}"
+
 # Limits. Keep the Caddy side in sync if changed (a proxy that rejects a body
 # first shows the operator its error instead of an XRPC one).
 pds_blob_upload_limit: 16777216        # 16 MiB (default) — bytes

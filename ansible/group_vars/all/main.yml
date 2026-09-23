@@ -207,13 +207,27 @@ sync_relay_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir 
 # PDS_PLC_ROTATION_KEY_PRIVATE is the operator's recovery key for every identity
 # this server issues — losing it is losing the accounts. DR-critical, all four.
 #
-# TODO(spike): the two generated forms below stay commented until the spike
-# confirms their generator commands in the atproto-crates workspace — the
-# operator guide calls the PLC key "the private did:key a key generator prints"
-# (P-256 z42t… / K-256 z3vL…) and the OAuth keys a multi-key JWK set. The role's
-# env template emits those two variables only when defined, so the rest of the
-# role runs (and boots, and smoke-tests) fine without them.
+# Key generation (verified 2026-09-23 against atproto-crates head + the
+# operator guide + workspace source):
+#   * PDS_JWT_SECRET / PDS_ADMIN_PASSWORD: recipes below (openssl-grade random),
+#     generated once and persisted under /root/.zai-secrets.
+#   * PDS_OAUTH_KEYS_JWK_SET: OPTIONAL at boot — when unset the server
+#     self-generates/loads its own service signing key via the FileKeyStore
+#     (label `__pds_oauth__`; see crates/atproto-pds/src/bin/pds.rs +
+#     src/oauth/jwks.rs). The env var exists so an OPERATOR holds the private
+#     OAuth keys (rotation control) instead of the box. Format: a multi-key
+#     private JWKS JSON (the same shape /oauth/jwks publishes, minus an
+#     operator-attributed key). Needed before hosting identities whose OAuth
+#     tokens must survive a rebuild.
+#   * PDS_PLC_ROTATION_KEY_PRIVATE: the operator's recovery key for every
+#     identity this server issues — "the private did:key a key generator
+#     prints" (P-256 z42t… / K-256 z3vL…; a public key or other curve is refused
+#     at boot). OPTIONAL at boot (the server generates per-account signing
+#     keys); REQUIRED when we must be able to update a hosted identity's DID
+#     document ourselves (the SCN DID migration — see the plan note).
+# The role's env template emits the last two only when defined, so the role
+# runs (and boots, and smoke-tests, and serves OAuth) fine without them.
 pds_jwt_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/pds_jwt_secret chars=digits,abcdef length=64') }}"
 pds_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/pds_admin_password chars=ascii_letters,digits length=32') }}"
-# pds_oauth_jwk_set: "{{ lookup('ansible.builtin.pipe', 'TODO(spike)') }}"
-# pds_plc_rotation_key_private: "{{ lookup('ansible.builtin.pipe', 'TODO(spike)') }}"
+# pds_oauth_jwk_set: unset for now — server self-generates its OAuth signing key
+# pds_plc_rotation_key_private: unset for now — wire before the SCN DID migration

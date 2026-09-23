@@ -70,7 +70,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | `pds_service_did` | `did:web:pds.{{ cluster_domain }}` | the PDS's own service identity |
 | `pds_handle_domains` | `[".{{ cluster_domain }}"]` | handle namespace accounts get (SCN: `*.sharedcomputer.network`) |
 | `pds_crawlers` | `["https://bsky.network"]` | who may crawl/announce (TODO(decision): own relay?) |
-| `pds_admin_dids` | `[]` | delegated admins — set per cluster with `zai-set-pds-admin` |
+| `pds_admin_dids` | SCN roster (4 DIDs) | delegated admins — the [[zai-ops-pds-plan]] roster (@sharedcomputer.network, @bmann.ca, @hadsie.com, @jacob.cascadia.social); override per cluster with `zai-set-pds-admin` |
 | `pds_data_dir` | `/var/lib/pds` | accounts.sqlite + repos + blobs; the unit's only `ReadWritePaths` |
 | `pds_*_limit` | 16 MiB / 1 GiB | blob upload + import limits |
 
@@ -88,11 +88,14 @@ WebSocket upgrades through by default; the PDS trusts exactly one proxy hop
 |---|---|
 | `pds_jwt_secret` | signing JWTs the server issues |
 | `pds_admin_password` | the `/admin` staff dashboard (break-glass) |
-| `pds_oauth_jwk_set` *(TODO(spike))* | multi-key JWK set signing OAuth tokens |
-| `pds_plc_rotation_key_private` *(TODO(spike))* | operator recovery for identities it issues — **losing it is losing the accounts** |
+| `pds_oauth_jwk_set` *(optional at boot)* | multi-key JWK set signing OAuth tokens — server self-generates its own key when unset (`__pds_oauth__` FileKeyStore key); set it when the **operator** must hold the OAuth private keys |
+| `pds_plc_rotation_key_private` *(required for recovery)* | operator recovery for identities this server issues — **losing it is losing the accounts**. Wire before the SCN DID migration (see the plan note) |
 
-The last two need generator commands confirmed in the workspace; the env
-template emits them only when defined, so the role boots without them today.
+The last two are emitted by the env template only when defined, so the role
+boots without them (verified 2026-09-23 against the workspace source — the
+OAuth signing key is generated on first boot when the JWK set is absent; a
+P-256/K-256 private did:key is required only when we must update hosted
+identities' DID documents ourselves).
 
 ## Dependencies
 

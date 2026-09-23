@@ -65,10 +65,18 @@ pds_did_plc_url: "plc.directory"
 
 # Delegated admin — DIDs (public, not secrets) allowed to administer the PDS by
 # signing a service-auth token with the #atproto key of their own DID document.
-# Per-cluster identity: blank blueprint default; recorded in the runtime
-# inventory with `zai-set-pds-admin` (see set-pds-admin.yml). The /admin
-# dashboard is deliberately NOT routed publicly — see docs/roles/pds.md.
-pds_admin_dids: []
+# The /admin dashboard is deliberately NOT routed publicly — see docs/roles/pds.md.
+#
+# Blueprint default = the SCN delegated-admin roster (boris 2026-09-23): the
+# SCN identity itself plus the three operators. Override per cluster with
+# `zai-set-pds-admin` (runtime inventory, git-ignored) when a cluster needs a
+# different roster — the list below is the committed ADR-0001-style default,
+# not a secret.
+pds_admin_dids:
+  - "did:plc:n4mzxx6z4ehnswc7znswtfr2"   # @sharedcomputer.network — the SCN DID
+  - "did:plc:2cxgdrgtsmrbqnjkwyplmp43"   # @bmann.ca — boris
+  - "did:plc:tmxbvcho3zysvtadtextctxw"   # @hadsie.com
+  - "did:plc:hhyrsndukexwr6qucdngcf4r"   # @jacob.cascadia.social
 
 # Limits. Keep the Caddy side in sync if changed (a proxy that rejects a body
 # first shows the operator its error instead of an XRPC one).

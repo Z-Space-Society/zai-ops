@@ -241,4 +241,4 @@ pds_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/
 # cluster (default pds.<domain>; staging overrides
 # pds_email_from_address: pds-staging@sharedcomputer.network). Both the
 # From address and the URL must be set for the server to enable delivery.
-pds_email_smtp_url: "smtp://*@{{ pds_email_from_address.split('@')[1] }}:{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_email_smtp_password') }}@smtp.forwardemail.net:465?tls=required"
+pds_email_smtp_url: "smtps://*@{{ pds_email_from_address.split('@')[1] }}:{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_email_smtp_password') }}@smtp.forwardemail.net:465"

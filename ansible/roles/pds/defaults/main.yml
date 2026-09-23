@@ -18,9 +18,16 @@
 # Upstream publishes no tag to fetch, so the revision IS the reproducibility
 # pin — a bump drives a re-clone + rebuild (cold cargo build, ~15–30 min, same
 # budget as happyview). Re-verify the SHA before the spike deploys.
+#
+# BUMP 2026-09-23: 711ee2db → 68222af ("Let atproto-pds-admin create and
+# disable invite codes", 2026-09-18) — createInviteCode now also accepts the
+# admin password over HTTP Basic (as the reference PDS gates it) and the CLI
+# gains invite create/disable + disable-account/enable-account. Needed so an
+# operator (or agent at the admin password) can mint invite codes without a
+# roster DID's service-auth signature.
 pds_repo_url: "https://tangled.org/ngerakines.me/atproto-crates"
 pds_version: "0.15.0-rc.4"        # informational; verified against the checkout
-pds_revision: "711ee2db1aaa01b3fe994364739b425a5dd966ae"
+pds_revision: "68222af18add3a2953faa465c39219adf8314778"
 
 # Build features — the default sqlite storage profile stays on. clap is
 # REQUIRED (both bin targets gate on it); smtp = outbound mail (invites/2FA),

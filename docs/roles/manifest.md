@@ -55,6 +55,7 @@ sides in the same change.
 | `open-webui.json` | [`open-webui`](open-webui.md) | `openwebui_version` |
 | `happyview.json` | [`happyview`](happyview.md) | `happyview_version` |
 | `sync-relay.json` | [`sync_relay`](sync_relay.md) | `sync_relay_version` |
+| `pds.json` | [`pds`](pds.md) | `pds_version` |
 
 Each object is:
 

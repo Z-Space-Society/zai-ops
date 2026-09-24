@@ -51,6 +51,8 @@ Build-from-source, same shape as `happyview`:
    systemd unit, start + enable `pds`.
 5. Smoke-test: wait on the port, then `/_alive` (liveness) and
    `/xrpc/_health` (readiness — opens the accounts DB).
+6. Record `pds.json` in the Garage manifest bucket via the `manifest` role
+   (ADR-0009), after the smoke tests pass.
 
 ### Handlers
 

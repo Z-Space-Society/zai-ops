@@ -229,7 +229,12 @@ sync_relay_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir 
 # runs (and boots, and smoke-tests, and serves OAuth) fine without them.
 pds_jwt_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/pds_jwt_secret chars=digits,abcdef length=64') }}"
 pds_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/pds_admin_password chars=ascii_letters,digits length=32') }}"
-# pds_oauth_jwk_set: unset for now — server self-generates its OAuth signing key
+# pds_oauth_jwk_set: operator-provisioned **P-256 private JWK set** at
+# /root/.zai-secrets/pds_oauth_jwk_set (opsec: generated once, 0600, Tier-1
+# backed up — never regenerate, or OAuth tokens issued under the old key stop
+# verifying). Required for account delegation (its signing key must be P-256;
+# the server's self-generated key is K-256). Generated 2026-09-23 for staging.
+pds_oauth_jwk_set: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_oauth_jwk_set') }}"
 # pds_plc_rotation_key_private: unset for now — wire before the SCN DID migration
 
 # PDS outbound email — Forward Email relay (cluster SMTP convention,

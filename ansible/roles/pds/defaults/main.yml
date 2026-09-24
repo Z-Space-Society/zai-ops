@@ -94,6 +94,16 @@ pds_admin_dids:
 # report success without sending — dev-log only).
 pds_email_from_address: "pds.{{ cluster_domain }}"
 
+# Account delegation (the /account/delegation portal): lets a holder of an
+# account here authenticate a *delegate* against another server's OAuth —
+# new authority over the account reached without its password. Default ON
+# (boris 2026-09-23). The server refuses to make it available unless the
+# origin is HTTPS (Caddy edge provides it) AND the OAuth signing key is P-256
+# — the self-generated key is K-256, so `pds_oauth_jwk_set` (a P-256 private
+# JWK, operator-held in /root/.zai-secrets) must be provisioned or the portal
+# reports "delegation is not enabled".
+pds_delegation_enabled: true
+
 # Limits. Keep the Caddy side in sync if changed (a proxy that rejects a body
 # first shows the operator its error instead of an XRPC one).
 pds_blob_upload_limit: 16777216        # 16 MiB (default) — bytes

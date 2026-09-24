@@ -72,6 +72,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | `pds_crawlers` | `["https://bsky.network"]` | who may crawl/announce (TODO(decision): own relay?) |
 | `pds_admin_dids` | SCN roster (4 DIDs) | delegated admins — the [[zai-ops-pds-plan]] roster (@sharedcomputer.network, @bmann.ca, @hadsie.com, @jacob.cascadia.social); override per cluster with `zai-set-pds-admin` |
 | `pds_email_from_address` | `pds.{{ cluster_domain }}` | per-app From alias (Forward Email, one-alias-per-app); override per cluster (staging: `pds-staging@sharedcomputer.network`) |
+| `pds_delegation_enabled` | `true` | account delegation (`/account/delegation`) — default ON (boris); requires an HTTPS origin (Caddy) + a P-256 OAuth key (`pds_oauth_jwk_set`) or the portal reports "delegation is not enabled" |
 | `pds_data_dir` | `/var/lib/pds` | accounts.sqlite + repos + blobs; the unit's only `ReadWritePaths` |
 | `pds_*_limit` | 16 MiB / 1 GiB | blob upload + import limits |
 
@@ -89,7 +90,7 @@ WebSocket upgrades through by default; the PDS trusts exactly one proxy hop
 |---|---|
 | `pds_jwt_secret` | signing JWTs the server issues |
 | `pds_admin_password` | the `/admin` staff dashboard (break-glass) |
-| `pds_oauth_jwk_set` *(optional at boot)* | multi-key JWK set signing OAuth tokens — server self-generates its own key when unset (`__pds_oauth__` FileKeyStore key); set it when the **operator** must hold the OAuth private keys |
+| `pds_oauth_jwk_set` *(required for delegation)* | **P-256 private JWK set** signing OAuth tokens — server self-generates a **K-256** key when unset, which account delegation refuses; provision a P-256 set (operator-held, `/root/.zai-secrets/pds_oauth_jwk_set`, 0600, Tier-1 backed up — regenerating invalidates outstanding tokens) |
 | `pds_plc_rotation_key_private` *(required for recovery)* | operator recovery for identities this server issues — **losing it is losing the accounts**. Wire before the SCN DID migration (see the plan note) |
 
 The last two are emitted by the env template only when defined, so the role

@@ -243,7 +243,7 @@ pds_oauth_jwk_set: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_o
 # (pds_email_smtp_password — no generator; it is the Forward Email catch-all
 # secret for the domain). The catch-all SMTP *user* derives from the From
 # alias's domain (*@<domain of pds_email_from_address>) — one var to set per
-# cluster (default pds.<domain>; staging overrides
+# cluster (default pds@<domain>; staging overrides
 # pds_email_from_address: pds-staging@sharedcomputer.network). Both the
 # From address and the URL must be set for the server to enable delivery.
 pds_email_smtp_url: "smtps://*@{{ pds_email_from_address.split('@')[1] }}:{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_email_smtp_password') }}@smtp.forwardemail.net:465"

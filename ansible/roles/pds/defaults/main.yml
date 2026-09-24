@@ -88,11 +88,11 @@ pds_admin_dids:
 # Outbound mail — the cluster SMTP convention (Forward Email relay,
 # one-alias-per-app): the SMTP URL is built in group_vars/all/main.yml from the
 # catch-all SMTP creds in /root/.zai-secrets; `pds_email_from_address` is the
-# per-app alias used as the From. Default pds.<domain>; override per cluster
+# per-app alias used as the From. Default pds@<domain>; override per cluster
 # (e.g. pds-staging@sharedcomputer.network on staging). When *both* the URL and
 # the From are unset the server disables email (password reset / confirmation
 # report success without sending — dev-log only).
-pds_email_from_address: "pds.{{ cluster_domain }}"
+pds_email_from_address: "pds@{{ cluster_domain }}"
 
 # Account delegation (the /account/delegation portal): lets a holder of an
 # account here authenticate a *delegate* against another server's OAuth —

@@ -66,7 +66,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | Var | Default | Meaning |
 |---|---|---|
 | `pds_repo_url` | `https://tangled.org/ngerakines.me/atproto-crates` | build source |
-| `pds_revision` | `TODO(spike)` | **the reproducibility pin** — a commit SHA |
+| `pds_revision` | `68222af18add…` | **the reproducibility pin**, a commit SHA |
 | `pds_version` | `0.15.0-rc.4` | informational; verified against the checkout |
 | `pds_hostname` | `pds.{{ cluster_domain }}` | public hostname (SCN: `pds.sharedcomputer.network`) |
 | `pds_service_did` | `did:web:pds.{{ cluster_domain }}` | the PDS's own service identity |
@@ -183,9 +183,9 @@ The spike fills the remaining `TODO(spike)`s (key generators; the revision pin
 is already verified — see below) → proof list:
 1. ~~**Pin the revision**~~ — **DONE 2026-09-08**: tangled `main` HEAD
    `711ee2db1aaa01b3fe994364739b425a5dd966ae` builds `atproto-pds 0.15.0-rc.4`
-   (edition 2024, rust 1.97, MIT) — pinned in `roles/pds/defaults/main.yml`.
-   Re-confirm the SHA on the spike box (it is the reproducibility pin; a main
-   push since this notes the SHA must not silently move the pin).
+   (edition 2024, rust 1.97, MIT). Bumped 2026-09-23 to `68222af` (still
+   0.15.0-rc.4) for admin-password invite minting; see
+   `roles/pds/defaults/main.yml`.
 2. **Key generators** — exact commands for the OAuth JWK set and the PLC
    `did:key` rotation key (or write the pipe lookups).
 3. **Account hosting** (the point of this server): invite → `createAccount` →

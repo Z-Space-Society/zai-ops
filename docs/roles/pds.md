@@ -7,12 +7,12 @@ accounts**: it hosts the SCN DID and member accounts and speaks federation,
 OAuth 2.1 and Sync 1.1. Operator guide:
 [atproto-crates.com/pds.html](https://atproto-crates.com/pds.html).
 
-**Status: draft.** This role is the design deliverable for
-[zai-ops#7](https://github.com/Z-Space-Society/zai-ops/issues/7). The pins
-marked `TODO(spike)` are filled by the feasibility spike (a throwaway PDS on
-the ovhproxmox node at `atprotopds.bringyourown.computer`, provisioned with
-this role's semantics — see [Spike (ovhproxmox)](#spike-ovhproxmox) below)
-before this lands. Nothing has run against a real cluster yet.
+**Status: staging-verified.** This role is the deliverable for
+[zai-ops#7](https://github.com/Z-Space-Society/zai-ops/issues/7). It has been
+provisioned on the SCN staging cluster (Ronchamp) with
+`provision.yml --limit pds`; it has not run on production (Heron). The
+revision pin is filled; the key-generator items in
+[Spike (ovhproxmox)](#spike-ovhproxmox) below remain open.
 
 ## Purpose
 
@@ -26,7 +26,7 @@ a special dependency — no env keys, no OAuth callbacks, nothing that couples
 the two deployments. It is identity infrastructure: platform tier, beside the
 gateway and the sync relay.
 
-Why this engine (from the plan): it is the only candidate with **delegated
+Why this engine (see zai-ops#7): it is the only candidate with **delegated
 admin today** (`PDS_ADMIN_DIDS`, `com.atproto.admin.*`) **and** permissioned
 data (0016 spaces), builds as one Rust binary (no Docker), and fits the
 Caddy-edge + systemd conventions of this repo. It is **SQLite-only** (per-actor
@@ -72,7 +72,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | `pds_service_did` | `did:web:pds.{{ cluster_domain }}` | the PDS's own service identity |
 | `pds_handle_domains` | `[".{{ cluster_domain }}"]` | handle namespace accounts get (SCN: `*.sharedcomputer.network`) |
 | `pds_crawlers` | `["https://bsky.network"]` | who may crawl/announce (TODO(decision): own relay?) |
-| `pds_admin_dids` | SCN roster (4 DIDs) | delegated admins — the [[zai-ops-pds-plan]] roster (@sharedcomputer.network, @bmann.ca, @hadsie.com, @jacob.cascadia.social); override per cluster with `zai-set-pds-admin` |
+| `pds_admin_dids` | SCN roster (4 DIDs) | delegated admins, the SCN roster (@sharedcomputer.network, @bmann.ca, @hadsie.com, @jacob.cascadia.social); override per cluster with `zai-set-pds-admin` |
 | `pds_email_from_address` | `pds@{{ cluster_domain }}` | per-app From alias (Forward Email, one-alias-per-app); override per cluster (staging: `pds-staging@sharedcomputer.network`) |
 | `pds_delegation_enabled` | `true` | account delegation (`/account/delegation`) — default ON (boris); requires an HTTPS origin (Caddy) + a P-256 OAuth key (`pds_oauth_jwk_set`) or the portal reports "delegation is not enabled" |
 | `pds_data_dir` | `/var/lib/pds` | accounts.sqlite + repos + blobs; the unit's only `ReadWritePaths` |
@@ -84,18 +84,22 @@ route already wired into `caddy_proxy_hosts`). Caddy passes `subscribeRepos`
 WebSocket upgrades through by default; the PDS trusts exactly one proxy hop
 (`PDS_TRUSTED_PROXY_HOPS=1`).
 
-### Secrets (auto-generated — no manual step)
+### Secrets
 
-`group_vars/all/main.yml`, all under `/root/.zai-secrets` (Tier-1 backed up):
+`group_vars/all/main.yml`, all under `/root/.zai-secrets` (Tier-1 backed up).
+The first two are generated on first run with no manual step. The JWK set (and
+the SMTP password below) are placed there by an operator and are optional: a
+missing file reads as empty and its env line is left out. The PLC key is not
+wired yet.
 
 | Secret | For |
 |---|---|
 | `pds_jwt_secret` | signing JWTs the server issues |
 | `pds_admin_password` | the `/admin` staff dashboard (break-glass) |
 | `pds_oauth_jwk_set` *(required for delegation)* | **P-256 private JWK set** signing OAuth tokens — server self-generates a **K-256** key when unset, which account delegation refuses; provision a P-256 set (operator-held, `/root/.zai-secrets/pds_oauth_jwk_set`, 0600, Tier-1 backed up — regenerating invalidates outstanding tokens) |
-| `pds_plc_rotation_key_private` *(required for recovery)* | operator recovery for identities this server issues — **losing it is losing the accounts**. Wire before the SCN DID migration (see the plan note) |
+| `pds_plc_rotation_key_private` *(required for recovery)* | operator recovery for identities this server issues; **losing it is losing the accounts**. Wire before the SCN DID migration |
 
-The last two are emitted by the env template only when defined, so the role
+The last two are emitted by the env template only when non-empty, so the role
 boots without them (verified 2026-09-23 against the workspace source — the
 OAuth signing key is generated on first boot when the JWK set is absent; a
 P-256/K-256 private did:key is required only when we must update hosted
@@ -104,8 +108,7 @@ identities' DID documents ourselves).
 ### Outbound email (SMTP)
 
 The cluster sends mail through the **Forward Email** relay
-(`smtp.forwardemail.net:465`, catch-all SMTP creds, one alias per app —
-see the forwardemail skill). The catch-all password is provisioned into
+(`smtp.forwardemail.net:465`, catch-all SMTP creds, one alias per app). The catch-all password is provisioned into
 `/root/.zai-secrets/pds_email_smtp_password` by an operator (it is the
 domain's Forward Email catch-all secret — no generator); the SMTP URL is built
 from it in `group_vars/all/main.yml`. `pds_email_from_address` is the per-app

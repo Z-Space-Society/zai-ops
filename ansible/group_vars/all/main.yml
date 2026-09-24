@@ -226,7 +226,7 @@ sync_relay_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir 
 #     prints" (P-256 z42t… / K-256 z3vL…; a public key or other curve is refused
 #     at boot). OPTIONAL at boot (the server generates per-account signing
 #     keys); REQUIRED when we must be able to update a hosted identity's DID
-#     document ourselves (the SCN DID migration — see the plan note).
+#     document ourselves (the SCN DID migration).
 # The role's env template emits the last two only when non-empty (a missing
 # file reads as empty), so the role runs (and boots, and smoke-tests, and
 # serves OAuth) fine without them.

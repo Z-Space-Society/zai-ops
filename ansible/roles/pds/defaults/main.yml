@@ -12,18 +12,25 @@
 #
 # One instance only: a replica count above one is a data-loss setting.
 
-# Source + pin. Pinned to 68222af18add (2026-09-18, "Let atproto-pds-admin
-# create and disable invite codes"): atproto-pds 0.15.0-rc.4, workspace edition
-# 2024 / rust-version 1.97 / license MIT, verified against that commit. It
-# replaced the earlier 711ee2db pin because createInviteCode now also accepts
-# the admin password over HTTP Basic (as the reference PDS gates it) and the
-# CLI gains invite create/disable + disable-account/enable-account, so an
-# operator can mint invite codes without a roster DID's service-auth signature.
+# Source + pin. We build from the **SCN-owned fork** of the atproto-crates
+# workspace (https://tangled.org/sharedcomputer.network/atproto-crates, hosted
+# on the @commonscomputer.com knot, main @ c4aff94a) — SCN's upstream, so SCN
+# controls what the role builds and where pins resolve; the canonical upstream
+# remains Nick's ngerakines.me/atproto-crates (forked into ours).
+#
+# Pinned to 68222af18add (2026-09-18, "Let atproto-pds-admin create and
+# disable invite codes"): atproto-pds 0.15.0-rc.4, workspace edition 2024 /
+# rust-version 1.97 / license MIT, verified against that commit. It replaced
+# the earlier 711ee2db pin because createInviteCode now also accepts the admin
+# password over HTTP Basic (as the reference PDS gates it) and the CLI gains
+# invite create/disable + disable-account/enable-account, so an operator can
+# mint invite codes without a roster DID's service-auth signature.
 #
 # Upstream publishes no tag to fetch, so the revision IS the reproducibility
 # pin. A bump drives a re-clone + rebuild (cold cargo build, ~15-30 min, same
-# budget as happyview); re-verify pds_version against the new commit.
-pds_repo_url: "https://tangled.org/ngerakines.me/atproto-crates"
+# budget as happyview); re-verify pds_version against the new commit. Sync our
+# fork from upstream (ngerakines.me/atproto-crates) before bumping the pin.
+pds_repo_url: "https://tangled.org/sharedcomputer.network/atproto-crates"
 pds_version: "0.15.0-rc.4"        # informational; verified against the checkout
 pds_revision: "68222af18add3a2953faa465c39219adf8314778"
 

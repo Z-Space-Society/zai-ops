@@ -198,8 +198,10 @@ corliss_oidc_rsa_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secre
 sync_relay_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/sync_relay_db_password chars=digits,abcdef length=48') }}"
 
 # pds secrets — the in-house PDS (atproto-pds) that hosts the cluster's atproto
-# accounts. Same generate-once-and-persist posture as every pair above; all ride
-# the existing Tier-1 control-node backup of /root/.zai-secrets.
+# accounts. The JWT secret and admin password follow the generate-once-and-persist
+# posture of every pair above; the OAuth JWK set and the SMTP password below are
+# provisioned by an operator instead, and are optional. All ride the existing
+# Tier-1 control-node backup of /root/.zai-secrets.
 #
 # PDS_JWT_SECRET signs JWTs the server issues; PDS_ADMIN_PASSWORD guards the
 # /admin dashboard (the break-glass staff door when delegated-admin auth is
@@ -224,9 +226,10 @@ sync_relay_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir 
 #     prints" (P-256 z42t… / K-256 z3vL…; a public key or other curve is refused
 #     at boot). OPTIONAL at boot (the server generates per-account signing
 #     keys); REQUIRED when we must be able to update a hosted identity's DID
-#     document ourselves (the SCN DID migration — see the plan note).
-# The role's env template emits the last two only when defined, so the role
-# runs (and boots, and smoke-tests, and serves OAuth) fine without them.
+#     document ourselves (the SCN DID migration).
+# The role's env template emits the last two only when non-empty (a missing
+# file reads as empty), so the role runs (and boots, and smoke-tests, and
+# serves OAuth) fine without them.
 pds_jwt_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/pds_jwt_secret chars=digits,abcdef length=64') }}"
 pds_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/pds_admin_password chars=ascii_letters,digits length=32') }}"
 # pds_oauth_jwk_set: operator-provisioned **P-256 private JWK set** at
@@ -234,7 +237,7 @@ pds_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/
 # backed up — never regenerate, or OAuth tokens issued under the old key stop
 # verifying). Required for account delegation (its signing key must be P-256;
 # the server's self-generated key is K-256). Generated 2026-09-23 for staging.
-pds_oauth_jwk_set: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_oauth_jwk_set') }}"
+pds_oauth_jwk_set: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_oauth_jwk_set', errors='ignore') | default('', true) }}"
 # pds_plc_rotation_key_private: unset for now — wire before the SCN DID migration
 
 # PDS outbound email — Forward Email relay (cluster SMTP convention,
@@ -243,7 +246,9 @@ pds_oauth_jwk_set: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_o
 # (pds_email_smtp_password — no generator; it is the Forward Email catch-all
 # secret for the domain). The catch-all SMTP *user* derives from the From
 # alias's domain (*@<domain of pds_email_from_address>) — one var to set per
-# cluster (default pds.<domain>; staging overrides
+# cluster (default pds@<domain>; staging overrides
 # pds_email_from_address: pds-staging@sharedcomputer.network). Both the
 # From address and the URL must be set for the server to enable delivery.
-pds_email_smtp_url: "smtps://*@{{ pds_email_from_address.split('@')[1] }}:{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_email_smtp_password') }}@smtp.forwardemail.net:465"
+# No password file means no URL: the env template then leaves mail off.
+_pds_email_smtp_password: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_email_smtp_password', errors='ignore') | default('', true) }}"
+pds_email_smtp_url: "{{ ('smtps://*@' ~ pds_email_from_address.split('@')[1] ~ ':' ~ _pds_email_smtp_password ~ '@smtp.forwardemail.net:465') if _pds_email_smtp_password else '' }}"

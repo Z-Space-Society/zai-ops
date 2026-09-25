@@ -12,19 +12,17 @@
 #
 # One instance only: a replica count above one is a data-loss setting.
 
-# Source + pin. PIN VERIFIED 2026-09-08 against tangled main HEAD
-# (711ee2db1aaa01b3fe994364739b425a5dd966ae): atproto-pds resolves to
-# 0.15.0-rc.4, workspace edition 2024 / rust-version 1.97 / license MIT.
-# Upstream publishes no tag to fetch, so the revision IS the reproducibility
-# pin — a bump drives a re-clone + rebuild (cold cargo build, ~15–30 min, same
-# budget as happyview). Re-verify the SHA before the spike deploys.
+# Source + pin. Pinned to 68222af18add (2026-09-18, "Let atproto-pds-admin
+# create and disable invite codes"): atproto-pds 0.15.0-rc.4, workspace edition
+# 2024 / rust-version 1.97 / license MIT, verified against that commit. It
+# replaced the earlier 711ee2db pin because createInviteCode now also accepts
+# the admin password over HTTP Basic (as the reference PDS gates it) and the
+# CLI gains invite create/disable + disable-account/enable-account, so an
+# operator can mint invite codes without a roster DID's service-auth signature.
 #
-# BUMP 2026-09-23: 711ee2db → 68222af ("Let atproto-pds-admin create and
-# disable invite codes", 2026-09-18) — createInviteCode now also accepts the
-# admin password over HTTP Basic (as the reference PDS gates it) and the CLI
-# gains invite create/disable + disable-account/enable-account. Needed so an
-# operator (or agent at the admin password) can mint invite codes without a
-# roster DID's service-auth signature.
+# Upstream publishes no tag to fetch, so the revision IS the reproducibility
+# pin. A bump drives a re-clone + rebuild (cold cargo build, ~15-30 min, same
+# budget as happyview); re-verify pds_version against the new commit.
 pds_repo_url: "https://tangled.org/ngerakines.me/atproto-crates"
 pds_version: "0.15.0-rc.4"        # informational; verified against the checkout
 pds_revision: "68222af18add3a2953faa465c39219adf8314778"
@@ -88,11 +86,11 @@ pds_admin_dids:
 # Outbound mail — the cluster SMTP convention (Forward Email relay,
 # one-alias-per-app): the SMTP URL is built in group_vars/all/main.yml from the
 # catch-all SMTP creds in /root/.zai-secrets; `pds_email_from_address` is the
-# per-app alias used as the From. Default pds.<domain>; override per cluster
+# per-app alias used as the From. Default pds@<domain>; override per cluster
 # (e.g. pds-staging@sharedcomputer.network on staging). When *both* the URL and
 # the From are unset the server disables email (password reset / confirmation
 # report success without sending — dev-log only).
-pds_email_from_address: "pds.{{ cluster_domain }}"
+pds_email_from_address: "pds@{{ cluster_domain }}"
 
 # Account delegation (the /account/delegation portal): lets a holder of an
 # account here authenticate a *delegate* against another server's OAuth —

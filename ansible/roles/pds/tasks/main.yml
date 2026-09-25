@@ -188,3 +188,12 @@
   until: pds_ready is succeeded
   retries: 10
   delay: 3
+
+# --- Manifest (docs/roles/manifest.md) ----------------------------------------
+# After the smoke tests, so a service that failed them never claims a version.
+- name: Record the PDS's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_service: pds
+    manifest_version: "{{ pds_version }}"

@@ -1,0 +1,120 @@
+---
+# In-house PDS — atproto-pds (Nick @ngerakines.me, the atproto-crates
+# workspace). The server that is the SOURCE of the cluster's AT Protocol
+# (atmosphere) accounts: it hosts the SCN DID and member accounts, and speaks
+# federation, OAuth 2.1 and Sync 1.1. Operator guide:
+# https://atproto-crates.com/pds.html
+#
+# NOT on crates.io — the workspace is a git dependency. We build the two
+# binaries (`pds`, `atproto-pds-admin`) from source at a pinned revision, the
+# same shape as the happyview role. Its state lives on disk (per-actor SQLite
+# + a shared accounts.sqlite) — no Postgres, no S3 (both refuse at boot).
+#
+# One instance only: a replica count above one is a data-loss setting.
+
+# Source + pin. We build from Nick's canonical atproto-crates workspace
+# (https://tangled.org/ngerakines.me/atproto-crates). An SCN-owned fork exists
+# at tangled.org/sharedcomputer.network/atproto-crates, on the
+# @commonscomputer.com knot. It is not the build source: on 2026-10-06 its main
+# was 542 commits behind upstream and the knot was returning 502, and a build
+# source that is down fails every provision that has to clone. Point this back
+# at the fork once it is synced and the knot's uptime is something we rely on.
+#
+# Pinned to f74a3e104661 (2026-10-05, upstream main): atproto-pds 0.15.0-rc.6,
+# workspace edition 2024 / rust-version 1.97 / license MIT, verified against
+# that commit. It replaced 68222af18add (0.15.0-rc.4, 670 commits earlier).
+# What the bump is for: GET /_tls-check (e57a6f0), the endpoint Caddy's
+# on-demand TLS asks before issuing a certificate for a handle hostname. The
+# proxy role does not use it yet.
+#
+# Checked against f74a3e1 before bumping: the four build features below and
+# every PDS_* name pds.env.j2 writes still exist. Two changes in the range can
+# refuse a boot that 68222af accepted: PDS_PRODUCTION=true now needs
+# PDS_DATA_DIRECTORY to exist (the role creates it), and a JWK in
+# PDS_OAUTH_KEYS_JWK_SET whose public point does not match its private key is
+# refused at load.
+#
+# Upstream publishes no tag to fetch, so the revision IS the reproducibility
+# pin. A bump drives a re-clone + rebuild (cold cargo build, ~15-30 min, same
+# budget as happyview); re-verify pds_version against the new commit.
+pds_repo_url: "https://tangled.org/ngerakines.me/atproto-crates"
+pds_version: "0.15.0-rc.6"        # informational; verified against the checkout
+pds_revision: "f74a3e104661b503cfc92771acb5ef6775a0acaa"
+
+# Build features — the default sqlite storage profile stays on. clap is
+# REQUIRED (both bin targets gate on it); smtp = outbound mail (invites/2FA),
+# metrics = Prometheus /metrics, hickory-dns = the async resolver.
+pds_build_features: "clap,smtp,metrics,hickory-dns"
+
+# Listen. Like every other service CT: bind wildcard — the CT is vmbr1-only, so
+# "all interfaces" IS the internal network and Caddy is the boundary.
+pds_port: 3000
+pds_host: "0.0.0.0"
+
+# Service account + layout, mirroring the happyview/corliss conventions. The
+# bin dir is root-owned; the DATA dir is owned by the daemon (unlike happyview,
+# whose state lives in Postgres — see the unit's ReadWritePaths).
+pds_user: pds
+pds_group: pds
+pds_home: /opt/pds
+pds_bin_dir: "{{ pds_home }}/bin"
+pds_bin: "{{ pds_bin_dir }}/pds"
+pds_admin_bin: "{{ pds_bin_dir }}/atproto-pds-admin"
+pds_src: "{{ pds_home }}/src"
+pds_config_dir: /etc/pds
+pds_env_file: "{{ pds_config_dir }}/pds.env"
+pds_data_dir: /var/lib/pds
+
+# Public identity. Derive from cluster_domain so the blueprint stays generic
+# (ADR-0001): on the SCN cluster cluster_domain == sharedcomputer.network, so
+# the PDS is pds.sharedcomputer.network, its service DID is did:web for that
+# origin, and accounts get *.sharedcomputer.network handles. On a spike
+# cluster the same derivation lands on that cluster's domain.
+pds_hostname: "pds.{{ cluster_domain }}"
+pds_service_did: "did:web:pds.{{ cluster_domain }}"
+pds_handle_domains: [".{{ cluster_domain }}"]
+
+# Federation. TODO(decision): announce to bsky.network, or stand up our own
+# crawler/relay? Unset, nothing else on the network ever discovers this
+# server's accounts. The app view is Bluesky's open appview.
+pds_crawlers: ["https://bsky.network"]
+pds_bsky_app_view_did: "did:web:api.bsky.app"
+pds_bsky_app_view_url: "https://api.bsky.app"
+pds_did_plc_url: "plc.directory"
+
+# Delegated admin — DIDs (public, not secrets) allowed to administer the PDS by
+# signing a service-auth token with the #atproto key of their own DID document.
+# The /admin dashboard is deliberately NOT routed publicly — see docs/roles/pds.md.
+#
+# Empty in the blueprint: who administers a cluster's PDS is that cluster's
+# identity, so it is recorded per cluster with `zai-set-pds-admin` (runtime
+# inventory, git-ignored) and nothing is committed here (ADR-0001). With the
+# list empty the env template leaves PDS_ADMIN_DIDS out and the admin password
+# is the only admin door.
+pds_admin_dids: []
+
+# Outbound mail. The relay is the cluster's `smtp_url` (group_vars/all/main.yml,
+# read from /root/.zai-secrets/smtp_url); this is the From address the PDS
+# sends as. The server enables delivery only when both are set. With the relay
+# unset it logs each message's recipient and subject and drops it, so password
+# reset, email confirmation and PLC-operation tokens never arrive.
+pds_email_from_address: "pds@{{ cluster_domain }}"
+
+# Account delegation (the /account/delegation portal): lets a holder of an
+# account here authenticate a *delegate* against another server's OAuth —
+# new authority over the account reached without its password. Default ON
+# (boris 2026-09-23). The server refuses to make it available unless the
+# origin is HTTPS (Caddy edge provides it) AND the OAuth signing key is P-256.
+# From the f74a3e1 pin the server generates a P-256 key on first boot, so a
+# fresh PDS meets both with nothing provisioned. A PDS first booted on an
+# older build may hold a K-256 key in its key store; that one needs
+# `pds_oauth_jwk_set` (see group_vars/all/main.yml).
+pds_delegation_enabled: true
+
+# Limits. Keep the Caddy side in sync if changed (a proxy that rejects a body
+# first shows the operator its error instead of an XRPC one).
+pds_blob_upload_limit: 16777216        # 16 MiB (default) — bytes
+pds_import_limit: 1073741824           # 1 GiB (default) — bytes
+
+# Rust toolchain — stable satisfies the workspace's rust-version (≥ 1.97).
+pds_rust_channel: stable

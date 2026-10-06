@@ -92,8 +92,8 @@ itself from this repo.
 
    Assigning only records numbers in git-ignored runtime state; nothing is
    created. Assign every service before provisioning any, because services
-   reference each other's addresses (the proxy's Caddyfile will not render until
-   litellm has a CTID). The defaults follow the tier convention: **100–109 core
+   reference each other's addresses (the proxy skips the route of any service
+   that has no CTID yet, so a service assigned later needs a proxy re-run). The defaults follow the tier convention: **100–109 core
    infra, 110–119 platform, 120–129 applications** (see
    [Networking](docs/README.md#networking)).
 
@@ -119,6 +119,8 @@ itself from this repo.
    ansible-playbook provision.yml --limit happyview
    ansible-playbook provision.yml --limit litellm
    ansible-playbook provision.yml --limit sync-relay # ~15-30 min: builds
+                                                  #   from source on a cold CT
+   ansible-playbook provision.yml --limit pds        # ~15-30 min: builds
                                                   #   from source on a cold CT
    ansible-playbook provision.yml --limit corliss
    ansible-playbook provision.yml --limit open-webui

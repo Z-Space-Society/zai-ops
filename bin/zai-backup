@@ -42,6 +42,12 @@ keep_monthly=6
 # virtual keys/spend, Open WebUI users/chats), so this is no longer optional —
 # see F3 in Fable Security Review 2.
 postgres_enabled=true
+# Tier 2: the in-house PDS's data dir (accounts.sqlite, per-actor repos, blobs)
+# streamed as a tarball over SSH into the same repo (tag zai-pds). OFF until
+# the pds CT is assigned and ZAI_PDS_HOST is added to /etc/zai-backup/restic.env
+# — see docs/roles/pds.md. TODO(spike): verify tar-of-live-SQLite consistency
+# before enabling (the hardened alternative is restic client-side on the pds CT).
+pds_enabled=false
 # ----------------------------------------------------------------------------
 
 run_backup() {
@@ -72,11 +78,25 @@ run_backup() {
       | restic backup --tag zai-postgres --stdin --stdin-filename pg_dumpall.sql
   fi
 
+  if [ "$pds_enabled" = true ]; then
+    # Same shape as the postgres tier: stream the PDS data dir over SSH into
+    # restic via stdin, no file on disk and no restic client on the pds CT.
+    # WAL-mode SQLite survives a tar of an interrupted checkpoint (recovery
+    # re-applies the journal), but see docs/roles/pds.md before trusting it.
+    echo "zai-backup: backing up pds data from the pds CT"
+    ssh "root@${ZAI_PDS_HOST}" "tar -C /var/lib/pds -czf - ." \
+      | restic backup --tag zai-pds --stdin --stdin-filename pds-data.tar.gz
+  fi
+
   echo "zai-backup: pruning old snapshots"
   restic forget --tag zai-control-node \
     --keep-daily "$keep_daily" --keep-weekly "$keep_weekly" --keep-monthly "$keep_monthly" --prune
   if [ "$postgres_enabled" = true ]; then
     restic forget --tag zai-postgres \
+      --keep-daily "$keep_daily" --keep-weekly "$keep_weekly" --keep-monthly "$keep_monthly" --prune
+  fi
+  if [ "$pds_enabled" = true ]; then
+    restic forget --tag zai-pds \
       --keep-daily "$keep_daily" --keep-weekly "$keep_weekly" --keep-monthly "$keep_monthly" --prune
   fi
   echo "zai-backup: done"

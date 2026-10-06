@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+[Unit]
+Description=SCN PDS (atproto-pds — AT Protocol Personal Data Server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ pds_user }}
+Group={{ pds_group }}
+EnvironmentFile={{ pds_env_file }}
+ExecStart={{ pds_bin }}
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# UNLIKE happyview (state in Postgres), every byte this server owns lives on
+# disk under /var/lib/pds — accounts.sqlite, per-actor repos, blobs — so that
+# is exactly the one path the daemon must be able to write at runtime.
+ReadWritePaths={{ pds_data_dir }}
+
+[Install]
+WantedBy=multi-user.target

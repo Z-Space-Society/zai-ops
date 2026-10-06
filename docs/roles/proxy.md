@@ -248,6 +248,14 @@ If issuance fails, check public `:80` first (see
   Debian-signed, version-pinned apt package" property above, plus a Cloudflare
   API token scoped to DNS edits on the zone, in the vault.
 
+- **A route to an unassigned service is skipped, not an error.** The upstream
+  address is derived from the service's CTID, so a route whose service has no
+  CTID yet has nothing to render. The template leaves a comment naming the
+  domain and the service in its place, and the route appears on the first
+  proxy run after the service is assigned in `scn-config`. This is what lets a new service's route sit in
+  the committed defaults before every cluster runs that service. The cost: a
+  core service that was never assigned no longer fails the proxy play, so
+  check the rendered Caddyfile for `not routed` lines if a hostname is missing.
 - **Empty `caddy_proxy_hosts` is safe** — the `:80` site (health probe + HTTPS
   redirect) keeps the Caddyfile valid before any upstream is assigned, mirroring
   the inventory's placeholder pattern.

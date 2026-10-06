@@ -62,9 +62,9 @@ upstream as the dev/CI path, not the SCN runtime.
 | `.env:/app/.env:ro` | rendered `/opt/scn-chat/.env` (0600) from ansible-vault vars |
 | `./data:/data` (sqlite) | `/data` on the CT rootfs; add to restic paths in `bin/zai-backup` |
 | `127.0.0.1:3000` | `10.1.1.{{ ctid }}:3000` (internal only) |
-| reverse proxy + TLS | `proxy` role: Caddy route `chat.{{ cluster_domain }}` |
-| "lexicons and permission set published" | `pnpm publish-lexicons` + permission-set record (target TBD — Q5) |
-| Admin bootstrap (Settings → Admin) | manual post-deploy step; `ADMIN_DIDS` in env |
+| reverse proxy + TLS | `proxy` role: Caddy route `chat.{{ cluster_domain }}` — on SCN: `chat.sharedcomputer.network` |
+| "lexicons and permission set published" | **the app's responsibility** (upstream deploy concern; Q5 answered) |
+| Admin bootstrap (Settings → Admin) | manual post-deploy step; `ADMIN_DIDS` from the cluster admin roster |
 
 ## 4. Implementation (adding-a-service.md checklist)
 
@@ -78,7 +78,10 @@ upstream as the dev/CI path, not the SCN runtime.
    - `git` clone `Z-Space-Society/scn-chat` pinned at `scn_chat_version`
      (commit ref — repo is young; see Q9) → `/opt/scn-chat`.
    - `pnpm install --frozen-lockfile` → `pnpm build` → `pnpm migrate`.
-   - Render `.env` (0600) from vault vars; `Restart=always` systemd unit
+   - Render `.env` (0600) from vault vars; `ADMIN_DIDS` is **not** a hardcoded
+     var — `include_tasks: tasks/roster.yml` (`scn_roster_admin_dids`, the
+     cluster admin roster, same authority Corliss and the PDS use) and
+     comma-join into the env. `Restart=always` systemd unit
      `scn-chat.service` (`ExecStart=pnpm start`, `EnvironmentFile=/opt/scn-chat/.env`).
    - **Smoke test** at role end: `wait_for` `10.1.1.{{ctid}}:3000`, then `uri`
      `GET /api/health` (proves the feature, not just systemd "active").
@@ -86,7 +89,11 @@ upstream as the dev/CI path, not the SCN runtime.
    `manifest_version: "{{ scn_chat_version }}"`; add `scn-chat.json` to the key
    table in `docs/roles/manifest.md` (Corliss reads it by that exact name).
 4. **Play + route** — configure play in `provision.yml` (after `proxy`);
-   `caddy_proxy_hosts` entry `chat.{{ cluster_domain }}` → `10.1.1.{{ctid}}:3000`.
+   `caddy_proxy_hosts` entry `chat.{{ cluster_domain }}` →
+   `10.1.1.{{ctid}}:3000`. On SCN `cluster_domain == sharedcomputer.network`
+   (pds role note) so the URL is `chat.sharedcomputer.network`. Subdomain
+   pattern is established: OpenWebUI now serves at `owui.{{ cluster_domain }}`
+   (949fa0b), so `chat.` is free.
 5. **Corliss health check** — probe `_scn_chat`: `GET http://10.1.1.{{ctid}}:3000/api/health`;
    `Probe` row in `STACK` with `manifest=scn-chat`; `<SERVICE>_URL` setting +
    `.env.example`/README/tests in `corliss/health.py`.
@@ -99,42 +106,52 @@ upstream as the dev/CI path, not the SCN runtime.
   control node with `pnpm keys` during provisioning and written **straight into
   ansible-vault** (never plaintext in the repo; rotate via `pnpm keys`).
 - `scn_chat_public_url` (= `https://chat.{{ cluster_domain }}`),
-  `scn_chat_admin_dids` (comma-separated; Q4), `node_env: production`,
-  `oauth_scope_mode: permission-set`.
+  `node_env: production`, `oauth_scope_mode: permission-set`.
+  `ADMIN_DIDS` is derived at provision time from the cluster admin roster
+  (`tasks/roster.yml`) — no DIDs live in vault (Q4 answered).
 - Provider/model API keys are **admin-UI state**, not env — bootstrapped by a
   human after first login (Q8).
 
-## 6. Identity note — no Corliss for login
+## 6. Identity — bring-your-own PDS, no gating
 
 scn-chat authenticates **atproto-native** (OAuth against the user's PDS) — the
 Corliss OIDC bridge is *not* part of its login path (contrast: lasuite).
-Production SCN members therefore need **spaces-capable PDSs** (0016 permissioned
-data) — the in-house atproto-pds (zai-ops `pds` role) is the natural target.
-Whether the PDS must be production before chat ships is a coordination question
-(Q2). Corliss still applies for the manifest/probe ("/systems/ can say whether
-it's up and which version").
+Members **bring their own logins**: any PDS works, spaces-capable or not
+(full spaces experience only on 0016-capable PDSs; otherwise the server sqlite
+fallback). **No gating at this stage** — guiding users to account creation or
+their existing credentials is the app's job (app-layer concern, Q2/Q10
+answered).
+
+The in-house **atproto-pds is in the zai-ops blueprint**: host `pds` in
+`ansible/inventory/hosts.yml` (platform tier, default CTID 114), `pds` role
+merged via PR #19, public identity `pds.sharedcomputer.network`
+(`cluster_domain == sharedcomputer.network`) with a `did:web` service DID. It's
+the SCN-native option for members without a spaces-capable PDS — *not* a
+deployment dependency of scn-chat.
+
+Corliss still applies for the manifest/probe ("/systems/ can say whether it's
+up and which version").
 
 ## 7. Rollout (phased)
 
 1. **Phase 1 — staging (Ronchamp)**: role + play, source pin, smoke test
    `/api/health`; verify OAuth login with a test atproto account; confirm the
    app serves its OAuth client metadata at `PUBLIC_URL` (Q6).
-2. **Phase 2 — production (Heron)**: assign CTID, deploy, Caddy route live,
-   publish lexicons/permission-set (Q5), first admin login.
+2. **Phase 2 — production (Heron)**: assign CTID, deploy, Caddy route live
+   (`chat.sharedcomputer.network`), first admin login (roster-derived).
 3. **Phase 3 — observability**: Corliss probe + manifest, `/systems/` shows
    scn-chat up + version.
-4. **Phase 4 — operations**: backups (Q7), provider/model config (Q8),
-   announce to members.
+4. **Phase 4 — operations**: backups (Q7 → hadsie), provider/model config
+   (Q8), announce to members.
 
 ## 8. Risks
 
 - **spaces-alpha atproto packages** (root `pnpm.overrides` pins
   `0.0.0-spaces-alpha-…`) — breaking changes expected; the pin+rebuild path is
-  our only stability lever (Q9).
-- **Single-CT sqlite** — no HA; backup discipline is the safeguard (Q7).
+  our only stability lever (Q9 → hadsie).
+- **Single-CT sqlite** — no HA; backup discipline is the safeguard (Q7 → hadsie).
 - **`did:web` OAuth client tied to `PUBLIC_URL`** — changing the public domain
-  later breaks the client id; choose it once (Q3).
-- **PDS target for lexicons/permission-set** unknown until Q5 is answered.
+  later breaks the client id; choose it once (Q3, answered: `chat.` subdomain).
 - **Experimental status upstream** ("do not store anything sensitive").
 
 Open questions in the companion file:

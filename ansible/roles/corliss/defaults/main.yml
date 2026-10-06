@@ -90,6 +90,10 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v1.3.3 adds the Parascribe guide at /tools/parascribe/: how to call the
+# cluster's transcription models, naming the ones the reader's tier reaches from
+# the LiteLLM settings corliss already has. No new env keys, no migration.
+#
 # v1.3.2 adds `sync_admins`, which re-derives every is_staff flag from the admin
 # roster without changing who is an admin. It is what admins.yml runs for
 # `admin_action=apply`, Corliss's half of scn-config's Apply; below this pin
@@ -365,7 +369,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v1.3.2
+corliss_version: v1.3.3
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

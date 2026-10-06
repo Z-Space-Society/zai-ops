@@ -230,8 +230,8 @@ From then on every playbook resolves the service to `ctid` and a derived
 exactly that CT, and fails fast if the service was never assigned. The menu's
 **Provision Containers** entry runs that for each ticked service, one at a time
 in dependency order (core, then platform, then apps), stopping at the first
-failure. It asks Proxmox what exists first, marks each service `new: create` or
-`exists: rebuild`, and refuses a CTID held by a container that isn't that
+failure. It asks Proxmox what exists first, marks each service `action: create` or
+`action: rebuild`, and refuses a CTID held by a container that isn't that
 service's.
 
 **An assignment is set once.** The CTID is the container's VMID and its address,

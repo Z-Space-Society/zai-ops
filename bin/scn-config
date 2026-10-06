@@ -455,8 +455,8 @@ do_provision_menu() {
     status="$(ct_status "${SVC_NAME[$i]}" "${SVC_CTID[$i]}")"
     label="$(ctid_label "${SVC_CTID[$i]}")" ticked=ON
     case "$status" in
-      new) label="$label  new: create" ;;
-      exists) label="$label  exists: rebuild" ;;
+      new) label="$label  action: create" ;;
+      exists) label="$label  action: rebuild" ;;
       taken\ *) label="$label  IN USE by ${status#taken }" ticked=OFF ;;
     esac
     args+=("${SVC_NAME[$i]}" "$label" "$ticked")

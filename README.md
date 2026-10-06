@@ -50,6 +50,9 @@ itself from this repo.
      `verify-proxmox.yml` (confirm the API token authenticates), stopping if
      the first fails. Scripted: `scn-config nonint setup`.
    - **Cluster Settings** lists four values with what is recorded for each:
+     - **Proxmox host name**: `bootstrap.sh` already recorded it from the
+       host's `hostname`. Change it only to correct it, for example after
+       renaming the host.
      - **Domain**: required before provisioning the proxy. Its Caddy routes
        are built from `cluster_domain`, and every service's public URL
        (`owui.`, `api.`, `view.`, …) derives from it, so setting it once moves
@@ -61,9 +64,6 @@ itself from this repo.
      - **Registry client key**: the registry's public HappyView client key.
        Optional. Scripted: `scn-config nonint set-registry client_key hvc_…`.
        [corliss](docs/roles/corliss.md) reads both registry values.
-     - **Proxmox host name**: `bootstrap.sh` already recorded it from the
-       host's `hostname`. Change it only to correct it, for example after
-       renaming the host.
 
    All four are stored in git-ignored runtime state
    ([`inventory/local.yml`](docs/README.md#cluster-settings)), which is what

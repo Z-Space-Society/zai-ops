@@ -90,6 +90,14 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v1.3.0 lets the control node manage admins: `make_admin --admit [--tier T]`
+# admits a non-member (an ordinary grant, authored by the service account)
+# before appointing them, and a new `list_admins` prints the roster and the
+# service session as JSON. Both are what admins.yml runs for scn-config's
+# Cluster Admins entry, so that entry needs this pin or later; below it,
+# `list_admins` does not exist and the entry reports an error. Commands only:
+# no new env keys, no migration, nothing changes for a signed-in member.
+#
 # v1.2.1 fills in /systems/' zai-ops and Version columns: which zai-ops revision
 # provisioned each service and which version it runs, read from the manifests
 # every service play writes to Garage since zai-ops v0.7.0 (ADR-0009).
@@ -345,7 +353,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v1.2.1
+corliss_version: v1.3.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

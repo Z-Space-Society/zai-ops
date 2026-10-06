@@ -1,0 +1,156 @@
+---
+# Set, clear or show the cluster's outbound mail relay — one SMTP URL,
+# credentials included, in {{ _zai_secrets_dir }}/smtp_url.
+#
+#   SCN_SMTP_URL='smtps://user:password@smtp.example.com:465' \
+#     ansible-playbook set-smtp.yml -e smtp_action=set
+#   ansible-playbook set-smtp.yml -e smtp_action=clear
+#   ansible-playbook set-smtp.yml -e smtp_action=show
+#
+# (`scn-config`, the operator command in bin/, drives this — its Set SMTP menu
+# and `scn-config nonint show-smtp | set-smtp | clear-smtp`. The script builds
+# the URL from parts and percent-encodes the credentials; this playbook
+# validates and persists.)
+#
+# Why a file under .zai-secrets and not the runtime inventory: the URL carries a
+# password. group_vars/all/main.yml reads the file as `smtp_url`; a missing file
+# reads as empty and every consumer leaves mail off. It is in the Tier-1
+# control-node backup with the rest of that directory.
+#
+# The URL arrives in the ENVIRONMENT, never as -e: an extra-var is on the
+# process list for as long as the play runs. Every task whose arguments or
+# result could carry the URL is no_log. The asserts are left readable on
+# purpose — they print the expression that failed, never the value — so a
+# refusal says why.
+#
+# What the consumer accepts (lettre's URL form, which atproto-pds uses):
+#   smtps://…:465               implicit TLS
+#   smtp://…:587?tls=required   STARTTLS
+# A bare smtp:// with no tls parameter is PLAINTEXT, password included, so it is
+# refused here rather than left for someone to discover on the wire.
+
+- name: Set, clear or show the cluster's outbound mail relay
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    smtp_url_file: "{{ _zai_secrets_dir }}/smtp_url"
+    new_url: "{{ lookup('ansible.builtin.env', 'SCN_SMTP_URL') }}"
+    stored_url: "{{ lookup('ansible.builtin.file', smtp_url_file, errors='ignore') | default('', true) }}"
+    # Everything after the credentials: host[:port][/name][?tls=required]. The
+    # greedy `.*@` ends at the LAST @, so a username that is an email address
+    # is still cut whole. Credential-free by construction.
+    url_tail_of: '^[a-zA-Z][a-zA-Z0-9+.-]*://(.*@)?'
+    tail_regex: '^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?)(:[0-9]{1,5})?(/[^?#\s]*)?(\?tls=required)?$'
+  tasks:
+    - name: Require a known action
+      ansible.builtin.assert:
+        that: smtp_action | default('') in ['set', 'clear', 'show']
+        fail_msg: "Pass -e smtp_action=set, clear or show."
+
+    - name: Validate the new URL
+      when: smtp_action == 'set'
+      vars:
+        new_scheme: "{{ new_url | regex_search('^[a-zA-Z][a-zA-Z0-9+.-]*(?=://)') | default('', true) }}"
+        new_tail: "{{ new_url | regex_replace(url_tail_of, '') }}"
+      block:
+        - name: Require the URL in the environment
+          ansible.builtin.assert:
+            that:
+              - new_url | length > 0
+              - new_url is not search('\s')
+            fail_msg: >-
+              No usable URL: export it as SCN_SMTP_URL (one line, no spaces),
+              e.g. smtps://user:password@smtp.example.com:465
+
+        - name: Require an smtp or smtps URL
+          ansible.builtin.assert:
+            that: new_scheme in ['smtp', 'smtps']
+            fail_msg: "The URL must start with smtps:// or smtp://."
+
+        - name: Require a host and a numeric port
+          ansible.builtin.assert:
+            that: new_tail is match(tail_regex)
+            fail_msg: >-
+              After the credentials the URL must be host[:port], where the port
+              is a number. A password containing @ / ? or # must be
+              percent-encoded (scn-config's menu does this for you).
+
+        - name: Refuse a plaintext relay
+          ansible.builtin.assert:
+            that: new_scheme == 'smtps' or new_tail is search('\?tls=required$')
+            fail_msg: >-
+              smtp:// without ?tls=required sends the password unencrypted.
+              Use smtps://host:465 (implicit TLS) or
+              smtp://host:587?tls=required (STARTTLS).
+
+    - name: Ensure the secrets directory exists, root-only
+      ansible.builtin.file:
+        path: "{{ _zai_secrets_dir }}"
+        state: directory
+        mode: "0700"
+      when: smtp_action == 'set'
+
+    # copy, not a shell redirect: writing the value already stored is a no-op.
+    # `content` adds no trailing newline.
+    - name: Write the relay URL
+      ansible.builtin.copy:
+        dest: "{{ smtp_url_file }}"
+        content: "{{ new_url }}"
+        owner: root
+        group: root
+        mode: "0600"
+      diff: false
+      no_log: true
+      register: smtp_write
+      when: smtp_action == 'set'
+
+    - name: Remove the relay URL
+      ansible.builtin.file:
+        path: "{{ smtp_url_file }}"
+        state: absent
+      register: smtp_clear
+      when: smtp_action == 'clear'
+
+    - name: Report the change
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Mail relay ' ~ ('saved' if smtp_action == 'set' else 'cleared')
+             if (smtp_write is changed or smtp_clear is changed)
+             else 'Mail relay unchanged — nothing to do' }}.
+          It reaches a service on its next provision
+          (ansible-playbook provision.yml --limit pds).
+      when: smtp_action in ['set', 'clear']
+
+    # Scheme, host and port only — never the credentials. Written to `out` for
+    # scn-config to read (the same hand-off ct-status.yml uses), or printed.
+    - name: Describe the stored relay
+      when: smtp_action == 'show'
+      vars:
+        stored_scheme: "{{ stored_url | regex_search('^[a-zA-Z][a-zA-Z0-9+.-]*(?=://)') | default('', true) }}"
+        stored_tail: "{{ stored_url | regex_replace(url_tail_of, '') }}"
+        stored_host: "{{ stored_tail | regex_replace('(:[0-9]+)?(/[^?#]*)?(\\?.*)?$', '') }}"
+        stored_port: >-
+          {{ stored_tail | regex_search(':([0-9]+)(?:[/?]|$)', '\1') | default([], true) | first
+             | default('465' if stored_scheme == 'smtps' else '587', true) }}
+        description: |
+          state {{ 'set' if stored_url | length > 0 else 'unset' }}
+          {% if stored_url | length > 0 %}
+          scheme {{ stored_scheme }}
+          host {{ stored_host }}
+          port {{ stored_port }}
+          tls {{ 'implicit' if stored_scheme == 'smtps' else ('starttls' if stored_tail is search('\?tls=required$') else 'none') }}
+          {% endif %}
+      block:
+        - name: Write the description
+          ansible.builtin.copy:
+            dest: "{{ out }}"
+            content: "{{ description }}"
+            mode: "0600"
+          changed_when: false
+          when: out is defined
+
+        - name: Print the description
+          ansible.builtin.debug:
+            msg: "{{ description | trim | split('\n') }}"
+          when: out is not defined

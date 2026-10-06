@@ -65,6 +65,11 @@ out and update the docs.
   out via the host.
 - **SSH into service CTs via an injected key.** CT 100's root ed25519 public key
   is injected at create time; key-only root login. No per-CT passwords.
+- **Admins live in one place: the public roster record.** It sits in the
+  `scn_service_did` account's repo and only Corliss writes it. zai-ops stores
+  no admin list: `admins.yml` runs Corliss's commands, and the PDS's
+  `PDS_ADMIN_DIDS` is read from the roster by `tasks/roster.yml` each time the
+  pds play runs. Don't add a second list for a new service; derive it.
 - **Secrets:** API token in `ansible/group_vars/all/vault.yml` (Ansible Vault,
   git-ignored). Vault password at `/root/.vault_pass` on CT 100 — host root is
   the trust boundary by design.
@@ -93,7 +98,10 @@ out and update the docs.
   assignment is runtime data in `inventory/local.yml`, written by `assign.yml`.
   `scn-config` (a whiptail menu patterned on raspi-config, plus `nonint`
   subcommands) is the only front end; its menu also runs `provision.yml` per
-  service, ordered by `default_ctid` because tier order is dependency order.
+  service, ordered by `default_ctid` because tier order is dependency order,
+  manages cluster admins (`admins.yml`) and sets the mail relay
+  (`set-smtp.yml`). New settings go in as `scn-config` entries with a `nonint`
+  form and a playbook underneath, not as new `zai-set-*` commands.
   The menu never changes a recorded
   assignment: the CTID is the container's VMID and address, so renumbering after
   provisioning strands the old container and its data. `nonint assign-ctid

@@ -6,13 +6,19 @@
 #   scn-config nonint assign-ctid proxy 110      # assign one service
 #   scn-config nonint assign-ctid-defaults       # assign every unassigned service
 #                                                #   its blueprint default
+#   scn-config nonint show-admins                # the cluster's admins
+#   scn-config nonint add-admin alice.example.com    # handle or DID
+#   scn-config nonint remove-admin alice.example.com
+#   scn-config nonint show-smtp                  # the mail relay, minus credentials
+#   scn-config nonint set-smtp < url-file        # the relay URL, read from stdin
+#   scn-config nonint clear-smtp                 # remove it; mail off
 #
 # Runs on the control node. Lives in the repo's bin/ (on PATH via
 # /etc/profile.d/zai-ops.sh) and runs in place — the script you run is always the
 # one in git, no installed copy to drift.
 #
-# This is the front end only. assign.yml validates and writes the runtime
-# inventory; the checks here exist to give a readable message before a playbook
+# This is the front end only. The playbooks (assign.yml, admins.yml,
+# set-smtp.yml) validate and write; the checks here exist to give a readable message before a playbook
 # run, and the playbook stays the authority.
 set -euo pipefail
 
@@ -43,6 +49,12 @@ usage: scn-config
        scn-config nonint show-ctid
        scn-config nonint assign-ctid <service> <ctid> [--reassign]
        scn-config nonint assign-ctid-defaults
+       scn-config nonint show-admins
+       scn-config nonint add-admin <handle-or-did> [--admit] [--tier <tier>]
+       scn-config nonint remove-admin <handle-or-did>
+       scn-config nonint show-smtp
+       scn-config nonint set-smtp        (URL on stdin)
+       scn-config nonint clear-smtp
 EOF
   exit 64
 }
@@ -193,6 +205,208 @@ nonint_assign_ctid_defaults() {
     return 0
   fi
   run_assign
+}
+
+# --- Cluster admins ----------------------------------------------------------
+# The roster is Corliss's to read and write (admins.yml runs its commands on the
+# corliss CT), so everything shown here is Corliss's answer, in its own words.
+ADMIN_RC=1 ADMIN_OUT="" ADMIN_ERR=""
+ADM_DID=() ADM_HANDLE=() ADM_MEMBER=() ADM_NOTE=""
+
+HANDLE_RE='^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+DID_RE='^did:(plc:[a-z2-7]{24}|web:[A-Za-z0-9.%:-]+)$'
+
+# admins_run <ansible args> — run admins.yml; Corliss's exit status, output and
+# complaint land in ADMIN_RC / ADMIN_OUT / ADMIN_ERR.
+admins_run() {
+  local out log field
+  out="$(mktemp)" log="$(mktemp)"
+  ADMIN_RC=1 ADMIN_OUT="" ADMIN_ERR=""
+  ANSIBLE_NOCOLOR=1 ansible-playbook admins.yml -e "out=$out" "$@" >"$log" 2>&1 || true
+  if [ -s "$out" ]; then
+    field='import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])'
+    ADMIN_RC="$(python3 -c "$field" "$out" rc)"
+    ADMIN_OUT="$(python3 -c "$field" "$out" stdout)"
+    # Django prefixes a refusal with "CommandError: "; the sentence after it is
+    # the part worth showing.
+    ADMIN_ERR="$(python3 -c "$field" "$out" stderr | grep -v '^$' | tail -n 1 | sed 's/^CommandError: //')"
+  else
+    # The command never ran: corliss has no CTID, is unreachable, or the
+    # request was refused before it got there.
+    ADMIN_ERR="$(grep -a -E 'Action failed:|UNREACHABLE|ERROR' "$log" | tail -n 3 \
+      | sed 's/.*Action failed: //')"
+    [ -n "$ADMIN_ERR" ] || ADMIN_ERR="$(tail -n 6 "$log")"
+  fi
+  rm -f "$out" "$log"
+  [ "$ADMIN_RC" = 0 ]
+}
+
+# load_admins — the current admins into ADM_*, and anything the operator should
+# know about the roster or the service session into ADM_NOTE.
+load_admins() {
+  local kind a b c
+  ADM_DID=() ADM_HANDLE=() ADM_MEMBER=() ADM_NOTE=""
+  admins_run -e admin_action=show || return 1
+  while IFS=$'\t' read -r kind a b c; do
+    case "$kind" in
+      admin) ADM_DID+=("$a") ADM_HANDLE+=("$b") ADM_MEMBER+=("$c") ;;
+      note) ADM_NOTE="${ADM_NOTE:+$ADM_NOTE
+}$a" ;;
+    esac
+  done < <(python3 -c '
+import json, sys
+report = json.loads(sys.argv[1])
+for a in report["admins"]:
+    print("admin", a["did"], a["handle"], "yes" if a["member"] else "no", sep="\t")
+if not report["roster_exists"]:
+    print("note\tNo roster has been written yet: the service account is the only admin.")
+service = report.get("service", {})
+if not service.get("configured"):
+    print("note\tNo service DID is recorded (zai-set-registry service_did).")
+elif not service.get("present"):
+    print("note\tThe service account is not signed in to Corliss, so admins cannot be changed until it is.")
+elif not service.get("can_write_registry"):
+    print("note\tThe service account has no registry session: sign in to Corliss as it again.")
+' "$ADMIN_OUT")
+}
+
+admins_table() {
+  local i
+  if [ "${#ADM_DID[@]}" -eq 0 ]; then
+    echo "  (none)"
+    return 0
+  fi
+  printf '  %-30s %s\n' "Handle" "DID"
+  printf '  %-30s %s\n' "------------------------------" "--------------------------------"
+  for i in "${!ADM_DID[@]}"; do
+    printf '  %-30s %s%s\n' "${ADM_HANDLE[$i]}" "${ADM_DID[$i]}" \
+      "$([ "${ADM_MEMBER[$i]}" = yes ] || echo "  (not a member)")"
+  done
+}
+
+# normalise_who <input> — echo a handle or DID in the form admins.yml accepts,
+# or fail.
+normalise_who() {
+  local who="${1#@}"
+  [[ "$who" == did:* ]] || who="$(tr '[:upper:]' '[:lower:]' <<<"$who")"
+  [[ "$who" =~ $HANDLE_RE || "$who" =~ $DID_RE ]] || return 1
+  echo "$who"
+}
+
+# After a change that the PDS reads at provision time, say how to apply it.
+pds_hint() {
+  local i
+  load_state
+  i="$(index_of pds)" && [ -n "${SVC_CTID[$i]}" ] \
+    && echo "The PDS picks this up on: ansible-playbook provision.yml --limit pds"
+  return 0
+}
+
+nonint_show_admins() {
+  load_admins || die "could not read the admins: $ADMIN_ERR"
+  admins_table
+  [ -z "$ADM_NOTE" ] || printf '\n%s\n' "$ADM_NOTE"
+}
+
+nonint_add_admin() {
+  local who args=()
+  [ $# -ge 1 ] || usage
+  who="$(normalise_who "$1")" || die "'$1' is not a handle or a DID"
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --admit) args+=(-e admit=true) ;;
+      --tier) [ $# -ge 2 ] || usage; args+=(-e "tier=$2"); shift ;;
+      *) usage ;;
+    esac
+    shift
+  done
+  admins_run -e admin_action=add -e "who=$who" ${args[@]+"${args[@]}"} \
+    || die "$who was not made an admin: $ADMIN_ERR"
+  echo "$ADMIN_OUT"
+  pds_hint
+}
+
+nonint_remove_admin() {
+  local who
+  [ $# -eq 1 ] || usage
+  who="$(normalise_who "$1")" || die "'$1' is not a handle or a DID"
+  admins_run -e admin_action=remove -e "who=$who" \
+    || die "$who was not removed: $ADMIN_ERR"
+  echo "$ADMIN_OUT"
+  pds_hint
+}
+
+# --- Mail relay ---------------------------------------------------------------
+# What set-smtp.yml reports about the stored relay: never the credentials.
+SMTP_STATE=unset SMTP_SCHEME="" SMTP_HOST="" SMTP_PORT="" SMTP_TLS=""
+
+load_smtp() {
+  local out key value
+  SMTP_STATE=unset SMTP_SCHEME="" SMTP_HOST="" SMTP_PORT="" SMTP_TLS=""
+  out="$(mktemp)"
+  if ! ANSIBLE_NOCOLOR=1 ansible-playbook set-smtp.yml -e smtp_action=show \
+      -e "out=$out" >/dev/null 2>&1; then
+    rm -f "$out"
+    die "could not read the mail relay — run: ansible-playbook set-smtp.yml -e smtp_action=show"
+  fi
+  while read -r key value; do
+    case "$key" in
+      state) SMTP_STATE="$value" ;;
+      scheme) SMTP_SCHEME="$value" ;;
+      host) SMTP_HOST="$value" ;;
+      port) SMTP_PORT="$value" ;;
+      tls) SMTP_TLS="$value" ;;
+    esac
+  done <"$out"
+  rm -f "$out"
+}
+
+# tls_label <implicit|starttls|none> — how to say it to a person.
+tls_label() {
+  case "$1" in
+    implicit) echo "implicit TLS" ;;
+    starttls) echo "STARTTLS" ;;
+    *) echo "NOT ENCRYPTED" ;;
+  esac
+}
+
+smtp_summary() {
+  if [ "$SMTP_STATE" = set ]; then
+    echo "$SMTP_SCHEME://$SMTP_HOST:$SMTP_PORT ($(tls_label "$SMTP_TLS"))"
+  else
+    echo "not set — mail is off"
+  fi
+}
+
+# set_smtp <url> [ansible args] — the URL goes in the environment, never an
+# argument: arguments are on the process list for as long as the play runs.
+set_smtp() {
+  local url="$1"; shift
+  SCN_SMTP_URL="$url" ansible-playbook set-smtp.yml -e smtp_action=set "$@"
+}
+
+nonint_show_smtp() {
+  load_smtp
+  echo "mail relay: $(smtp_summary)"
+}
+
+# The URL comes from stdin so the password stays out of shell history and the
+# process list. Typed at a terminal, it is not echoed.
+nonint_set_smtp() {
+  local url=""
+  if [ -t 0 ]; then
+    read -r -s -p "SMTP URL (input hidden): " url || true
+    echo
+  else
+    read -r url || true
+  fi
+  [ -n "$url" ] || die "no URL on stdin, e.g. smtps://user:password@smtp.example.com:465"
+  set_smtp "$url"
+}
+
+nonint_clear_smtp() {
+  ansible-playbook set-smtp.yml -e smtp_action=clear
 }
 
 # --- Interactive mode --------------------------------------------------------
@@ -443,7 +657,7 @@ ct_status() {
 }
 
 do_provision_menu() {
-  local i args=() picked text name unassigned=0 note="" failed="" remaining=()
+  local i args=() picked text name unassigned=0 note=""
   local status label ticked plan=""
   load_state
   # TERM=ansi: see the infobox in do_assign_menu.
@@ -517,18 +731,24 @@ on a new container. The run stops at the first failure."
     --yes-button Provision --no-button Back \
     --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
 
-  # Leave whiptail for the run: the playbook output is the progress display,
-  # and it is what the operator needs on screen if a task fails.
+  # shellcheck disable=SC2086  # service names, one per line, split on purpose
+  run_provision $picked
+}
+
+# run_provision <service>... — provision each in the order given, stopping at
+# the first failure. Leaves whiptail for the run: the playbook output is the
+# progress display, and it is what the operator needs on screen if a task fails.
+run_provision() {
+  local name failed="" remaining=()
   clear
-  while read -r name; do
+  for name in "$@"; do
     if [ -n "$failed" ]; then
       remaining+=("$name")
       continue
     fi
     printf '\n=== scn-config: provisioning %s ===\n\n' "$name"
-    # </dev/null: keep ansible from consuming the list this loop is reading.
     ansible-playbook provision.yml --limit "$name" </dev/null || failed="$name"
-  done <<<"$picked"
+  done
 
   echo
   if [ -n "$failed" ]; then
@@ -538,6 +758,305 @@ on a new container. The run stops at the first failure."
     echo "scn-config: provisioning finished."
   fi
   read -r -p "Press Enter to return to the menu. " </dev/tty || true
+}
+
+# ask <title> <prompt> <default> — an input box; fails if the operator cancels.
+ask() {
+  whiptail --backtitle "$BACKTITLE" --title "$1" \
+    --inputbox "$2" "$(box_height "$2" 8)" "$WT_WIDTH" "$3" 3>&1 1>&2 2>&3
+}
+
+# offer_pds_provision <title> <what changed> — for a change the PDS reads only
+# when it is provisioned (the mail relay, the admin roster): offer to do that
+# now, when the PDS exists to provision.
+offer_pds_provision() {
+  local i ctid="" text
+  load_state
+  i="$(index_of pds)" && ctid="${SVC_CTID[$i]}"
+  if [ -z "$ctid" ]; then
+    msgbox "$1" "$2
+
+The PDS has no container ID yet, so there is nothing to update there.
+It will pick this up when it is first provisioned."
+    return 0
+  fi
+  text="$2
+
+The PDS picks this up on its next provision. Run that now?"
+  whiptail --backtitle "$BACKTITLE" --title "$1" \
+    --yes-button "Provision pds" --no-button Later \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+  run_provision pds
+}
+
+# Best-effort lookup so the operator sees who they are about to appoint. Prints
+# the DID then the handle. Corliss does the authoritative, verified resolution
+# when the appointment is made; this only fills in the confirmation.
+IDENTITY_LOOKUP='
+import json, sys, urllib.parse, urllib.request
+who = sys.argv[1]
+def get(url):
+    with urllib.request.urlopen(url, timeout=6) as response:
+        return response.read().decode()
+try:
+    if who.startswith("did:plc:"):
+        doc = json.loads(get("https://plc.directory/" + who))
+    elif who.startswith("did:web:"):
+        doc = json.loads(get("https://" + who[8:].split(":")[0] + "/.well-known/did.json"))
+    else:
+        try:
+            did = json.loads(get("https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=" + urllib.parse.quote(who)))["did"]
+        except Exception:
+            did = get("https://" + who + "/.well-known/atproto-did").strip()
+        print(did, who, sep="\n")
+        sys.exit(0)
+    names = [n[5:] for n in doc.get("alsoKnownAs", []) if n.startswith("at://")]
+    print(who, names[0] if names else "", sep="\n")
+except Exception:
+    sys.exit(1)
+'
+
+# admin_change <add|remove> <who> — make the change, offering to admit a
+# non-member first, and report what Corliss said.
+admin_change() {
+  local action="$1" who="$2" tier text
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
+    --infobox "Asking Corliss…" 8 "$WT_WIDTH"
+  if ! admins_run -e "admin_action=$action" -e "who=$who" \
+      && [ "$action" = add ] && [[ "$ADMIN_ERR" == *"only a current member"* ]]; then
+    # Admins are members. Admitting someone is its own decision, so it is asked,
+    # never assumed.
+    text="$who is not a member, and only a member can be an admin.
+
+Admit them as a member first, then make them an admin?"
+    whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
+      --yes-button "Admit and appoint" --no-button Back \
+      --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+    tier="$(ask "Cluster Admins" "Membership tier for $who" "level-0")" || return 0
+    TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
+      --infobox "Asking Corliss…" 8 "$WT_WIDTH"
+    admins_run -e admin_action=add -e "who=$who" -e admit=true -e "tier=$tier" || true
+  fi
+  if [ "$ADMIN_RC" = 0 ]; then
+    offer_pds_provision "Cluster Admins" "$ADMIN_OUT"
+  else
+    msgbox "Cluster Admins" "Corliss refused:
+
+$ADMIN_ERR"
+  fi
+}
+
+do_admins_menu() {
+  local choice text who found did handle i args
+  while true; do
+    TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
+      --infobox "Reading the admin roster…" 8 "$WT_WIDTH"
+    if ! load_admins; then
+      msgbox "Cluster Admins" "Could not read the admins.
+
+$ADMIN_ERR"
+      return 0
+    fi
+    text="An admin can approve and revoke members in Corliss and administer
+the PDS. The list is the public roster; nothing is stored here.
+
+$(admins_table)${ADM_NOTE:+
+
+$ADM_NOTE}"
+    choice="$(whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
+      --ok-button Select --cancel-button Back \
+      --menu "$text" "$(box_height "$text" 10)" "$WT_WIDTH" 2 \
+      "Add" " Make someone an admin" \
+      "Remove" " End someone's admin authority" \
+      3>&1 1>&2 2>&3)" || return 0
+
+    if [ "$choice" = Add ]; then
+      who=""
+      while true; do
+        who="$(ask "Cluster Admins" "Who? A handle (alice.example.com) or a DID (did:plc:…)." "$who")" || continue 2
+        who="$(normalise_who "$who")" && break
+        msgbox "Cluster Admins" "That is neither a handle nor a DID."
+        who=""
+      done
+      if found="$(python3 -c "$IDENTITY_LOOKUP" "$who" 2>/dev/null)"; then
+        { read -r did; read -r handle; } <<<"$found"
+        text="Make this person a cluster admin?
+
+  Handle  ${handle:-(none found)}
+  DID     $did"
+      else
+        text="Make $who a cluster admin?
+
+It could not be looked up from here. Corliss will resolve and verify
+it, and refuse if it does not check out."
+      fi
+      whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
+        --yes-button "Make admin" --no-button Back \
+        --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || continue
+      admin_change add "$who"
+    else
+      args=()
+      for i in "${!ADM_DID[@]}"; do
+        args+=("${ADM_DID[$i]}" " ${ADM_HANDLE[$i]}")
+      done
+      [ "${#args[@]}" -gt 0 ] || { msgbox "Cluster Admins" "There is nobody to remove."; continue; }
+      did="$(whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
+        --ok-button Select --cancel-button Back \
+        --menu "Whose admin authority ends?" "$((${#ADM_DID[@]} + 8))" "$WT_WIDTH" \
+        "${#ADM_DID[@]}" "${args[@]}" 3>&1 1>&2 2>&3)" || continue
+      text="End $did's admin authority?
+
+Members they approved stay members. They stay a member themselves."
+      whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
+        --yes-button Remove --no-button Back \
+        --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || continue
+      admin_change remove "$did"
+    fi
+  done
+}
+
+# Take a pasted relay URL apart and put it back together in the form the
+# consumer reads. The input arrives in the environment (it carries a password).
+# Prints scheme, host, port, tls, "auth" or "", and the rebuilt URL, one per line.
+#
+# Credentials end at the LAST @, so a username that is an email address or a
+# catch-all (*@example.com) needs no escaping from the operator. Each half is
+# unquoted then quoted: the consumer percent-decodes, so that keeps the meaning
+# of a URL that was already encoded and fixes one that was not.
+SMTP_URL_PARSER='
+import os, re, sys
+from urllib.parse import quote, unquote
+raw = os.environ["SMTP_INPUT"].strip()
+scheme, rest = raw.split("://", 1)
+scheme = scheme.lower()
+rest, _, query = rest.partition("?")
+userinfo, at, hostport = rest.rpartition("@")
+hostport = hostport.split("/", 1)[0]
+m = re.fullmatch(r"(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)(?::([0-9]{1,5}))?", hostport)
+if not m:
+    sys.exit(1)
+host, port = m.group(1), m.group(2)
+# Bare smtp:// would be unencrypted, so it is read as STARTTLS.
+tls = "implicit" if scheme == "smtps" else "starttls"
+port = port or ("465" if tls == "implicit" else "587")
+user, _, password = userinfo.partition(":")
+auth = quote(unquote(user), safe="") + ":" + quote(unquote(password), safe="") + "@" if at and user else ""
+suffix = "" if tls == "implicit" else "?tls=required"
+print(scheme, host, port, tls, "auth" if auth else "", f"{scheme}://{auth}{host}:{port}{suffix}", sep="\n")
+'
+
+do_smtp_menu() {
+  local choice text host tls port user pass url scheme query out problem parsed
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Set SMTP" \
+    --infobox "Reading the mail relay…" 8 "$WT_WIDTH"
+  load_smtp
+
+  text="Outbound mail relay: $(smtp_summary)
+
+One relay per cluster. The PDS sends invites, confirmations and
+password resets through it."
+  choice="$(whiptail --backtitle "$BACKTITLE" --title "Set SMTP" \
+    --ok-button Select --cancel-button Back \
+    --menu "$text" "$(box_height "$text" 10)" "$WT_WIDTH" 2 \
+    "Set" " Enter the relay's details" \
+    "Clear" " Remove the relay and turn mail off" \
+    3>&1 1>&2 2>&3)" || return 0
+
+  if [ "$choice" = Clear ]; then
+    [ "$SMTP_STATE" = set ] || { msgbox "Set SMTP" "No relay is set."; return 0; }
+    whiptail --backtitle "$BACKTITLE" --title "Set SMTP" \
+      --yes-button Clear --no-button Back \
+      --yesno "Remove the mail relay? Mail will be off for every service." \
+      8 "$WT_WIDTH" || return 0
+    if out="$(ANSIBLE_NOCOLOR=1 nonint_clear_smtp 2>&1)"; then
+      offer_pds_provision "Set SMTP" "The mail relay is cleared."
+    else
+      msgbox "Set SMTP" "Could not clear the relay.
+
+$(tail -n 12 <<<"$out")"
+    fi
+    return 0
+  fi
+
+  # Host, then how it does TLS, then the port that choice implies. A relay's
+  # own setup page usually hands over one whole URL, so the first box takes
+  # that too and the rest of the questions are skipped.
+  host="$SMTP_HOST" url="" user=""
+  while true; do
+    host="$(ask "Set SMTP" "Relay host, e.g. smtp.example.com
+
+Or paste the relay's whole URL (smtps://user:password@host:465)." "$host")" || return 0
+    if [[ "$host" =~ ^[Ss][Mm][Tt][Pp][Ss]?:// ]]; then
+      if parsed="$(SMTP_INPUT="$host" python3 -c "$SMTP_URL_PARSER")"; then
+        { read -r scheme; read -r host; read -r port; read -r tls; read -r user; read -r url; } <<<"$parsed"
+        break
+      fi
+      host=""
+      msgbox "Set SMTP" "That URL has no host, or its port is not a number."
+      continue
+    fi
+    [[ "$host" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] && break
+    msgbox "Set SMTP" "That is not a host name. Enter just the host, or a whole
+smtp:// or smtps:// URL."
+  done
+  if [ -z "$url" ]; then
+  tls="$(whiptail --backtitle "$BACKTITLE" --title "Set SMTP" \
+    --ok-button Select --cancel-button Back --default-item "${SMTP_TLS:-implicit}" \
+    --menu "How does $host secure the connection?" 11 "$WT_WIDTH" 2 \
+    "implicit" " TLS from the first byte (smtps, usually port 465)" \
+    "starttls" " Upgrades with STARTTLS (smtp, usually port 587)" \
+    3>&1 1>&2 2>&3)" || return 0
+  if [ "$tls" = implicit ]; then
+    scheme=smtps query="" port=465
+  else
+    # Without tls=required the consumer would talk to the relay unencrypted.
+    scheme=smtp query="?tls=required" port=587
+  fi
+  [ "$tls" = "$SMTP_TLS" ] && [ -n "$SMTP_PORT" ] && port="$SMTP_PORT"
+  while true; do
+    port="$(ask "Set SMTP" "Port on $host" "$port")" || return 0
+    [[ "$port" =~ ^[0-9]{1,5}$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] && break
+    msgbox "Set SMTP" "The port must be a number from 1 to 65535."
+  done
+
+  # Credentials are never pre-filled: the stored ones are not read back.
+  user="$(ask "Set SMTP" "Username for $host. Leave empty if the relay needs no sign-in." "")" || return 0
+  pass=""
+  if [ -n "$user" ]; then
+    pass="$(whiptail --backtitle "$BACKTITLE" --title "Set SMTP" \
+      --passwordbox "Password for $user" 9 "$WT_WIDTH" 3>&1 1>&2 2>&3)" || return 0
+  fi
+
+  # Percent-encode the credentials: usernames are often email addresses, and
+  # an unencoded @ / ? or # would change where the URL's host begins. Passed to
+  # python in the environment so the password is never an argument.
+  url="$(SMTP_USER="$user" SMTP_PASS="$pass" python3 -c '
+import os, sys
+from urllib.parse import quote
+scheme, host, port, query = sys.argv[1:5]
+user, password = os.environ["SMTP_USER"], os.environ["SMTP_PASS"]
+auth = quote(user, safe="") + ":" + quote(password, safe="") + "@" if user else ""
+print(f"{scheme}://{auth}{host}:{port}{query}")
+' "$scheme" "$host" "$port" "$query")"
+  fi
+
+  text="Set the mail relay to:
+
+  $scheme://$host:$port ($(tls_label "$tls"))
+  $([ -n "$user" ] && echo "signing in with the username and password given" || echo "with no sign-in")"
+  whiptail --backtitle "$BACKTITLE" --title "Set SMTP" \
+    --yes-button Save --no-button Back \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+
+  if out="$(ANSIBLE_NOCOLOR=1 set_smtp "$url" 2>&1)"; then
+    offer_pds_provision "Set SMTP" "The mail relay is saved."
+  else
+    problem="$(grep -a -m1 'Action failed:' <<<"$out" | sed 's/.*Action failed: //')"
+    msgbox "Set SMTP" "The relay was refused — nothing was written.
+
+${problem:-$(tail -n 8 <<<"$out")}"
+  fi
 }
 
 interactive() {
@@ -552,10 +1071,14 @@ interactive() {
       --menu "" 18 "$WT_WIDTH" 9 \
       "1 Container Assignment" " Set the CTID per service" \
       "2 Provision Containers" " Build the assigned services" \
+      "3 Cluster Admins" " Who can approve members and run the PDS" \
+      "4 Set SMTP" " Outbound mail relay" \
       3>&1 1>&2 2>&3)" || exit 0
     case "$choice" in
       1\ *) do_assign_menu ;;
       2\ *) do_provision_menu ;;
+      3\ *) do_admins_menu ;;
+      4\ *) do_smtp_menu ;;
     esac
   done
 }
@@ -569,6 +1092,12 @@ case "${1:-}" in
       show-ctid) nonint_show_ctid ;;
       assign-ctid) shift; nonint_assign_ctid "$@" ;;
       assign-ctid-defaults) nonint_assign_ctid_defaults ;;
+      show-admins) nonint_show_admins ;;
+      add-admin) shift; nonint_add_admin "$@" ;;
+      remove-admin) shift; nonint_remove_admin "$@" ;;
+      show-smtp) nonint_show_smtp ;;
+      set-smtp) nonint_set_smtp ;;
+      clear-smtp) nonint_clear_smtp ;;
       *) usage ;;
     esac
     ;;

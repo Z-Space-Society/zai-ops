@@ -83,6 +83,11 @@ itself from this repo.
    ([`inventory/local.yml`](docs/README.md#networking)), which is what keeps the
    committed tree free of this cluster's identity.
 
+   One more setting is a secret, so it is kept out of that file: the **outbound
+   mail relay**. Set it with `scn-config` (Set SMTP) before provisioning the
+   PDS, or the PDS runs with mail off. See
+   [Outbound email](docs/roles/pds.md#outbound-email-smtp).
+
 4. Build the service containers in two passes: **assign** every service its
    container ID, then **provision** them.
 
@@ -235,7 +240,7 @@ architecture, networking, and a note for every role.
   - `site.yml` — configures the control node (CT 100)
   - `verify-proxmox.yml` — checks the API token authenticates
   - `provision.yml` — creates the service containers over the API, then configures them
-  - `make-admin.yml` — promotes an ATProto handle to corliss admin, keyed on DID (`zai-make-admin`)
+  - `admins.yml` — shows, adds or removes a cluster admin by running Corliss's own commands on its CT (`scn-config`, Cluster Admins)
   - `enroll-inference-node.yml` — records a bare-metal inference node in the runtime inventory
   - `inference.yml` — configures inference nodes (NVIDIA/CUDA + llama-server)
   - `add-github-user.yml` — creates a human admin account from GitHub keys (CT 100 + inference nodes)

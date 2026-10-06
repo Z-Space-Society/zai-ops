@@ -65,9 +65,9 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 
 | Var | Default | Meaning |
 |---|---|---|
-| `pds_repo_url` | `https://tangled.org/sharedcomputer.network/atproto-crates` | build source — the **SCN-owned fork** (hosted on the @commonscomputer.com knot; canonical upstream = `ngerakines.me/atproto-crates`) |
-| `pds_revision` | `68222af18add…` | **the reproducibility pin**, a commit SHA |
-| `pds_version` | `0.15.0-rc.4` | informational; verified against the checkout |
+| `pds_repo_url` | `https://tangled.org/ngerakines.me/atproto-crates` | build source: Nick's canonical workspace. The SCN fork (`sharedcomputer.network/atproto-crates`, on the @commonscomputer.com knot) is not used while it trails upstream; see the comment in `defaults/main.yml` |
+| `pds_revision` | `f74a3e104661…` | **the reproducibility pin**, a commit SHA |
+| `pds_version` | `0.15.0-rc.6` | informational; verified against the checkout |
 | `pds_hostname` | `pds.{{ cluster_domain }}` | public hostname (SCN: `pds.sharedcomputer.network`) |
 | `pds_service_did` | `did:web:pds.{{ cluster_domain }}` | the PDS's own service identity |
 | `pds_handle_domains` | `[".{{ cluster_domain }}"]` | handle namespace accounts get (SCN: `*.sharedcomputer.network`) |
@@ -187,7 +187,8 @@ is already verified — see below) → proof list:
 1. ~~**Pin the revision**~~ — **DONE 2026-09-08**: tangled `main` HEAD
    `711ee2db1aaa01b3fe994364739b425a5dd966ae` builds `atproto-pds 0.15.0-rc.4`
    (edition 2024, rust 1.97, MIT). Bumped 2026-09-23 to `68222af` (still
-   0.15.0-rc.4) for admin-password invite minting; see
+   0.15.0-rc.4) for admin-password invite minting. Bumped 2026-10-06 to
+   `f74a3e1` (0.15.0-rc.6, upstream main) for `GET /_tls-check`; see
    `roles/pds/defaults/main.yml`.
 2. **Key generators** — exact commands for the OAuth JWK set and the PLC
    `did:key` rotation key (or write the pipe lookups).

@@ -12,27 +12,34 @@
 #
 # One instance only: a replica count above one is a data-loss setting.
 
-# Source + pin. We build from the **SCN-owned fork** of the atproto-crates
-# workspace (https://tangled.org/sharedcomputer.network/atproto-crates, hosted
-# on the @commonscomputer.com knot, main @ c4aff94a) — SCN's upstream, so SCN
-# controls what the role builds and where pins resolve; the canonical upstream
-# remains Nick's ngerakines.me/atproto-crates (forked into ours).
+# Source + pin. We build from Nick's canonical atproto-crates workspace
+# (https://tangled.org/ngerakines.me/atproto-crates). An SCN-owned fork exists
+# at tangled.org/sharedcomputer.network/atproto-crates, on the
+# @commonscomputer.com knot. It is not the build source: on 2026-10-06 its main
+# was 542 commits behind upstream and the knot was returning 502, and a build
+# source that is down fails every provision that has to clone. Point this back
+# at the fork once it is synced and the knot's uptime is something we rely on.
 #
-# Pinned to 68222af18add (2026-09-18, "Let atproto-pds-admin create and
-# disable invite codes"): atproto-pds 0.15.0-rc.4, workspace edition 2024 /
-# rust-version 1.97 / license MIT, verified against that commit. It replaced
-# the earlier 711ee2db pin because createInviteCode now also accepts the admin
-# password over HTTP Basic (as the reference PDS gates it) and the CLI gains
-# invite create/disable + disable-account/enable-account, so an operator can
-# mint invite codes without a roster DID's service-auth signature.
+# Pinned to f74a3e104661 (2026-10-05, upstream main): atproto-pds 0.15.0-rc.6,
+# workspace edition 2024 / rust-version 1.97 / license MIT, verified against
+# that commit. It replaced 68222af18add (0.15.0-rc.4, 670 commits earlier).
+# What the bump is for: GET /_tls-check (e57a6f0), the endpoint Caddy's
+# on-demand TLS asks before issuing a certificate for a handle hostname. The
+# proxy role does not use it yet.
+#
+# Checked against f74a3e1 before bumping: the four build features below and
+# every PDS_* name pds.env.j2 writes still exist. Two changes in the range can
+# refuse a boot that 68222af accepted: PDS_PRODUCTION=true now needs
+# PDS_DATA_DIRECTORY to exist (the role creates it), and a JWK in
+# PDS_OAUTH_KEYS_JWK_SET whose public point does not match its private key is
+# refused at load.
 #
 # Upstream publishes no tag to fetch, so the revision IS the reproducibility
 # pin. A bump drives a re-clone + rebuild (cold cargo build, ~15-30 min, same
-# budget as happyview); re-verify pds_version against the new commit. Sync our
-# fork from upstream (ngerakines.me/atproto-crates) before bumping the pin.
-pds_repo_url: "https://tangled.org/sharedcomputer.network/atproto-crates"
-pds_version: "0.15.0-rc.4"        # informational; verified against the checkout
-pds_revision: "68222af18add3a2953faa465c39219adf8314778"
+# budget as happyview); re-verify pds_version against the new commit.
+pds_repo_url: "https://tangled.org/ngerakines.me/atproto-crates"
+pds_version: "0.15.0-rc.6"        # informational; verified against the checkout
+pds_revision: "f74a3e104661b503cfc92771acb5ef6775a0acaa"
 
 # Build features — the default sqlite storage profile stays on. clap is
 # REQUIRED (both bin targets gate on it); smtp = outbound mail (invites/2FA),

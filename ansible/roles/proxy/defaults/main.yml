@@ -63,7 +63,7 @@ caddy_acme_email: ""
 # already carries it fall through to the real app instead.
 caddy_proxy_hosts:
   - { domain: "api.{{ cluster_domain }}", service: litellm, port: 4000 }
-  - domain: "chat.{{ cluster_domain }}"
+  - domain: "owui.{{ cluster_domain }}"
     service: open-webui
     port: 8080
     redirects:

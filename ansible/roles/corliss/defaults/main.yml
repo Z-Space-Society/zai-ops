@@ -90,6 +90,12 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v1.3.4 renames the env key `CHAT_URL` to `OPENWEBUI_URL`, because Open WebUI
+# moved to owui.<domain> and the chat name is promised to another app. The key
+# in corliss.env.j2 is renamed in the same commit as this pin, and there is no
+# fallback read of the old one: a pin below v1.3.4 ignores `OPENWEBUI_URL` and
+# hides the Open WebUI nav entry and home page block. No migration.
+#
 # v1.3.3 adds the Parascribe guide at /tools/parascribe/: how to call the
 # cluster's transcription models, naming the ones the reader's tier reaches from
 # the LiteLLM settings corliss already has. No new env keys, no migration.
@@ -369,7 +375,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v1.3.3
+corliss_version: v1.3.4
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -472,7 +478,7 @@ corliss_allowed_hosts:
 # same convention as openwebui_litellm_port/litellm_port.
 corliss_oidc_client_id: open-webui
 corliss_oidc_redirect_uris:
-  - "https://chat.{{ cluster_domain }}/oauth/oidc/callback"
+  - "https://owui.{{ cluster_domain }}/oauth/oidc/callback"
 
 # Open WebUI's back-channel logout endpoint — where corliss POSTs a logout_token
 # on sign-out and on revocation. INTERNAL (derived from open-webui's CTID via
@@ -496,7 +502,7 @@ corliss_oidc_backchannel_logout_uri: "http://{{ hostvars['open-webui'].ansible_h
 #
 # Blank hides the corresponding link/block in the app, which is why they're
 # derived rather than required: nothing here fails when a surface is absent.
-corliss_chat_url: "https://chat.{{ cluster_domain }}"     # nav "Chat" link
+corliss_openwebui_url: "https://owui.{{ cluster_domain }}"  # Tools menu "Open WebUI" entry
 corliss_api_url: "https://api.{{ cluster_domain }}"       # base URL shown on /api/
 corliss_happyview_url: "https://view.{{ cluster_domain }}"  # Manage menu, admins only
 

@@ -2,7 +2,7 @@
 # OpenWebUI — the cluster's user-facing chat UI. A Python app (FastAPI + a built
 # Svelte frontend) run natively from a dedicated venv under systemd; no Docker
 # (per the prime directive). Internal-only on vmbr1; the LAN reaches it through the
-# Caddy edge (chat.{{ cluster_domain }} → open-webui:8080). It talks to the litellm
+# Caddy edge (owui.{{ cluster_domain }} → open-webui:8080). It talks to the litellm
 # CT as its OpenAI-compatible backend for BOTH chat and RAG embeddings, and keeps
 # its state (users, chats, settings) in Postgres so the CT holds nothing
 # unreproducible.
@@ -130,8 +130,8 @@ openwebui_rag_embedding_engine: openai
 openwebui_rag_embedding_model: "nomic-embed-text"
 
 # Public URL, derived from cluster_domain — used for OAuth/share links. The matching
-# Caddy route (proxy role's caddy_proxy_hosts) sends chat.{{ cluster_domain }} here.
-openwebui_url: "https://chat.{{ cluster_domain }}"
+# Caddy route (proxy role's caddy_proxy_hosts) sends owui.{{ cluster_domain }} here.
+openwebui_url: "https://owui.{{ cluster_domain }}"
 
 # --- OIDC login: corliss is the ONLY way in ---------------------------------
 # corliss (this cluster's ATProto->OIDC bridge — see docs/decisions/0005-

@@ -269,7 +269,7 @@
   # The regexp is anchored at BOTH ends and must match the rendered line exactly:
   # a regexp the line itself doesn't satisfy would append a duplicate on every
   # run. Anchoring also keeps it from matching a subdomain entry
-  # (chat.{{ cluster_domain }}), which belongs to a different CT.
+  # (owui.{{ cluster_domain }}), which belongs to a different CT.
   ansible.builtin.lineinfile:
     path: /etc/hosts
     line: "{{ hostvars['proxy'].ansible_host }} {{ cluster_domain }}"

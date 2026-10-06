@@ -145,7 +145,7 @@ scn-config nonint set-domain <domain>` instead of a raw undefined-variable error
 ```yaml
 caddy_proxy_hosts:
   - { domain: "api.{{ cluster_domain }}", service: litellm, port: 4000 }
-#  - { domain: "chat.{{ cluster_domain }}", service: open-webui, port: 8080 }
+#  - { domain: "owui.{{ cluster_domain }}", service: open-webui, port: 8080 }
 ```
 
 ## Secrets
@@ -166,8 +166,8 @@ In `acme` mode the point is a chain browsers trust, so verify by hostname from
 **outside** the LAN, and never with `-k`:
 
 ```bash
-curl -sI https://chat.example.com/ | head -1       # must succeed without -k
-echo | openssl s_client -connect chat.example.com:443 -servername chat.example.com \
+curl -sI https://owui.example.com/ | head -1       # must succeed without -k
+echo | openssl s_client -connect owui.example.com:443 -servername owui.example.com \
   2>/dev/null | openssl x509 -noout -issuer -dates   # issuer: Let's Encrypt
 ssh root@10.1.1.<ctid> 'journalctl -u caddy --no-pager | grep -iE "obtain|challenge|acme"'
 ```

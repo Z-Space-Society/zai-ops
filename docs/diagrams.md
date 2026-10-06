@@ -60,7 +60,7 @@ flowchart TB
     cf -->|"vmbr0 / LAN"| proxy
 
     proxy -->|"apex → :8000"| corliss
-    proxy -->|"chat. → :8080"| owui
+    proxy -->|"owui. → :8080"| owui
     proxy -->|"api. → :4000"| litellm
     proxy -->|"view. → :3000"| happyview
 
@@ -236,7 +236,7 @@ sequenceDiagram
     CO->>CO: cache standing and tier
     end
 
-    M->>C: GET https://chat.apex/
+    M->>C: GET https://owui.apex/
     C->>C: /auth* → /oauth/oidc/login<br/>skipped when the token cookie is present
     C->>OW: reverse_proxy 10.1.1.121:8080
 

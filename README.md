@@ -52,7 +52,7 @@ itself from this repo.
    - **Cluster Settings** lists four values with what is recorded for each:
      - **Domain**: required before provisioning the proxy. Its Caddy routes
        are built from `cluster_domain`, and every service's public URL
-       (`chat.`, `api.`, `view.`, …) derives from it, so setting it once moves
+       (`owui.`, `api.`, `view.`, …) derives from it, so setting it once moves
        them all together. Scripted: `scn-config nonint set-domain example.com`.
      - **Registry service DID**: the account whose repo holds the public admin
        roster. Provisioning succeeds without it and nobody is an admin, so it

@@ -14,7 +14,7 @@ chats and settings persisted in [`postgres`](postgres.md).
 A native Open WebUI install: a Python app run from a dedicated venv under systemd —
 **no Docker** (per the [prime directive](../../CLAUDE.md)). It is **internal-only**
 on `vmbr1`; the LAN reaches it through the [`proxy`](proxy.md) edge
-(`chat.{{ cluster_domain }}` → `open-webui:8080`). Its state lives in Postgres, so
+(`owui.{{ cluster_domain }}` → `open-webui:8080`). Its state lives in Postgres, so
 the CT itself holds nothing unreproducible.
 
 **One backend, the litellm gateway.** Open WebUI is pointed at the
@@ -232,7 +232,7 @@ booted once before this setting existed.
 **No native "skip the login page" option.** Open WebUI has no built-in way to
 auto-redirect straight to the sole configured OAuth provider
 ([open-webui/open-webui#24325](https://github.com/open-webui/open-webui/issues/24325)
-is the open feature request) — visiting `chat.{{ cluster_domain }}` always
+is the open feature request) — visiting `owui.{{ cluster_domain }}` always
 lands on `/auth` first, showing a "Continue with ZAI" button to click even
 with the local form gone. The [`proxy`](proxy.md) role's `redirects` field on
 this route (`/auth*` → `/oauth/oidc/login`) closes that gap at the edge
@@ -246,7 +246,7 @@ same `/auth` path — that's how its frontend picks up the just-set `token`
 session cookie and finishes logging in client-side, then navigates to `/`.
 A `/auth*` redirect with no exception catches that completion request too
 and bounces it straight into another OIDC round-trip — forever. Symptom:
-the browser loops entirely on `chat.{{ cluster_domain }}/auth` (never
+the browser loops entirely on `owui.{{ cluster_domain }}/auth` (never
 visibly reaching corliss again), while `journalctl -u open-webui` shows a
 *successful* token exchange (`POST /oidc/token 200`, "Stored OAuth session
 server-side") on every single cycle — the login is actually succeeding each
@@ -298,7 +298,7 @@ generate, and the source of the hard provisioning dependency below.
   [the trade](redis.md#the-trade-this-role-makes-stated-deliberately) before
   touching either side.
 - **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts`
-  (`chat.{{ cluster_domain }}`); set the domain once with `scn-config` (Cluster Settings).
+  (`owui.{{ cluster_domain }}`); set the domain once with `scn-config` (Cluster Settings).
 
 ## Verify
 
@@ -315,7 +315,7 @@ ssh root@10.1.1.<ctid> 'SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
   /opt/open-webui/venv/bin/python -c "from jwt import PyJWKClient; \
   PyJWKClient(\"https://<domain>/.well-known/jwks.json\").fetch_data(); print(\"jwks ok\")"'
 
-# end-to-end: browse https://chat.<domain>, create the first (admin) user,
+# end-to-end: browse https://owui.<domain>, create the first (admin) user,
 # confirm litellm's models appear, and upload a doc to exercise RAG.
 # Revocation: revoke a member in corliss, then expect a 200 (not 400) on
 # POST /oauth/backchannel-logout in `journalctl -u open-webui`, and the marker

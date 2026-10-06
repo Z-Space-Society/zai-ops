@@ -752,7 +752,7 @@ settings_domain() {
     domain="$(ask "Cluster Settings" "The cluster's public base domain, e.g. example.com
 
 Every public address is built from it: the membership site on the
-domain itself, and chat.<domain>, api.<domain> and the rest beside it." "$domain")" || return 0
+domain itself, and owui.<domain>, api.<domain> and the rest beside it." "$domain")" || return 0
     domain="$(tr '[:upper:]' '[:lower:]' <<<"$domain")"
     # A handle and a domain have the same shape.
     [[ "$domain" =~ $HANDLE_RE ]] && break

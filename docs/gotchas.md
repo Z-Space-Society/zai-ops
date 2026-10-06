@@ -253,7 +253,7 @@ Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
   since config is meant to live in git, not a mutable runtime database. See
   [`open-webui`](roles/open-webui.md#oidc-login-corliss-is-the-only-way-in).
 - **No native way to skip the login page when OAuth is the only option.** Visiting
-  `chat.{{ cluster_domain }}` always lands on `/auth` first, showing a "Continue
+  `owui.{{ cluster_domain }}` always lands on `/auth` first, showing a "Continue
   with ZAI" button rather than redirecting straight into the OIDC flow
   ([open-webui/open-webui#24325](https://github.com/open-webui/open-webui/issues/24325)
   is the open feature request). Closed at the edge instead: the [`proxy`](roles/proxy.md)
@@ -266,7 +266,7 @@ Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
   `token` session cookie there and completes login client-side) — an edge
   redirect on `/auth*` with no exception also catches that completion
   request and bounces it into another OIDC round-trip, forever. The browser
-  loops entirely on `chat.{{ cluster_domain }}/auth`, never visibly reaching
+  loops entirely on `owui.{{ cluster_domain }}/auth`, never visibly reaching
   corliss again, while `journalctl -u open-webui` shows a *successful*
   token exchange on every single cycle — easy to chase as an OIDC config bug
   when the login is actually succeeding every time and the edge redirect is

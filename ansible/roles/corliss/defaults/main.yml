@@ -190,8 +190,8 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 #
 # - **This role now fails if sync-relay, redis, object-store or proxy has no
 #   CTID assigned.** The four URLs derive from hostvars unguarded, the same
-#   idiom and reasoning as corliss_membership_registry_url. `zai-assign
-#   <service> <ctid>` is the fix. It is an inventory dependency, not an ordering
+#   idiom and reasoning as corliss_membership_registry_url. `scn-config`
+#   is the fix. It is an inventory dependency, not an ordering
 #   one — no facts are read from those hosts, so their plays need not have run.
 # - **A pin below v0.9.3 ignores the four keys** and the page reverts to
 #   reporting "unknown", which is the state it shipped in. Nothing fails.

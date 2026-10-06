@@ -23,7 +23,8 @@
 # every live CTID before assigning anything, e.g. on yvette:
 #   reserved_ctids: [100, 101, 102, 103, 104, 199]
 # (100 = eventual control-node target, 101-104 = live services, 199 = the current
-# control node). With these set, no assign or provision run can target them.
+# control node). With these set, no assign or provision run can target them, and scn-config
+# stops proposing any blueprint default_ctid that falls in the list.
 reserved_ctids: [100]
 
 # Storage for service-CT root filesystems. Combined with each CT's ct_disk size

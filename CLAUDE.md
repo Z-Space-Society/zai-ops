@@ -88,8 +88,17 @@ out and update the docs.
   pattern.
 - **Inventory is data-driven.** Per-CT create specs (cores/memory/disk/netif)
   live on the host entry in `inventory/hosts.yml`; the create play reads them.
+- **CTIDs are assigned once, with `scn-config`.** The blueprint carries a
+  *suggested* `default_ctid` per service and nothing else reads it; the
+  assignment is runtime data in `inventory/local.yml`, written by `assign.yml`.
+  `scn-config` (a whiptail menu patterned on raspi-config, plus `nonint`
+  subcommands) is the only front end. The menu never changes a recorded
+  assignment: the CTID is the container's VMID and address, so renumbering after
+  provisioning strands the old container and its data. `nonint assign-ctid
+  --reassign` exists only for correcting a number *before* provisioning. A new
+  service gets a `default_ctid` in its tier's range. See ADR-0010.
 - **Operator commands live in `bin/`, run in place from git.** Things a human runs
-  by hand on CT 100 (`zai-assign`, `zai-backup`) live in the repo's `bin/` (scripts
+  by hand on CT 100 (`scn-config`, `zai-backup`) live in the repo's `bin/` (scripts
   that run on the Proxmox host go in `host/` instead), put on PATH via
   two hooks — `/etc/profile.d/zai-ops.sh` for login/ssh shells, and the same
   snippet sourced from `/etc/bash.bashrc` for the interactive *non-login* shell

@@ -84,46 +84,26 @@ itself from this repo.
    committed tree free of this cluster's identity.
 
 4. Build the service containers in two passes: **assign** every service its
-   container ID first, then **provision** them. `zai-assign` only records the
-   number in git-ignored runtime state — nothing is created — so assigning all up
-   front lets each provision render cross-service references regardless of the
-   order you provision in. (The proxy's Caddy route points at litellm's address,
-   `10.1.1.<litellm-ctid>`; if litellm has no CTID yet the proxy's Caddyfile fails
-   to render. Assigning up front sidesteps that.) `provision.yml` then creates
-   each CT over the Proxmox API and configures it over SSH. The committed
-   blueprint stays number-free, so the same repo stands up a cluster on whatever
-   CTIDs are free. **The numbers below are examples** — pick any free ones; this
-   cluster's actual layout is in the [docs](docs/README.md#networking).
-
-   The example CTIDs below follow a tiered convention: **100–109 core infra**
-   (control, object store, postgres), **110–119 platform** (the edge proxy, the
-   registry, the LiteLLM gateway), **120–129 applications** — the surfaces people
-   actually sign in to. The gaps are deliberate — the CTID tells you the tier, and
-   there's room to grow without renumbering.
-
-   The line between the last two is *who talks to it*: platform CTs are consumed by
-   other services, application CTs are consumed by members. Corliss sits in the
-   application tier for that reason — it authenticates people, but it is also the
-   membership surface and the page a member lands on, not a component something
-   else calls.
+   container ID, then **provision** them.
 
    ```bash
-   # 1. assign every CTID up front — records numbers only, creates nothing
-   zai-assign object-store 101   # core infra: restic backend
-   zai-assign postgres 102       # core infra: internal database
-   zai-assign redis 103          # core infra: revocation store — lets open-webui
-                                 #   invalidate a session JWT it already issued
-   zai-assign proxy 110          # platform: LAN-facing reverse proxy
-   zai-assign happyview 111      # platform: atproto AppView — indexes the firehose
-                                 #   and hosts the spaces holding the membership registry
-   zai-assign litellm 112        # platform: AI gateway
-   zai-assign sync-relay 113     # platform: automerge sync relay behind shared
-                                 #   notes. No proxy route on purpose — see ADR-0007
-   zai-assign corliss 120        # application: the member's front door — ATProto
-                                 #   sign-in, membership and tier, OIDC provider
-   zai-assign open-webui 121     # application: the chat UI
+   scn-config    # menu: accept the defaults (or untick and renumber), then Assign
+   ```
 
-   # 2. provision each — create over the API, configure over SSH.
+   Assigning only records numbers in git-ignored runtime state; nothing is
+   created. Assign every service before provisioning any, because services
+   reference each other's addresses (the proxy's Caddyfile will not render until
+   litellm has a CTID). The defaults follow the tier convention: **100–109 core
+   infra, 110–119 platform, 120–129 applications** (see
+   [Networking](docs/README.md#networking)).
+
+   An assignment is **set once**. The menu will not change one, because
+   renumbering does not move a provisioned container. The scripted equivalent of
+   accepting the defaults is `scn-config nonint assign-ctid-defaults`; see
+   [Service CTID assignment](docs/README.md#service-ctid-assignment).
+
+   ```bash
+   # provision each — create over the API, configure over SSH.
    #    object store first: it's the restic backend the backup job writes to.
    #    postgres before happyview/litellm/sync-relay/corliss/open-webui —
    #    each of those roles creates its own role + database on the postgres CT.
@@ -140,10 +120,9 @@ itself from this repo.
    ansible-playbook provision.yml --limit open-webui
    ```
 
-   (`zai-assign`, `zai-backup`, … are operator commands in the repo's
-   [`bin/`](bin/), put on `PATH` when the control node is configured. They run in
-   place from git — nothing is copied to `/usr/local/bin`, so a `git pull` updates
-   them.)
+   (`scn-config`, `zai-backup`, … are operator commands in the repo's
+   [`bin/`](bin/), on `PATH` on the control node. They run in place from git, so
+   a `git pull` updates them.)
 
 5. Turn on backups. The control node backs up the unreproducible runtime state
    to the object store on a daily timer. The backup is one command, `zai-backup`:

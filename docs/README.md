@@ -66,11 +66,11 @@ What it does, in order (each phase prints a numbered banner):
    2 cores / 2 GB / 8 GB, `net0` on `vmbr0` (DHCP). Skipped if it already exists.
 8. **Attach to the internal network** — give CT 100 a `vmbr1` NIC at `10.1.1.100`.
 9. **Provision the control node** — fix the locale (must happen before Ansible
-   can run at all), install `ansible` + `git`, clone this repo to `/opt/zai-ops`,
+   can run at all), install `ansible`, `git` and `whiptail`, clone this repo to `/opt/zai-ops`,
    install the pinned Ansible collections (`community.proxmox >=1.6.0`, so
    `provision.yml` works before `site.yml` — the bundled 1.3.0 can't set the API
    timeout), and put the repo's [`bin/`](#operator-commands) on PATH (so a fresh
-   `pct enter` can run `zai-assign`/`zai-backup` before `site.yml` has run).
+   `pct enter` can run `scn-config`/`zai-backup` before `site.yml` has run).
 10. **Mint the Proxmox API token + vault** — create the `ansible@pve` user, the
    `ZaiProvision` role, and a token; write the credentials into an encrypted
    Ansible Vault on CT 100. See [Secrets & trust model](#secrets--trust-model).
@@ -87,7 +87,7 @@ pct enter 100
 cd /opt/zai-ops/ansible
 ansible-playbook site.yml                       # configure the control node
 ansible-playbook verify-proxmox.yml             # confirm the API token
-zai-assign proxy 110                            # assign proxy its CTID (10.1.1.110)
+scn-config                                      # assign each service its CTID
 ansible-playbook provision.yml --limit proxy    # create + configure proxy
 ```
 
@@ -174,7 +174,7 @@ between core and platform doubles as a trust line: the data foundations stay off
 the LAN, while the only internet-facing box (the proxy) sits one tier out.
 
 - The specific numbers above are this cluster's **assigned** layout, not committed
-  identity — each is bound with `zai-assign` and could differ on another host.
+  identity — each is bound with `scn-config` and could differ on another host.
   What's fixed is the `10.1.1.{ctid}` convention and the tier ranges above. See
   [Service CTID assignment](#service-ctid-assignment).
 
@@ -182,71 +182,65 @@ the LAN, while the only internet-facing box (the proxy) sits one tier out.
 
 ## Generic repo vs runtime data
 
-This repo is meant to rebuild *any* cluster, not just this one (it's the pilot
-for COAI). So **this-cluster facts stay out of the committed tree** and live only
-as **runtime data on the control node**, git-ignored — the same pattern the vault
-already uses for the API token.
+This repo is meant to rebuild *any* cluster, not just this one. The committed
+tree holds only generic automation and blueprint constants; **this-cluster facts
+live in the git-ignored `ansible/inventory/local.yml` on the control node**. The
+inventory is loaded as a directory, so that file merges with the committed
+`hosts.yml` automatically.
 
-- The repo holds **generic** automation (roles, playbooks) and the **blueprint
-  constants** every cluster reuses — the `10.1.1.0/24` net and the
-  `10.1.1.{ctid}` addressing *convention* (but not the specific numbers).
-- This-cluster specifics live in `ansible/inventory/local.yml`: *which inference
-  nodes exist, which CTID each service got, the cluster's public base domain, how
-  its proxy gets a TLS certificate, and the Proxmox node name*. They are written by
-  [`enroll-inference-node.yml`](#playbooks) (inference roster),
-  [`assign.yml`](#service-ctid-assignment) (`zai-assign`, service CTIDs),
-  [`set-domain.yml`](#service-ctid-assignment) (`zai-set-domain`, `cluster_domain`),
-  [`set-tls.yml`](#cluster-tls-mode) (`zai-set-tls`, `caddy_tls_mode`),
-  and [`set-node.yml`](#playbooks) (`zai-set-node`, `proxmox_node_name`),
-  and never committed. The committed `hosts.yml` carries **no container numbers** at
-  all — services are keyed by logical name (`proxy`, `litellm`, …) and their IP
-  is *derived* from the assigned CTID, so there's no second field to drift.
-- The inventory is loaded as a **directory** (`inventory/`), so the committed
-  blueprint (`hosts.yml`, with an empty `inference_nodes` group and number-free
-  service blueprint) and the runtime `local.yml` merge automatically.
+| Runtime fact | Written by |
+| ------------ | ---------- |
+| Service CTIDs | `scn-config` ([Service CTID assignment](#service-ctid-assignment)) |
+| `cluster_domain` | `zai-set-domain` ([Cluster domain](#cluster-domain)) |
+| `caddy_tls_mode` | `zai-set-tls` ([Cluster TLS mode](#cluster-tls-mode)) |
+| `proxmox_node_name` | `bootstrap.sh` (from the host's `hostname`), `zai-set-node` |
+| Membership-registry identity | `zai-set-registry` |
+| Inference-node roster | [`enroll-inference-node.yml`](#inference-nodes) |
 
-Because neither the roster nor the CTID assignments live in the repo, a
-control-node rebuild is **repo + restored runtime data** — back up `local.yml`
-alongside the vault. The decision is pinned in
-[ADR-0001](decisions/0001-repo-stays-generic.md). The committed tree now carries
-**no this-cluster identity at all**: `proxmox_node_name` was the last holdout and
-is recorded as runtime data too (`bootstrap.sh` captures it from the host's
-`hostname`; `zai-set-node` adjusts it).
+What stays committed is what every cluster shares: the `10.1.1.0/24` net, the
+`10.1.1.{ctid}` addressing convention, and each service's create specs and
+*suggested* `default_ctid`.
+
+A control-node rebuild is therefore **repo + restored runtime data**, so
+`local.yml` is backed up alongside the vault (see [Backups](#backups)). The
+decision is pinned in [ADR-0001](decisions/0001-repo-stays-generic.md).
 
 ---
 
 ## Service CTID assignment
 
-The committed blueprint names services generically (`proxy`, `litellm`, …) and
-carries **no container numbers**. The operator binds a service to a container ID
-once, with the `zai-assign` command — one of the [operator
-commands](#operator-commands) in the repo's `bin/`, on PATH. It runs in place from
-git (self-locating to load `ansible.cfg`), so there's no installed copy to drift:
+The blueprint names services generically (`proxy`, `litellm`, …). Which container
+ID each one gets is decided per cluster with `scn-config`, on the control node:
 
 ```bash
-zai-assign proxy 110                  # proxy is now CT 110 at 10.1.1.110, cluster-wide
-zai-assign proxy 111 -e reassign=true # move it (reassign guards against accidental clobber)
+scn-config                                 # the menu
+scn-config nonint show-ctid                # service / CTID / default table
+scn-config nonint assign-ctid-defaults     # give every unassigned service its default
+scn-config nonint assign-ctid proxy 110    # assign one
 ```
 
-`zai-assign` is thin sugar over [`assign.yml`](#playbooks); the playbook is the
-engine. It validates (CTID in range 100–999, not in
-[`reserved_ctids`](#service-ctid-assignment), not already held by another service,
-the service exists in the blueprint, and not already assigned unless
-`reassign=true`), then **read-modify-writes** the whole `inventory/local.yml`
-structure so every other assignment — and the inference-node roster that shares
-the file — survives. Assigning a service the CTID it already has is an idempotent
-no-op.
+The menu lists the unassigned services, each ticked and pre-filled with its
+`default_ctid` from the blueprint. Untick any to leave for later, or change the
+numbers before confirming. Nothing is created: the numbers are recorded in
+`inventory/local.yml` by [`assign.yml`](#playbooks), which refuses a CTID that
+is outside 100–999, in `reserved_ctids`, or already taken.
 
-From then on the merged inventory resolves the service to `ctid` and a derived
-`ansible_host` of `10.1.1.{ctid}` for every playbook; `provision.yml --limit
-<service>` creates exactly that CT and **fails fast** if the service was never
-assigned.
+From then on every playbook resolves the service to `ctid` and a derived
+`ansible_host` of `10.1.1.{ctid}`. `provision.yml --limit <service>` creates
+exactly that CT, and fails fast if the service was never assigned.
+
+**An assignment is set once.** The CTID is the container's VMID and its address,
+so changing it after provisioning moves nothing: the next provision creates a
+second, empty container, the old one keeps the data, and every other service
+still points at the old address. The menu therefore shows assigned services as
+locked. To correct a number *before* the service has been provisioned:
+`scn-config nonint assign-ctid <service> <ctid> --reassign`. See
+[ADR-0010](decisions/0010-scn-config.md).
 
 **`reserved_ctids`** (in [`group_vars/all/main.yml`](../ansible/group_vars/all/main.yml))
-is the safety rail: a per-cluster list the allocator refuses to assign over.
-Default is `[100]` (the control node). On a **brownfield** host, widen it to every
-live CTID *before* assigning anything, so no run can stomp a container the cluster
-didn't create.
+lists CTIDs that are never handed out. The default is `[100]`, the control node.
+On a **brownfield** host, widen it to every live CTID *before* assigning
+anything, so no run can stomp a container the cluster didn't create.
 
 > **Control-node exception.** The `10.1.1.{ctid}` convention is for **service
 > containers only**. The control node's internal IP is pinned to `10.1.1.100` by
@@ -342,7 +336,7 @@ later; the repo bakes in neither.
 | --------------------- | -------------- | --------------------------------------------------- |
 | `site.yml`            | CT 100 (local) | Configure the control node (applies `control_node`) |
 | `verify-proxmox.yml`  | CT 100 (local) | Read-only check that the API token authenticates    |
-| `assign.yml`          | CT 100 (local) | Bind a service to a CTID in runtime inventory (the `zai-assign` engine) |
+| `assign.yml`          | CT 100 (local) | Record service → CTID assignments in runtime inventory (the `scn-config` engine) |
 | `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the `zai-set-domain` engine) |
 | `set-tls.yml`         | CT 100 (local) | Record the proxy's TLS mode, and the acme contact email, in runtime inventory (the `zai-set-tls` engine) |
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox node name in runtime inventory (the `zai-set-node` engine; `bootstrap.sh` calls it automatically) |
@@ -374,11 +368,12 @@ PATH when the control node is configured. The convention:
 
 | Command | Does | Backed by |
 | ------- | ---- | --------- |
-| `zai-assign <service> <ctid>` | Bind a service to a CTID in runtime inventory | [`assign.yml`](#playbooks) |
-| `zai-set-domain <domain>` | Record the cluster's public base domain in runtime inventory | [`set-domain.yml`](#playbooks) |
-| `zai-set-tls <mode> [email]` | Record how the proxy gets its certificate (`origin_ca`, `acme` or `none`; the email is for `acme` only) in runtime inventory. Never run means `acme`. See [Cluster TLS mode](#cluster-tls-mode) | [`set-tls.yml`](#playbooks) |
-| `zai-set-node <node>` | Record the Proxmox node name in runtime inventory (bootstrap sets it automatically) | [`set-node.yml`](#playbooks) |
-| `zai-set-registry <key> <value>` | Record a membership-registry identity (`client_key`, `service_did`) in runtime inventory. Both are read by [corliss](roles/corliss.md) — `service_did` for its roster read, `client_key` for its registry reconciliation — each one registry identity recorded once. Was `zai-set-console`; renamed when the `manage_console` role was deleted and corliss became the only consumer. The third key it used to take, `registry_space_uri`, went with the console | [`set-registry.yml`](#playbooks) |
+| `scn-config` | Menu-driven cluster configuration. Today: assign each service its CTID. See [Service CTID assignment](#service-ctid-assignment) | [`assign.yml`](#playbooks) |
+| `scn-config nonint <command>` | The same, scripted: `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults` | [`assign.yml`](#playbooks) |
+| `zai-set-domain <domain>` | Record the cluster's public base domain | [`set-domain.yml`](#playbooks) |
+| `zai-set-tls <mode> [email]` | Record how the proxy gets its certificate: `acme` (the default), `origin_ca` or `none`. See [Cluster TLS mode](#cluster-tls-mode) | [`set-tls.yml`](#playbooks) |
+| `zai-set-node <node>` | Record the Proxmox node name (bootstrap does this automatically) | [`set-node.yml`](#playbooks) |
+| `zai-set-registry <key> <value>` | Record a membership-registry identity (`client_key`, `service_did`), read by [corliss](roles/corliss.md) | [`set-registry.yml`](#playbooks) |
 | `zai-make-admin <handle>` | Promote an ATProto handle to corliss admin, keyed on DID | [`make-admin.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
@@ -505,8 +500,8 @@ internal-only on `vmbr1`. restic encrypts and deduplicates, so the vault passwor
 and SSH key are safe at rest in the bucket.
 
 ```bash
-# Object store is the restic backend, so it's assigned and comes up first:
-zai-assign object-store 105
+# Object store is the restic backend, so it comes up first (assign it with
+# scn-config if it has no CTID yet):
 ansible-playbook provision.yml --limit object-store
 ansible-playbook backup.yml
 ```
@@ -654,7 +649,7 @@ On the **control node** itself:
 
 - **`pct enter` is a non-login shell, so `/etc/profile.d` never loads.** Putting
   the repo's `bin/` on PATH via a `/etc/profile.d/zai-ops.sh` snippet alone left
-  `zai-assign` "command not found" inside `pct enter 100` — that shell is
+  `scn-config` "command not found" inside `pct enter 100` — that shell is
   interactive but *non-login*, and only login shells (and ssh) source
   `/etc/profile.d`. Fix: also source the snippet from `/etc/bash.bashrc`, which
   Debian's interactive *non-login* bash does read. Both the bootstrap seed and the

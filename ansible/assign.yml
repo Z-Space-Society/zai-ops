@@ -1,63 +1,76 @@
 ---
-# Assign a service to a container ID — the CTID allocator.
+# Assign services to container IDs — the CTID allocator.
 #
-#   ansible-playbook assign.yml -e "service=proxy ctid=110"
-#   ansible-playbook assign.yml -e "service=proxy ctid=110 reassign=true"
+#   ansible-playbook assign.yml -e '{"assignments": {"proxy": 110, "postgres": 102}}'
 #
-# (`zai-assign <service> <ctid>`, the operator command in bin/, is sugar over this —
-# no logic lives in the wrapper.) From here on the service is authoritatively that CTID at
-# 10.1.1.<ctid> for every playbook, cluster-wide.
+# (`scn-config`, the operator command in bin/, drives this — both its menu and
+# `scn-config nonint assign-ctid …`. No assignment logic lives there; this
+# playbook validates and persists.) From here on each service is authoritatively
+# that CTID at 10.1.1.<ctid> for every playbook, cluster-wide.
 #
 # Why a playbook and not hand-edited inventory: the container number is per-cluster
 # runtime data, not committed identity. It goes in the git-ignored runtime
 # inventory (inventory/local.yml) on the control node — backed up like the vault,
 # never committed — which Ansible merges into the blueprint (hosts.yml) because the
-# inventory is a directory. The repo stays generic; the same blueprint stands up a
-# cluster on whatever CTIDs are free. See docs ADR-0001 / "Generic repo vs runtime".
+# inventory is a directory. The blueprint's `default_ctid` is only what scn-config
+# proposes; nothing here reads it. See docs ADR-0001 / ADR-0010.
+#
+# An assignment is set ONCE. The CTID is the container's VMID and its address, so
+# changing it after the service is provisioned moves nothing: the next provision
+# creates a second, empty container and the old one keeps the data. Changing a
+# recorded assignment is therefore refused unless reassign=true, which is only
+# safe before the service has been provisioned.
 #
 # Read-modify-write the WHOLE structure and re-dump (never line-append): that
 # preserves every other service's assignment AND the inference-node roster that
 # shares this file, instead of corrupting it.
 
-- name: Assign a service container to a CTID
+- name: Assign service containers to CTIDs
   hosts: localhost
   connection: local
   gather_facts: false
   vars:
     runtime_inventory: "{{ playbook_dir }}/inventory/local.yml"
   tasks:
-    - name: Require service and ctid
+    - name: Require an assignments mapping
       ansible.builtin.assert:
         that:
-          - service is defined and (service | string | length) > 0
-          - ctid is defined and (ctid | string | length) > 0
+          - assignments is defined
+          - assignments is mapping
+          - assignments | length > 0
         fail_msg: >-
-          Pass both service and ctid, e.g.
-          -e "service=proxy ctid=110"
+          Pass a service → CTID mapping, e.g.
+          -e '{"assignments": {"proxy": 110}}'
 
-    - name: Validate the service exists in the blueprint
+    - name: Validate each service exists in the blueprint
       # groups['service_containers'] is the blueprint membership from hosts.yml;
       # rejecting unknown names stops a typo from minting a phantom service.
       ansible.builtin.assert:
-        that: service in groups.get('service_containers', [])
+        that: item.key in groups.get('service_containers', [])
+        quiet: true
         fail_msg: >-
-          '{{ service }}' is not a service in the blueprint (inventory/hosts.yml).
+          '{{ item.key }}' is not a service in the blueprint (inventory/hosts.yml).
           Known services: {{ groups.get('service_containers', []) | sort | join(', ') }}
+      loop: "{{ assignments | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
 
-    - name: Validate the CTID is an integer in range
+    - name: Validate each CTID is an integer in range and not reserved
+      # reserved_ctids is the safety rail against stomping a live or
+      # externally-managed container (group_vars/all/main.yml).
       ansible.builtin.assert:
         that:
-          - ctid is match('^[0-9]+$')
-          - (ctid | int) >= 100
-          - (ctid | int) <= 999
-        fail_msg: "ctid must be an integer in 100-999 (got '{{ ctid }}')."
-
-    - name: Validate the CTID is not reserved
-      ansible.builtin.assert:
-        that: (ctid | int) not in reserved_ctids
+          - item.value | string is match('^[0-9]+$')
+          - (item.value | int) >= 100
+          - (item.value | int) <= 999
+          - (item.value | int) not in reserved_ctids
+        quiet: true
         fail_msg: >-
-          CTID {{ ctid }} is reserved ({{ reserved_ctids | join(', ') }}) — refusing
-          to assign over a live or externally-managed container.
+          {{ item.key }}: CTID must be an integer in 100-999 and not reserved
+          ({{ reserved_ctids | join(', ') }}) — got '{{ item.value }}'.
+      loop: "{{ assignments | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
 
     # errors='ignore' → empty string when the file doesn't exist yet; 'or {}'
     # turns that (and an empty/whitespace file) into an empty mapping to merge into.
@@ -65,75 +78,91 @@
       ansible.builtin.set_fact:
         runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
 
-    # The current { service: ctid } map, pulled out of the merged structure so the
-    # collision/idempotency checks below read cleanly.
-    - name: Extract the current assignments
+    # Flatten both sides to { service: ctid } so the checks below compare like
+    # with like. `recorded` is what local.yml already holds.
+    - name: Extract the recorded and requested assignments
       ansible.builtin.set_fact:
-        assignments: >-
+        recorded: >-
+          {{ dict(_recorded | map(attribute='key')
+                  | zip(_recorded | map(attribute='value.ctid') | map('int'))) }}
+        requested: >-
+          {{ dict(assignments.keys() | zip(assignments.values() | map('int'))) }}
+      vars:
+        _recorded: >-
           {{
             runtime_data.get('all', {}).get('children', {})
                         .get('service_containers', {}).get('hosts', {})
-            | dict2items
-            | selectattr('value.ctid', 'defined')
-            | items2dict(key_name='key', value_name='value')
+            | dict2items | selectattr('value.ctid', 'defined') | list
           }}
 
-    - name: Validate the CTID is not already held by another service
-      ansible.builtin.assert:
-        that: >-
-          assignments | dict2items
-          | selectattr('value.ctid', 'equalto', ctid | int)
-          | rejectattr('key', 'equalto', service)
-          | list | length == 0
-        # `| first | default` keeps this message templatable even when the
-        # assertion passes (Ansible finalizes fail_msg eagerly): no collision ⇒
-        # empty sequence ⇒ would otherwise raise "No first item".
-        fail_msg: >-
-          CTID {{ ctid }} is already assigned to
-          {{ (assignments | dict2items | selectattr('value.ctid', 'equalto', ctid | int)
-              | map(attribute='key') | first | default('another service')) }}.
-
-    # Idempotent no-op: assigning the CTID a service already holds exits 0 cleanly.
-    - name: Detect an unchanged (no-op) assignment
+    # to_write drops anything already recorded with the same CTID, so re-running
+    # the same request is an idempotent no-op. moved is the subset that would
+    # change a recorded assignment.
+    - name: Work out what would change
       ansible.builtin.set_fact:
-        existing_ctid: "{{ assignments.get(service, {}).get('ctid') | default(none) }}"
-        is_noop: "{{ (assignments.get(service, {}).get('ctid') | default(none)) == (ctid | int) }}"
+        to_write: "{{ _to_write }}"
+        moved: "{{ _to_write | selectattr('key', 'in', recorded.keys() | list) | list }}"
+        resulting: "{{ recorded | combine(_to_write | items2dict) }}"
+      vars:
+        _to_write: "{{ requested | dict2items | difference(recorded | dict2items) }}"
 
-    - name: Validate the service is not already assigned (unless reassign=true)
+    - name: Refuse to change a recorded assignment (unless reassign=true)
       ansible.builtin.assert:
-        that: existing_ctid is none or is_noop or (reassign | default(false) | bool)
+        that: moved | length == 0 or (reassign | default(false) | bool)
         fail_msg: >-
-          '{{ service }}' is already assigned CTID {{ existing_ctid }}. To move it,
-          re-run with reassign=true (zai-assign {{ service }} {{ ctid }} -e reassign=true).
+          Already assigned: {{ moved | map(attribute='key') | join(', ') }}.
+          An assignment is set once — changing it does not move a provisioned
+          container. If the service has NOT been provisioned yet, re-run with
+          reassign=true (scn-config nonint assign-ctid <service> <ctid> --reassign).
+
+    # Checked against the RESULTING state, not the request alone, so a request
+    # can't collide with a recorded assignment or with itself.
+    - name: Validate no two services would share a CTID
+      ansible.builtin.assert:
+        that: holders | length == 0
+        quiet: true
+        fail_msg: >-
+          CTID {{ item.value }} for {{ item.key }} is already taken by
+          {{ holders | join(', ') }}.
+      vars:
+        holders: >-
+          {{ resulting | dict2items | selectattr('value', 'equalto', item.value)
+             | rejectattr('key', 'equalto', item.key) | map(attribute='key') | list }}
+      loop: "{{ to_write }}"
+      loop_control:
+        label: "{{ item.key }}"
 
     - name: Report the no-op and finish
       ansible.builtin.debug:
-        msg: "'{{ service }}' is already CTID {{ ctid }} — nothing to do."
-      when: is_noop | bool
+        msg: "Already assigned as requested — nothing to do."
+      when: to_write | length == 0
 
-    # Read-modify-write: merge ONLY this service's ctid into the whole structure,
-    # recursively, so every sibling assignment and the inference-node roster survive.
-    - name: Merge this assignment into the runtime structure
+    # Read-modify-write: merge ONLY the changed services' ctid into the whole
+    # structure, recursively, so every sibling assignment and the inference-node
+    # roster survive.
+    - name: Merge the assignments into the runtime structure
       ansible.builtin.set_fact:
-        merged_inventory: >-
+        runtime_data: >-
           {{
             runtime_data
             | combine({'all': {'children': {'service_containers': {'hosts':
-                {service: {'ctid': ctid | int}}}}}},
+                {item.key: {'ctid': item.value}}}}}},
               recursive=True)
           }}
-      when: not (is_noop | bool)
+      loop: "{{ to_write }}"
+      loop_control:
+        label: "{{ item.key }}"
 
     - name: Write the runtime inventory
       ansible.builtin.copy:
         dest: "{{ runtime_inventory }}"
-        content: "{{ merged_inventory | to_nice_yaml(indent=2) }}"
+        content: "{{ runtime_data | to_nice_yaml(indent=2) }}"
         mode: "0644"
-      when: not (is_noop | bool)
+      when: to_write | length > 0
 
     - name: Report
       ansible.builtin.debug:
-        msg:
-          - "{{ service }} → CTID {{ ctid }} (10.1.1.{{ ctid }}) recorded in {{ runtime_inventory }}."
-          - "Next: ansible-playbook provision.yml --limit {{ service }}"
-      when: not (is_noop | bool)
+        msg: "{{ item.key }} → CTID {{ item.value }} (10.1.1.{{ item.value }}) recorded in {{ runtime_inventory }}."
+      loop: "{{ to_write }}"
+      loop_control:
+        label: "{{ item.key }}"

@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+# scn-config — the cluster's configuration tool, patterned on raspi-config.
+#
+#   scn-config                                   # the menu
+#   scn-config nonint show-ctid                  # service / CTID / default table
+#   scn-config nonint assign-ctid proxy 110      # assign one service
+#   scn-config nonint assign-ctid-defaults       # assign every unassigned service
+#                                                #   its blueprint default
+#
+# Runs on the control node. Lives in the repo's bin/ (on PATH via
+# /etc/profile.d/zai-ops.sh) and runs in place — the script you run is always the
+# one in git, no installed copy to drift.
+#
+# This is the front end only. assign.yml validates and writes the runtime
+# inventory; the checks here exist to give a readable message before a playbook
+# run, and the playbook stays the authority.
+set -euo pipefail
+
+# cd to the ansible dir (sibling of this bin/) so ansible.cfg loads no matter the
+# caller's CWD — it supplies the inventory (relative: inventory/) and the vault
+# password file. Self-locating off this script's path (not hardcoded) so the same
+# script works from any checkout: /opt/zai-ops on the box, a dev tree elsewhere.
+cd "$(dirname "$(readlink -f "$0")")/../ansible"
+
+TITLE="SCN Configuration Tool (scn-config)"
+BACKTITLE="Shared Computer Network — control node $(hostname)"
+
+# Shown wherever a recorded assignment could be changed. The CTID is the
+# container's VMID and its address, so this is a migration, not a setting.
+REASSIGN_WARNING="Changing a recorded assignment does not move a provisioned
+container: the next provision creates a second, empty one at the new CTID, the
+old one keeps the data, and every other service still points at the old address.
+Only safe before the service has been provisioned."
+
+die() { echo "scn-config: $*" >&2; exit 1; }
+
+usage() {
+  cat >&2 <<'EOF'
+usage: scn-config
+       scn-config nonint show-ctid
+       scn-config nonint assign-ctid <service> <ctid> [--reassign]
+       scn-config nonint assign-ctid-defaults
+EOF
+  exit 64
+}
+
+# --- State -------------------------------------------------------------------
+# Parallel arrays, one entry per blueprint service, ordered by CTID (assigned,
+# else default). SVC_CTID / SVC_DEFAULT hold "" when there is none.
+SVC_NAME=() SVC_CTID=() SVC_DEFAULT=()
+RESERVED=" "   # space-delimited, space-padded for `case` membership tests
+
+# Read the merged inventory (blueprint + runtime local.yml) in one call. python3
+# rather than jq: Ansible guarantees python on the control node, while jq only
+# arrives with site.yml and this must work straight after bootstrap.
+load_state() {
+  local json line kind name ctid default
+  json="$(ansible-inventory --list 2>/dev/null)" \
+    || die "could not read the inventory — run: ansible-inventory --list"
+  SVC_NAME=() SVC_CTID=() SVC_DEFAULT=() RESERVED=" "
+  while read -r kind name ctid default; do
+    case "$kind" in
+      reserved) RESERVED="${RESERVED}${name} " ;;
+      svc)
+        SVC_NAME+=("$name")
+        SVC_CTID+=("${ctid#-}")
+        SVC_DEFAULT+=("${default#-}")
+        ;;
+    esac
+  done < <(python3 -c '
+import json, sys
+inv = json.load(sys.stdin)
+hostvars = inv.get("_meta", {}).get("hostvars", {})
+rows, reserved = [], []
+for name in inv.get("service_containers", {}).get("hosts", []):
+    hv = hostvars.get(name, {})
+    reserved = hv.get("reserved_ctids", reserved)
+    rows.append((name, hv.get("ctid"), hv.get("default_ctid")))
+rows.sort(key=lambda r: (r[1] or r[2] or 1000, r[0]))
+for r in reserved:
+    print("reserved", r)
+for name, ctid, default in rows:
+    print("svc", name, ctid or "-", default or "-")
+' <<<"$json")
+  [ "${#SVC_NAME[@]}" -gt 0 ] || die "the blueprint has no service_containers"
+}
+
+# index_of <service> — echo its index in SVC_*, or fail.
+index_of() {
+  local i
+  for i in "${!SVC_NAME[@]}"; do
+    [ "${SVC_NAME[$i]}" = "$1" ] && { echo "$i"; return 0; }
+  done
+  return 1
+}
+
+# assigned_holder <ctid> — echo the service already recorded at that CTID.
+assigned_holder() {
+  local i
+  for i in "${!SVC_NAME[@]}"; do
+    [ "${SVC_CTID[$i]}" = "$1" ] && { echo "${SVC_NAME[$i]}"; return 0; }
+  done
+  return 1
+}
+
+# ctid_problem <ctid> — echo why a CTID can't be handed out; silent if it can.
+ctid_problem() {
+  local holder
+  if ! [[ "$1" =~ ^[0-9]+$ ]] || [ "$1" -lt 100 ] || [ "$1" -gt 999 ]; then
+    echo "must be a number from 100 to 999"
+  elif [[ "$RESERVED" == *" $1 "* ]]; then
+    echo "$1 is reserved (reserved_ctids)"
+  elif holder="$(assigned_holder "$1")"; then
+    echo "$1 is already assigned to $holder"
+  fi
+}
+
+# usable_default <index> — echo the service's default if it is free to propose.
+usable_default() {
+  local default="${SVC_DEFAULT[$1]}"
+  [ -n "$default" ] && [ -z "$(ctid_problem "$default")" ] && echo "$default"
+  return 0
+}
+
+# --- The engine --------------------------------------------------------------
+# The pending request: parallel arrays of service → CTID.
+P_NAME=() P_CTID=()
+
+# Service names come from the inventory and CTIDs are validated numeric, so
+# neither needs JSON escaping.
+assignments_json() {
+  local i out=""
+  for i in "${!P_NAME[@]}"; do
+    out="${out:+$out,}\"${P_NAME[$i]}\":${P_CTID[$i]}"
+  done
+  echo "{\"assignments\":{${out}}}"
+}
+
+# run_assign [extra ansible args] — hand the pending request to assign.yml.
+run_assign() {
+  ansible-playbook assign.yml -e "$(assignments_json)" "$@"
+}
+
+# --- Non-interactive mode ----------------------------------------------------
+nonint_show_ctid() {
+  local i
+  load_state
+  printf '%-14s %-6s %s\n' SERVICE CTID DEFAULT
+  for i in "${!SVC_NAME[@]}"; do
+    printf '%-14s %-6s %s\n' "${SVC_NAME[$i]}" "${SVC_CTID[$i]:--}" "${SVC_DEFAULT[$i]:--}"
+  done
+}
+
+nonint_assign_ctid() {
+  [ $# -ge 2 ] || usage
+  [[ "$2" =~ ^[0-9]+$ ]] || die "ctid must be a number (got '$2')"
+  P_NAME=("$1") P_CTID=("$((10#$2))")   # 10#: a leading zero is not octal
+  shift 2
+  case "${1:-}" in
+    "") run_assign ;;
+    --reassign)
+      printf '%s\n\n' "WARNING: $REASSIGN_WARNING" >&2
+      run_assign -e reassign=true
+      ;;
+    *) usage ;;
+  esac
+}
+
+nonint_assign_ctid_defaults() {
+  local i default
+  load_state
+  P_NAME=() P_CTID=()
+  for i in "${!SVC_NAME[@]}"; do
+    [ -z "${SVC_CTID[$i]}" ] || continue
+    default="$(usable_default "$i")"
+    if [ -n "$default" ]; then
+      P_NAME+=("${SVC_NAME[$i]}") P_CTID+=("$default")
+    else
+      echo "skipping ${SVC_NAME[$i]}: no free default — assign it by hand" >&2
+    fi
+  done
+  if [ "${#P_NAME[@]}" -eq 0 ]; then
+    echo "Nothing to assign."
+    return 0
+  fi
+  run_assign
+}
+
+# --- Interactive mode --------------------------------------------------------
+calc_wt_size() {
+  WT_WIDTH="$(tput cols 2>/dev/null || echo 80)"
+  WT_MAX_HEIGHT=$(( $(tput lines 2>/dev/null || echo 24) - 2 ))
+  [ "$WT_WIDTH" -gt 78 ] && WT_WIDTH=78
+  return 0
+}
+
+# box_height <text> <chrome> — a dialog tall enough for the text plus its
+# borders, buttons and any list (the chrome), capped to the terminal.
+box_height() {
+  local height=$(( $(wc -l <<<"$1") + $2 ))
+  [ "$height" -gt "$WT_MAX_HEIGHT" ] && height="$WT_MAX_HEIGHT"
+  echo "$height"
+}
+
+msgbox() {  # msgbox <title> <text>
+  whiptail --backtitle "$BACKTITLE" --title "$1" \
+    --msgbox "$2" "$(box_height "$2" 7)" "$WT_WIDTH"
+}
+
+# The recorded assignments as "  name   ctid" lines, for dialog text.
+assigned_lines() {
+  local i
+  for i in "${!SVC_NAME[@]}"; do
+    [ -n "${SVC_CTID[$i]}" ] && printf '  %-14s %s\n' "${SVC_NAME[$i]}" "${SVC_CTID[$i]}"
+  done
+  return 0
+}
+
+pending_lines() {
+  local i
+  for i in "${!P_NAME[@]}"; do
+    printf '  %-14s %s\n' "${P_NAME[$i]}" "${P_CTID[$i]:-(not set)}"
+  done
+}
+
+# Fails when two pending services hold the same CTID, echoing which.
+pending_duplicate() {
+  local i j
+  for i in "${!P_NAME[@]}"; do
+    for j in "${!P_NAME[@]}"; do
+      if [ "$i" -lt "$j" ] && [ "${P_CTID[$i]}" = "${P_CTID[$j]}" ]; then
+        echo "${P_NAME[$i]} and ${P_NAME[$j]} are both set to ${P_CTID[$i]}."
+        return 1
+      fi
+    done
+  done
+}
+
+pending_has_unset() {
+  local i
+  for i in "${!P_NAME[@]}"; do
+    [ -z "${P_CTID[$i]}" ] && return 0
+  done
+  return 1
+}
+
+# Walk an input box per pending service. Fails if the operator cancels.
+edit_pending() {
+  local i value problem
+  for i in "${!P_NAME[@]}"; do
+    value="${P_CTID[$i]}"
+    while true; do
+      value="$(whiptail --backtitle "$BACKTITLE" --title "Container Assignment" \
+        --inputbox "Container ID for ${P_NAME[$i]} (100-999).\n\nIts address becomes 10.1.1.<ctid>." \
+        10 "$WT_WIDTH" "$value" 3>&1 1>&2 2>&3)" || return 1
+      problem="$(ctid_problem "$value")"
+      [ -z "$problem" ] && break
+      msgbox "Container Assignment" "${P_NAME[$i]}: $problem."
+    done
+    P_CTID[i]="$((10#$value))"   # 10#: a leading zero is not octal
+  done
+}
+
+do_assign_menu() {
+  local i title intro text default args=() picked name status label out duplicate rc
+  local total assigned unassigned
+  load_state
+
+  total="${#SVC_NAME[@]}" assigned=0
+  for i in "${!SVC_NAME[@]}"; do
+    if [ -n "${SVC_CTID[$i]}" ]; then
+      assigned=$((assigned + 1))
+      continue
+    fi
+    default="$(usable_default "$i")"
+    if [ -n "$default" ]; then
+      label="CTID $default" status=ON
+    else
+      label="(no free default)" status=OFF
+    fi
+    args+=("${SVC_NAME[$i]}" "$label" "$status")
+  done
+
+  unassigned=$((total - assigned))
+  if [ "$unassigned" -eq 0 ]; then
+    msgbox "Container Assignment" "Every service is assigned:
+
+$(assigned_lines)
+
+An assignment is set once and cannot be changed here. To correct one
+BEFORE its service has been provisioned:
+
+  scn-config nonint assign-ctid <service> <ctid> --reassign"
+    return 0
+  fi
+
+  # First run reads differently on purpose: it is the moment the cluster's
+  # layout is decided, and there is no undo from this tool.
+  if [ "$assigned" -eq 0 ]; then
+    title="Initial Container Assignment"
+    intro="No service has a container ID yet. This sets them.
+
+Tick the services to assign now; the rest can be done later. An
+assignment is permanent once saved — it cannot be changed here."
+  else
+    title="Container Assignment"
+    intro="Already assigned ($assigned of $total) — these are locked:
+
+$(assigned_lines)
+
+Tick the services to assign now."
+  fi
+
+  picked="$(whiptail --backtitle "$BACKTITLE" --title "$title" --separate-output \
+    --ok-button Next --cancel-button Back \
+    --checklist "$intro" "$(box_height "$intro" $((unassigned + 8)))" "$WT_WIDTH" "$unassigned" \
+    "${args[@]}" 3>&1 1>&2 2>&3)" || return 0
+  [ -n "$picked" ] || return 0
+
+  P_NAME=() P_CTID=()
+  while read -r name; do
+    P_NAME+=("$name")
+    P_CTID+=("$(usable_default "$(index_of "$name")")")
+  done <<<"$picked"
+
+  # Confirm, with a way back to change the numbers. Esc leaves without writing.
+  while true; do
+    if pending_has_unset; then
+      edit_pending || return 0
+    fi
+    text="About to assign:
+
+$(pending_lines)
+
+This is permanent — an assignment cannot be changed here once saved.
+Press Esc to leave without writing anything."
+    rc=0
+    whiptail --backtitle "$BACKTITLE" --title "$title" \
+      --yes-button Assign --no-button "Change numbers" \
+      --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || rc=$?
+    case "$rc" in
+      0)
+        duplicate="$(pending_duplicate)" && break
+        msgbox "$title" "$duplicate"
+        edit_pending || return 0
+        ;;
+      1) edit_pending || return 0 ;;
+      *) return 0 ;;
+    esac
+  done
+
+  # TERM=ansi: under xterm, whiptail draws an infobox to the alternate screen
+  # and it vanishes the moment whiptail exits, before the playbook has run.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "$title" \
+    --infobox "Writing assignments…" 8 "$WT_WIDTH"
+  if out="$(ANSIBLE_NOCOLOR=1 run_assign 2>&1)"; then
+    msgbox "$title" "Assigned:
+
+$(pending_lines)
+
+Nothing has been created yet. Next, provision each service:
+
+  ansible-playbook provision.yml --limit <service>"
+  else
+    msgbox "$title" "The assignment was refused — nothing was written.
+
+$(tail -n 12 <<<"$out")"
+  fi
+}
+
+interactive() {
+  local choice
+  [ -t 0 ] && [ -t 1 ] || die "the menu needs a terminal — see: scn-config nonint"
+  command -v whiptail >/dev/null \
+    || die "whiptail is not installed — run: apt-get install whiptail"
+  calc_wt_size
+  while true; do
+    choice="$(whiptail --backtitle "$BACKTITLE" --title "$TITLE" \
+      --ok-button Select --cancel-button Finish \
+      --menu "" 18 "$WT_WIDTH" 9 \
+      "1 Container Assignment" "Choose the container ID for each service" \
+      3>&1 1>&2 2>&3)" || exit 0
+    case "$choice" in
+      1\ *) do_assign_menu ;;
+    esac
+  done
+}
+
+# --- Dispatch ----------------------------------------------------------------
+case "${1:-}" in
+  "") interactive ;;
+  nonint)
+    shift
+    case "${1:-}" in
+      show-ctid) nonint_show_ctid ;;
+      assign-ctid) shift; nonint_assign_ctid "$@" ;;
+      assign-ctid-defaults) nonint_assign_ctid_defaults ;;
+      *) usage ;;
+    esac
+    ;;
+  *) usage ;;
+esac

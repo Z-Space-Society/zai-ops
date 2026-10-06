@@ -11,7 +11,7 @@ Everything here is derived from the committed blueprint
 ([`inventory/hosts.yml`](../ansible/inventory/hosts.yml), the
 [`proxy`](roles/proxy.md) role's `caddy_proxy_hosts`, and the role docs). The
 **CTIDs shown are the example layout** from the [README](../README.md) — real
-numbers are per-cluster runtime data bound with `zai-assign`, so read them as
+numbers are per-cluster runtime data bound with `scn-config`, so read them as
 tier markers, not identity. See [Service CTID
 assignment](README.md#service-ctid-assignment).
 
@@ -149,9 +149,7 @@ flowchart LR
 
     subgraph phase3["3 · assign — records numbers only, creates nothing"]
         direction TB
-        a1["zai-assign object-store · postgres · redis"]
-        a2["zai-assign proxy · happyview · litellm · sync-relay"]
-        a3["zai-assign corliss · open-webui"]
+        a1["scn-config<br/>every service, at its default CTID unless changed"]
     end
 
     subgraph phase4["4 · provision.yml — create over the API, configure over SSH"]
@@ -178,8 +176,6 @@ flowchart LR
     start --> phase1 --> phase2 --> phase3 --> phase4 --> phase5
 
     a1 -.->|"assigning all up front is what<br/>makes provision order-independent"| phase4
-    a2 -.-> phase4
-    a3 -.-> phase4
 ```
 
 **Why assign is its own pass.** The proxy's Caddy route points at litellm's
@@ -198,7 +194,7 @@ assignment](README.md#service-ctid-assignment).
 
 `corliss` additionally needs `sync-relay`, `redis`, `object-store` and `proxy`
 to have been **assigned** — its `/systems/` probe URLs derive from `hostvars`
-unguarded. That is an inventory dependency, not an ordering one: `zai-assign` is
+unguarded. That is an inventory dependency, not an ordering one: `scn-config` is
 the fix, no provisioning required.
 
 ---

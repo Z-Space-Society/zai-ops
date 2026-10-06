@@ -16,7 +16,7 @@
 # Unlike the rest of bin/, this is NOT a wrapper over an idempotent Ansible
 # task: LiteLLM has no "generate-once" concept, so `create` run twice mints
 # two distinct keys. That's correct for an operator minting a key on purpose,
-# but it's a different reliability contract than zai-backup/zai-assign — there
+# but it's a different reliability contract than zai-backup/scn-config — there
 # is no re-run safety here by design.
 set -euo pipefail
 

@@ -224,6 +224,21 @@
   roles:
     - open-webui
 
+# scn-chat reads its admins from the cluster admin roster in a pre_task (same
+# idiom as the pds play) — the role itself only renders ADMIN_DIDS from it.
+- name: Configure scn-chat
+  hosts: scn-chat
+  gather_facts: true
+  pre_tasks:
+    - name: Read the cluster admin roster
+      ansible.builtin.include_tasks: tasks/roster.yml
+
+    - name: Make the roster's current admins scn-chat's admins
+      ansible.builtin.set_fact:
+        scn_chat_admin_dids: "{{ scn_roster_admin_dids }}"
+  roles:
+    - scn_chat
+
 # happyview runs AFTER postgres: its role creates the happyview role + database ON
 # the postgres CT (delegate_to: postgres). A --limit happyview run still needs
 # postgres already provisioned (its host facts + SSH reachability are required for

@@ -100,15 +100,19 @@ upstream as the dev/CI path, not the SCN runtime.
 6. **Point Corliss at it** — `corliss_scn_chat_url` default from `hostvars`,
    rendered in `corliss.env.j2`, bump `corliss_version`.
 
-## 5. Secrets (ansible-vault, `vault.yml`)
+## 5. Secrets (control-node `/root/.zai-secrets`, the existing idiom — not a vault)
 
-- `scn_chat_secret_key`, `scn_chat_oauth_private_keys` — generated on the
-  control node with `pnpm keys` during provisioning and written **straight into
-  ansible-vault** (never plaintext in the repo; rotate via `pnpm keys`).
+- `scn_chat_secret_key` — generate-once `openssl rand -base64 32` cached via a
+  `pipe` lookup in `group_vars/all/main.yml` (the happyview/corliss posture).
+- `scn_chat_oauth_private_keys` — the app's own `pnpm keys` output (an ES256
+  private JWK), cached the same way; the lookup bootstraps a one-time
+  `/root/scn-chat` checkout on the control node if the file is absent.
+- Both persist under `/root/.zai-secrets` and ride the existing Tier-1
+  control-node backup — no new escrow path.
 - `scn_chat_public_url` (= `https://chat.{{ cluster_domain }}`),
   `node_env: production`, `oauth_scope_mode: permission-set`.
   `ADMIN_DIDS` is derived at provision time from the cluster admin roster
-  (`tasks/roster.yml`) — no DIDs live in vault (Q4 answered).
+  (`tasks/roster.yml`) — no DIDs live in any secret store (Q4 answered).
 - Provider/model API keys are **admin-UI state**, not env — bootstrapped by a
   human after first login (Q8).
 

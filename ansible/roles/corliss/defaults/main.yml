@@ -722,6 +722,20 @@ corliss_enable_notes: true
 # read once per run, so a shorter interval costs registry reads, not much else.
 corliss_reconcile_interval: 1h
 
+# scn-chat, the SCN AI-assistant chat app. Probed at /api/health, which runs a
+# `select 1` against its database and 503s on failure, so "up" means the
+# process is serving and its storage answered. Needs corliss_version v1.4.2 or
+# later; an older pin ignores the key and shows no row.
+#
+# GUARDED like corliss_pds_url below, for the same reason: until scn-chat has a
+# CTID on a cluster, an unguarded reach into hostvars would fail every Corliss
+# deploy there. Blank shows the row as "unknown".
+#
+# The port is a local default, the corliss_sync_relay_port convention. Keep in
+# sync with scn_chat_port.
+corliss_chat_port: 3000
+corliss_chat_url: "{{ ('http://' ~ hostvars['scn-chat'].ansible_host ~ ':' ~ corliss_chat_port) if hostvars['scn-chat'].ctid is defined else '' }}"
+
 # The in-house PDS. Probed at /xrpc/_health, its readiness endpoint, so "up"
 # means the process is serving and its storage answered. Needs corliss_version
 # v1.3.1 or later; an older pin ignores the key and shows no row.

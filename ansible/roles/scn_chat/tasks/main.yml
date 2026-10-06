@@ -1,0 +1,224 @@
+---
+# Install scn-chat natively under systemd (spec 0005, docs/roles/scn_chat.md).
+#
+# scn-chat is a pnpm TS monorepo built for a single node:24-slim container; we
+# reproduce that one container as a plain CT: pinned Node 24 tarball + corepack,
+# source clone at a pinned commit, pnpm install + build, sqlite on the rootfs,
+# systemd. Same shape as the sync_relay role — source-build, and a smoke test
+# at the end that proves the feature.
+
+# --- Node.js ---------------------------------------------------------------
+# Tarball + checksum, the Garage/uv pattern. /opt/node-<ver> keeps multiple
+# majors side by side; /usr/local/bin gets symlinks, so `node` is whatever the
+# pinned version is (nothing else on a fresh CT claims those names).
+
+- name: Check for the pinned Node binary
+  ansible.builtin.command: "{{ scn_chat_node_dir }}/bin/node --version"
+  register: scn_chat_node_installed
+  changed_when: false
+  failed_when: false
+
+- name: Download the pinned Node LTS tarball
+  ansible.builtin.get_url:
+    url: "https://nodejs.org/dist/{{ scn_chat_node_version }}/node-{{ scn_chat_node_version }}-linux-x64.tar.xz"
+    dest: "/tmp/node-{{ scn_chat_node_version }}-linux-x64.tar.xz"
+    checksum: "sha256:{{ scn_chat_node_sha256 }}"
+    mode: "0644"
+  when: scn_chat_node_installed.rc != 0
+
+- name: Extract Node into /opt
+  ansible.builtin.unarchive:
+    src: "/tmp/node-{{ scn_chat_node_version }}-linux-x64.tar.xz"
+    dest: /opt
+    remote_src: true
+    creates: "{{ scn_chat_node_dir }}"
+  when: scn_chat_node_installed.rc != 0
+
+- name: Symlink node, npm, npx and corepack onto the PATH
+  ansible.builtin.file:
+    src: "{{ scn_chat_node_dir }}/bin/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+    force: true
+  loop:
+    - node
+    - npm
+    - npx
+    - corepack
+
+- name: Enable corepack (the pnpm shim, shipped with Node)
+  ansible.builtin.command: /usr/local/bin/corepack enable
+  args:
+    creates: /usr/local/bin/pnpm
+  environment:
+    PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
+
+- name: Prepare the repo's pnpm version in the corepack cache
+  ansible.builtin.command: /usr/local/bin/corepack prepare pnpm@{{ scn_chat_pnpm_version }} --activate
+  changed_when: false
+
+# --- Build dependencies ----------------------------------------------------
+
+- name: Install system build dependencies
+  # python3 + make + g++ are the node:24-slim Dockerfile's apt additions —
+  # what better-sqlite3 needs when no prebuilt binary matches this platform.
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - ca-certificates
+      - curl
+      - git
+      - python3
+      - xz-utils
+    state: present
+    update_cache: true
+
+# --- Clone + build ----------------------------------------------------------
+
+- name: Check the checked-out scn-chat revision
+  ansible.builtin.command: git -C "{{ scn_chat_src }}" rev-parse HEAD
+  register: scn_chat_src_version
+  changed_when: false
+  failed_when: false
+
+- name: Clone scn-chat source at the pinned commit
+  # ansible.builtin.git can only check out what origin advertises, so the pin
+  # must be pushed to origin/main — the same push-ahead-of-pin rule the
+  # sync_relay role records for tags.
+  ansible.builtin.git:
+    repo: "{{ scn_chat_repo_url }}"
+    dest: "{{ scn_chat_src }}"
+    version: "{{ scn_chat_version }}"
+    depth: 1
+    force: true
+  register: scn_chat_clone
+  when: scn_chat_src_version.stdout | trim != scn_chat_version
+
+- name: Check whether node_modules is present
+  ansible.builtin.stat:
+    path: "{{ scn_chat_src }}/node_modules"
+  register: scn_chat_node_modules
+
+- name: Install dependencies with pnpm (frozen lockfile)
+  ansible.builtin.command: pnpm install --frozen-lockfile
+  args:
+    chdir: "{{ scn_chat_src }}"
+  environment:
+    PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
+    HOME: /root
+  when: (scn_chat_clone is changed) or (not scn_chat_node_modules.stat.exists)
+  notify: restart scn-chat
+
+- name: Build the web app (pnpm build)
+  ansible.builtin.command: pnpm build
+  args:
+    chdir: "{{ scn_chat_src }}"
+  environment:
+    PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
+    HOME: /root
+  when: (scn_chat_clone is changed) or (not scn_chat_node_modules.stat.exists)
+  notify: restart scn-chat
+
+# --- Service account + directories ------------------------------------------
+
+- name: Create the scn-chat system group
+  ansible.builtin.group:
+    name: "{{ scn_chat_group }}"
+    system: true
+
+- name: Create the scn-chat system user
+  ansible.builtin.user:
+    name: "{{ scn_chat_user }}"
+    group: "{{ scn_chat_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ scn_chat_home }}"
+    create_home: false
+
+- name: Create the scn-chat home, data and config directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ scn_chat_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    # home: the service user's HOME (node caches).
+    # data: the sqlite store — the whole backup unit (spec 0005 Q7).
+    # config: root-owned, holds the 0600 env the daemon reads via EnvironmentFile.
+    - { path: "{{ scn_chat_home }}", owner: "{{ scn_chat_user }}", mode: "0755" }
+    - { path: "{{ scn_chat_data_dir }}", owner: "{{ scn_chat_user }}", mode: "0750" }
+    - { path: "{{ scn_chat_config_dir }}", owner: root, mode: "0750" }
+
+# --- Secret env + unit -------------------------------------------------------
+
+- name: Require the vault secrets before rendering the env
+  ansible.builtin.assert:
+    that:
+      - scn_chat_secret_key is defined and scn_chat_secret_key | length > 0
+      - scn_chat_oauth_private_keys is defined and scn_chat_oauth_private_keys | length > 0
+    quiet: true
+    fail_msg: >-
+      scn-chat needs SECRET_KEY and OAUTH_PRIVATE_KEYS
+      (scn_chat_secret_key / scn_chat_oauth_private_keys). They resolve as
+      generate-once lookups in group_vars/all/main.yml — the first provision
+      creates them under /root/.zai-secrets. docs/roles/scn_chat.md.
+
+- name: Render the scn-chat environment file
+  ansible.builtin.template:
+    src: scn-chat.env.j2
+    dest: "{{ scn_chat_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart scn-chat
+
+- name: Install the scn-chat systemd unit
+  ansible.builtin.template:
+    src: scn-chat.service.j2
+    dest: /etc/systemd/system/scn-chat.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart scn-chat
+
+- name: Ensure scn-chat is started and enabled
+  ansible.builtin.systemd:
+    name: scn-chat
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply pending scn-chat restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for scn-chat to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ scn_chat_port }}"
+    timeout: 120
+
+- name: Verify the scn-chat health endpoint responds
+  # /api/health runs a `select 1` against sqlite and 503s on a failure, so a
+  # 200 proves the process is serving AND its storage answered — the unit, the
+  # ExecStartPre migration and the sqlite path in one shot (the strongest
+  # probe in the cluster).
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ scn_chat_port }}/api/health"
+    return_content: true
+  register: scn_chat_health
+  until: scn_chat_health is succeeded and scn_chat_health.status == 200
+  retries: 10
+  delay: 3
+
+# --- Manifest (docs/roles/manifest.md) --------------------------------------
+# After the smoke test, so a service that failed it never claims a version.
+- name: Record scn-chat's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_service: scn-chat
+    manifest_version: "{{ scn_chat_version }}"

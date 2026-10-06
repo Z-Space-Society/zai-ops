@@ -147,7 +147,7 @@ and the gaps leave room to grow a tier without renumbering:
 | Range       | Tier         | Examples                                   |
 | ----------- | ------------ | ------------------------------------------ |
 | `100`–`109` | Core infra   | control (100), object-store (101), postgres (102), [`redis`](roles/redis.md) (103) |
-| `110`–`119` | Platform     | proxy/edge (110), registry (111, the [`happyview`](roles/happyview.md) role), gateway (112), sync relay (113, the [`sync_relay`](roles/sync_relay.md) role) |
+| `110`–`119` | Platform     | proxy/edge (110), registry (111, the [`happyview`](roles/happyview.md) role), gateway (112), sync relay (113, the [`sync_relay`](roles/sync_relay.md) role), PDS (114, the [`pds`](roles/pds.md) role) |
 | `120`–`129` | Applications | [`corliss`](roles/corliss.md) (120), open-webui (121), … other user-facing apps |
 
 What separates the last two tiers is **who talks to it**: platform CTs are
@@ -347,6 +347,7 @@ later; the repo bakes in neither.
 | `set-tls.yml`         | CT 100 (local) | Record the proxy's TLS mode, and the acme contact email, in runtime inventory (the `zai-set-tls` engine) |
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox node name in runtime inventory (the `zai-set-node` engine; `bootstrap.sh` calls it automatically) |
 | `set-registry.yml`    | CT 100 (local) | Record the membership registry's per-cluster identity in runtime inventory (the `zai-set-registry` engine) |
+| `set-pds-admin.yml`   | CT 100 (local) | Record the in-house PDS's delegated-admin DIDs in runtime inventory (the `zai-set-pds-admin` engine) |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
 | `make-admin.yml`      | corliss (SSH) | Promote an ATProto handle to corliss admin, keyed on DID (the `zai-make-admin` engine) |
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
@@ -379,6 +380,7 @@ PATH when the control node is configured. The convention:
 | `zai-set-tls <mode> [email]` | Record how the proxy gets its certificate (`origin_ca`, `acme` or `none`; the email is for `acme` only) in runtime inventory. Never run means `acme`. See [Cluster TLS mode](#cluster-tls-mode) | [`set-tls.yml`](#playbooks) |
 | `zai-set-node <node>` | Record the Proxmox node name in runtime inventory (bootstrap sets it automatically) | [`set-node.yml`](#playbooks) |
 | `zai-set-registry <key> <value>` | Record a membership-registry identity (`client_key`, `service_did`) in runtime inventory. Both are read by [corliss](roles/corliss.md) — `service_did` for its roster read, `client_key` for its registry reconciliation — each one registry identity recorded once. Was `zai-set-console`; renamed when the `manage_console` role was deleted and corliss became the only consumer. The third key it used to take, `registry_space_uri`, went with the console | [`set-registry.yml`](#playbooks) |
+| `zai-set-pds-admin <did>[,<did>…]` | Record who may administer the in-house [PDS](roles/pds.md) (`PDS_ADMIN_DIDS`) in runtime inventory. Replaces the whole list; nothing is committed, and the blueprint default is empty. Re-run `provision.yml --limit pds` to apply | [`set-pds-admin.yml`](#playbooks) |
 | `zai-make-admin <handle>` | Promote an ATProto handle to corliss admin, keyed on DID | [`make-admin.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
@@ -425,6 +427,7 @@ the API token and has no SSH path to the host, so anything needing host accounts
 | [`open-webui`](roles/open-webui.md)        | `open-webui` | OpenWebUI chat UI (uv-managed Python 3.12 venv) — Postgres-backed, fronted by Caddy, talks to litellm for chat + RAG embeddings |
 | [`happyview`](roles/happyview.md)          | `happyview` | HappyView AT Protocol AppView platform (Rust binary, built from source) — Postgres-backed, fronted by Caddy |
 | [`sync_relay`](roles/sync_relay.md) | `sync-relay` | Automerge sync server (Rust binary, built from source) — the server end of the automerge-repo WebSocket protocol behind shared notes, Postgres-backed. **Deliberately has no Caddy route:** the Phase A build enforces no membership, so `vmbr1` is the entire access boundary. See [ADR-0007](decisions/0007-sync-relay-and-space-membership.md) |
+| [`pds`](roles/pds.md)                      | `pds`      | In-house AT Protocol PDS (atproto-pds, Rust binary, built from source at a pinned revision): hosts the cluster's atproto accounts. SQLite on disk, no Postgres. Fronted by Caddy at `pds.<domain>` |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
 | [`manifest`](roles/manifest.md)            | every service play (last task) | Writes `<service>.json` to Garage: installed version, zai-ops revision, timestamp. Read by Corliss's `/systems/`. See [ADR-0009](decisions/0009-service-manifests-in-garage.md) |
 

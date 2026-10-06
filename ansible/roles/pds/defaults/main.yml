@@ -86,34 +86,29 @@ pds_did_plc_url: "plc.directory"
 # signing a service-auth token with the #atproto key of their own DID document.
 # The /admin dashboard is deliberately NOT routed publicly — see docs/roles/pds.md.
 #
-# Blueprint default = the SCN delegated-admin roster (boris 2026-09-23): the
-# SCN identity itself plus the three operators. Override per cluster with
-# `zai-set-pds-admin` (runtime inventory, git-ignored) when a cluster needs a
-# different roster — the list below is the committed ADR-0001-style default,
-# not a secret.
-pds_admin_dids:
-  - "did:plc:n4mzxx6z4ehnswc7znswtfr2"   # @sharedcomputer.network — the SCN DID
-  - "did:plc:2cxgdrgtsmrbqnjkwyplmp43"   # @bmann.ca — boris
-  - "did:plc:tmxbvcho3zysvtadtextctxw"   # @hadsie.com
-  - "did:plc:hhyrsndukexwr6qucdngcf4r"   # @jacob.cascadia.social
+# Empty in the blueprint: who administers a cluster's PDS is that cluster's
+# identity, so it is recorded per cluster with `zai-set-pds-admin` (runtime
+# inventory, git-ignored) and nothing is committed here (ADR-0001). With the
+# list empty the env template leaves PDS_ADMIN_DIDS out and the admin password
+# is the only admin door.
+pds_admin_dids: []
 
-# Outbound mail — the cluster SMTP convention (Forward Email relay,
-# one-alias-per-app): the SMTP URL is built in group_vars/all/main.yml from the
-# catch-all SMTP creds in /root/.zai-secrets; `pds_email_from_address` is the
-# per-app alias used as the From. Default pds@<domain>; override per cluster
-# (e.g. pds-staging@sharedcomputer.network on staging). When *both* the URL and
-# the From are unset the server disables email (password reset / confirmation
-# report success without sending — dev-log only).
+# Outbound mail. The relay is the cluster's `smtp_url` (group_vars/all/main.yml,
+# read from /root/.zai-secrets/smtp_url); this is the From address the PDS
+# sends as. The server enables delivery only when both are set. With the relay
+# unset it logs each message's recipient and subject and drops it, so password
+# reset, email confirmation and PLC-operation tokens never arrive.
 pds_email_from_address: "pds@{{ cluster_domain }}"
 
 # Account delegation (the /account/delegation portal): lets a holder of an
 # account here authenticate a *delegate* against another server's OAuth —
 # new authority over the account reached without its password. Default ON
 # (boris 2026-09-23). The server refuses to make it available unless the
-# origin is HTTPS (Caddy edge provides it) AND the OAuth signing key is P-256
-# — the self-generated key is K-256, so `pds_oauth_jwk_set` (a P-256 private
-# JWK, operator-held in /root/.zai-secrets) must be provisioned or the portal
-# reports "delegation is not enabled".
+# origin is HTTPS (Caddy edge provides it) AND the OAuth signing key is P-256.
+# From the f74a3e1 pin the server generates a P-256 key on first boot, so a
+# fresh PDS meets both with nothing provisioned. A PDS first booted on an
+# older build may hold a K-256 key in its key store; that one needs
+# `pds_oauth_jwk_set` (see group_vars/all/main.yml).
 pds_delegation_enabled: true
 
 # Limits. Keep the Caddy side in sync if changed (a proxy that rejects a body

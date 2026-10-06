@@ -119,6 +119,9 @@ itself from this repo.
    zai-assign litellm 112        # platform: AI gateway
    zai-assign sync-relay 113     # platform: automerge sync relay behind shared
                                  #   notes. No proxy route on purpose — see ADR-0007
+   zai-assign pds 114            # platform: in-house atproto PDS. Assign it before
+                                 #   provisioning the proxy, or re-run the proxy
+                                 #   after: its route is skipped until it has a CTID
    zai-assign corliss 120        # application: the member's front door — ATProto
                                  #   sign-in, membership and tier, OIDC provider
    zai-assign open-webui 121     # application: the chat UI
@@ -135,6 +138,8 @@ itself from this repo.
    ansible-playbook provision.yml --limit happyview
    ansible-playbook provision.yml --limit litellm
    ansible-playbook provision.yml --limit sync-relay # ~15-30 min: builds
+                                                  #   from source on a cold CT
+   ansible-playbook provision.yml --limit pds        # ~15-30 min: builds
                                                   #   from source on a cold CT
    ansible-playbook provision.yml --limit corliss
    ansible-playbook provision.yml --limit open-webui

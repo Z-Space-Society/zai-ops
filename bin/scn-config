@@ -23,7 +23,7 @@ set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/../ansible"
 
 TITLE="SCN Configuration Tool (scn-config)"
-BACKTITLE="Shared Computer Network — control node $(hostname)"
+BACKTITLE="Shared Computer Network — $(hostname)"
 
 # Shown wherever a recorded assignment could be changed. The CTID is the
 # container's VMID and its address, so this is a migration, not a setting.

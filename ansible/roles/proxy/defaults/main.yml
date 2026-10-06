@@ -72,6 +72,9 @@ caddy_proxy_hosts:
         code: 302
         skip_if_cookie: token
   - { domain: "view.{{ cluster_domain }}", service: happyview, port: 3000 }
+  # scn-chat — the SCN AI-assistant chat app, atproto OAuth sign-in (not
+  # OIDC), so no redirects — the happyview shape. Internal :3000.
+  - { domain: "chat.{{ cluster_domain }}", service: scn-chat, port: 3000 }
   # In-house PDS (atproto-pds) — the source of the cluster's atmosphere
   # accounts. The PDS terminates nothing: Caddy is the TLS edge (the server
   # trusts exactly one proxy hop; websocket upgrades for subscribeRepos pass

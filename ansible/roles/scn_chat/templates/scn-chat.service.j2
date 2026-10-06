@@ -1,0 +1,22 @@
+[Unit]
+Description=scn-chat — SCN AI-assistant chat app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ scn_chat_user }}
+Group={{ scn_chat_group }}
+WorkingDirectory={{ scn_chat_src }}
+Environment=HOME={{ scn_chat_home }}
+EnvironmentFile={{ scn_chat_env_file }}
+# Migrations before start, on every boot: drizzle migrate is idempotent, so an
+# upgrade is just "bump scn_chat_version + restart" — the ExecStartPre keeps
+# the schema current with the code.
+ExecStartPre=/usr/local/bin/node apps/server/src/migrate-cli.ts
+ExecStart=/usr/local/bin/node apps/server/src/index.ts
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

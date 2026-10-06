@@ -225,7 +225,7 @@ ssh root@<open-webui-ip> "journalctl -u open-webui --since '1 hour ago' | grep -
   exists whenever it exists, deleting the ordering dependency rather than
   sequencing around it with `After=network-online.target`. Use that exact form,
   not a bare `*`: the `-` prefix makes a failed IPv6 bind non-fatal, and this CT
-  is IPv4-only. See [Known gotchas](../README.md#known-gotchas).
+  is IPv4-only. See [Known gotchas](../gotchas.md).
 - **`protected-mode yes` is not what's protecting this.** With an explicit
   `bind` and a `requirepass`, protected mode never comes into play — the actual
   boundary is the `vmbr1`-only NAT network with no LAN route, reinforced by the

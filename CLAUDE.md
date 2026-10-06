@@ -24,8 +24,8 @@ docs for "later":
   the run steps in the top-level `README.md` if the operator flow changes).
 - **Networking, bootstrap phases, addressing, or trust model change** → update
   the relevant section of `docs/README.md` (and the table/diagram).
-- **A new gotcha learned the hard way** → add it to the "Known gotchas" section
-  of `docs/README.md` so it isn't re-debugged.
+- **A new gotcha learned the hard way** → add it to
+  [`docs/gotchas.md`](docs/gotchas.md) so it isn't re-debugged.
 
 When you finish a task, double-check whether any doc above needs the same edit.
 

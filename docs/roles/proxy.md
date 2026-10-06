@@ -181,7 +181,7 @@ ssh root@10.1.1.<ctid> 'journalctl -u caddy --no-pager | grep -iE "obtain|challe
 ```
 
 If issuance fails, check public `:80` first (see
-[Known gotchas](../README.md#known-gotchas)).
+[Known gotchas](../gotchas.md)).
 
 ## Notes
 

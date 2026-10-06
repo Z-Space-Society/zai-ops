@@ -23,7 +23,10 @@ set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/../ansible"
 
 TITLE="SCN Configuration Tool (scn-config)"
-BACKTITLE="Shared Computer Network — $(hostname)"
+# The same `git describe` the service manifests record (zai_ops_revision in
+# group_vars/all/main.yml), so the version here and on Corliss's /systems/ agree.
+VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo unknown)"
+BACKTITLE="Shared Computer Network — $(hostname) — zai-ops $VERSION"
 
 # Shown wherever a recorded assignment could be changed. The CTID is the
 # container's VMID and its address, so this is a migration, not a setting.

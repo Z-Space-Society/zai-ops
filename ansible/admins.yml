@@ -1,13 +1,15 @@
 ---
-# Show or change the cluster's admins.
+# Show, change or re-apply the cluster's admins.
 #
 #   ansible-playbook admins.yml -e admin_action=show
 #   ansible-playbook admins.yml -e admin_action=add    -e who=alice.example.com
 #   ansible-playbook admins.yml -e admin_action=add    -e who=alice.example.com -e admit=true -e tier=level-0
 #   ansible-playbook admins.yml -e admin_action=remove -e who=did:plc:abc2…
+#   ansible-playbook admins.yml -e admin_action=apply
 #
 # (`scn-config`, the operator command in bin/, drives this — its Cluster Admins
-# menu and `scn-config nonint show-admins | add-admin | remove-admin`.)
+# menu and `scn-config nonint show-admins | add-admin | remove-admin |
+# apply-admins`.)
 #
 # Nothing here stores an admin list. The authority is the public roster record
 # in the service account's repo, and only Corliss writes it, so this reaches the
@@ -15,6 +17,11 @@
 # `make_admin` to write (roster entry, is_staff, registry space access — one
 # operation, the same one the button on /manage/ performs). The PDS follows the
 # same roster on its next `provision.yml --limit pds` (tasks/roster.yml).
+#
+# `apply` changes no admins. It runs `sync_admins`, which re-derives Corliss's
+# own copy (the is_staff flags) from the roster as it stands: the fix for a
+# database restored from before an appointment. Needs corliss_version v1.3.2.
+# It is Corliss's half of `scn-config`'s Apply; the PDS's half is its provision.
 #
 # `who` is a handle or a DID. A handle is resolved and verified by Corliss; a
 # DID is taken as given.
@@ -42,6 +49,7 @@
     # DID is passed as both.
     manage_args: >-
       {{ ['list_admins'] if admin_action == 'show' else
+         ['sync_admins'] if admin_action == 'apply' else
          ['make_admin', who]
          + (['--did', who] if who_is_did else [])
          + (['--remove'] if admin_action == 'remove' else [])
@@ -50,8 +58,8 @@
   tasks:
     - name: Require a known action
       ansible.builtin.assert:
-        that: admin_action | default('') in ['show', 'add', 'remove']
-        fail_msg: "Pass -e admin_action=show, add or remove."
+        that: admin_action | default('') in ['show', 'add', 'remove', 'apply']
+        fail_msg: "Pass -e admin_action=show, add, remove or apply."
 
     - name: Require a handle or a DID
       ansible.builtin.assert:
@@ -59,7 +67,7 @@
         fail_msg: >-
           Pass -e who=<handle or DID>, e.g. alice.example.com or did:plc:… —
           got '{{ who | default('') }}'.
-      when: admin_action != 'show'
+      when: admin_action in ['add', 'remove']
 
     # The command needs the app's whole configuration (service DID, registry,
     # database), which lives in the unit's EnvironmentFile and nowhere an
@@ -83,7 +91,8 @@
       changed_when: >-
         admin_action != 'show' and
         ('promoted' in admin_cmd.stdout or 'removed' in admin_cmd.stdout
-         or 'admitted as' in admin_cmd.stdout)
+         or 'admitted as' in admin_cmd.stdout
+         or 'marked as an admin' in admin_cmd.stdout)
       failed_when: false
 
     # Hand the result to scn-config whether it worked or not: the script shows

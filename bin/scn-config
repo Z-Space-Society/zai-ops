@@ -9,6 +9,8 @@
 #   scn-config nonint show-admins                # the cluster's admins
 #   scn-config nonint add-admin alice.example.com    # handle or DID
 #   scn-config nonint remove-admin alice.example.com
+#   scn-config nonint apply-admins               # give the list to everything that
+#   scn-config nonint apply-admins pds           #   keeps a copy, or only to some
 #   scn-config nonint show-smtp                  # the mail relay, minus credentials
 #   scn-config nonint set-smtp < url-file        # the relay URL, read from stdin
 #   scn-config nonint clear-smtp                 # remove it; mail off
@@ -52,6 +54,7 @@ usage: scn-config
        scn-config nonint show-admins
        scn-config nonint add-admin <handle-or-did> [--admit] [--tier <tier>]
        scn-config nonint remove-admin <handle-or-did>
+       scn-config nonint apply-admins [corliss] [pds]
        scn-config nonint show-smtp
        scn-config nonint set-smtp        (URL on stdin)
        scn-config nonint clear-smtp
@@ -276,11 +279,13 @@ admins_table() {
     echo "  (none)"
     return 0
   fi
-  printf '  %-30s %s\n' "Handle" "DID"
-  printf '  %-30s %s\n' "------------------------------" "--------------------------------"
+  # 72 columns with a did:plc, inside the 74 a full-width dialog has for text:
+  # a wider row wraps in whiptail and breaks the table.
+  printf '  %-30s %-6s %s\n' "Handle" "Member" "DID"
+  printf '  %-30s %-6s %s\n' "------------------------------" "------" "--------------------------------"
   for i in "${!ADM_DID[@]}"; do
-    printf '  %-30s %s%s\n' "${ADM_HANDLE[$i]}" "${ADM_DID[$i]}" \
-      "$([ "${ADM_MEMBER[$i]}" = yes ] || echo "  (not a member)")"
+    printf '  %-30s %-6s %s\n' "${ADM_HANDLE[$i]}" \
+      "$([ "${ADM_MEMBER[$i]}" = yes ] && echo Yes || echo No)" "${ADM_DID[$i]}"
   done
 }
 
@@ -298,8 +303,70 @@ pds_hint() {
   local i
   load_state
   i="$(index_of pds)" && [ -n "${SVC_CTID[$i]}" ] \
-    && echo "The PDS picks this up on: ansible-playbook provision.yml --limit pds"
+    && echo "The PDS picks this up on: scn-config nonint apply-admins"
   return 0
+}
+
+# Everything that keeps its own copy of the admin list, in the order it is
+# applied. An add or remove reaches Corliss as it happens, and nothing else; a
+# service built or restored since then has never been told. Applying changes no
+# admins, it gives the roster as it stands to each of these. A new consumer is
+# a name here, a label below, and a branch in the two apply functions.
+ADMIN_TARGETS=(corliss pds)
+
+admin_target_label() {
+  case "$1" in
+    corliss) echo "Who its console and Django admin treat as admins" ;;
+    pds) echo "Who may administer it (provisions pds)" ;;
+  esac
+}
+
+# pds_assigned — true when the PDS has a container to apply anything to.
+pds_assigned() {
+  local i
+  load_state
+  i="$(index_of pds)" && [ -n "${SVC_CTID[$i]}" ]
+}
+
+# Corliss re-derives its is_staff flags from the roster (sync_admins, v1.3.2).
+# Result in ADMIN_RC / ADMIN_OUT / ADMIN_ERR, like every other admins.yml run.
+apply_admins_corliss() {
+  admins_run -e admin_action=apply && return 0
+  # Django's last word on a missing command is a usage hint, which says nothing
+  # about the fix.
+  if [[ "$ADMIN_ERR" == *"Unknown command"* || "$ADMIN_ERR" == *"manage.py help"* ]]; then
+    ADMIN_ERR="Corliss here is older than v1.3.2, which added this. Provision corliss first."
+  fi
+  return 1
+}
+
+nonint_apply_admins() {
+  local target targets=("$@") failed=0
+  [ $# -gt 0 ] || targets=("${ADMIN_TARGETS[@]}")
+  for target in "${targets[@]}"; do
+    [[ " ${ADMIN_TARGETS[*]} " == *" $target "* ]] \
+      || die "'$target' is not somewhere admins are applied (${ADMIN_TARGETS[*]})"
+  done
+  for target in "${targets[@]}"; do
+    case "$target" in
+      corliss)
+        if apply_admins_corliss; then
+          echo "$ADMIN_OUT"
+        else
+          echo "scn-config: Corliss was not updated: $ADMIN_ERR" >&2
+          failed=1
+        fi
+        ;;
+      pds)
+        if pds_assigned; then
+          ansible-playbook provision.yml --limit pds || failed=1
+        else
+          echo "The PDS has no container ID yet; it reads the roster when it is first provisioned."
+        fi
+        ;;
+    esac
+  done
+  [ "$failed" = 0 ]
 }
 
 nonint_show_admins() {
@@ -846,8 +913,41 @@ $ADMIN_ERR"
   fi
 }
 
+# apply_admins <target>... — give the roster as it stands to each target, and
+# say what happened. Corliss first: it is quick and answers in a sentence,
+# where the PDS hands the screen to ansible.
+apply_admins() {
+  local note=""
+  if [[ " $* " == *" corliss "* ]]; then
+    TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
+      --infobox "Asking Corliss…" 8 "$WT_WIDTH"
+    if ! apply_admins_corliss; then
+      msgbox "Cluster Admins" "Corliss was not updated, and nothing else was tried:
+
+$ADMIN_ERR"
+      return 0
+    fi
+    note="Corliss:
+$ADMIN_OUT"
+  fi
+  if [[ " $* " == *" pds "* ]]; then
+    if pds_assigned; then
+      [ -z "$note" ] || msgbox "Cluster Admins" "$note
+
+Next, the PDS."
+      run_provision pds
+      return 0
+    fi
+    note="${note:+$note
+
+}The PDS has no container ID yet, so there is nothing to update there.
+It reads the roster when it is first provisioned."
+  fi
+  msgbox "Cluster Admins" "$note"
+}
+
 do_admins_menu() {
-  local choice text who found did handle i args
+  local choice text who found did handle i args target picked targets
   while true; do
     TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
       --infobox "Reading the admin roster…" 8 "$WT_WIDTH"
@@ -865,12 +965,30 @@ $(admins_table)${ADM_NOTE:+
 $ADM_NOTE}"
     choice="$(whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
       --ok-button Select --cancel-button Back \
-      --menu "$text" "$(box_height "$text" 10)" "$WT_WIDTH" 2 \
+      --menu "$text" "$(box_height "$text" 12)" "$WT_WIDTH" 4 \
       "Add" " Make someone an admin" \
       "Remove" " End someone's admin authority" \
+      "Apply" " Give this list to everything that keeps a copy" \
+      "Apply Select" " Choose where to apply it" \
       3>&1 1>&2 2>&3)" || return 0
 
-    if [ "$choice" = Add ]; then
+    if [ "$choice" = Apply ]; then
+      apply_admins "${ADMIN_TARGETS[@]}"
+    elif [ "$choice" = "Apply Select" ]; then
+      args=()
+      for target in "${ADMIN_TARGETS[@]}"; do
+        args+=("$target" " $(admin_target_label "$target")" ON)
+      done
+      picked="$(whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
+        --ok-button Apply --cancel-button Back \
+        --checklist "Apply the admin list to: (space toggles)" \
+        "$((${#ADMIN_TARGETS[@]} + 8))" "$WT_WIDTH" "${#ADMIN_TARGETS[@]}" \
+        "${args[@]}" 3>&1 1>&2 2>&3)" || continue
+      # whiptail answers with the chosen tags, each quoted.
+      read -r -a targets <<<"${picked//\"/}"
+      [ "${#targets[@]}" -gt 0 ] || continue
+      apply_admins "${targets[@]}"
+    elif [ "$choice" = Add ]; then
       who=""
       while true; do
         who="$(ask "Cluster Admins" "Who? A handle (alice.example.com) or a DID (did:plc:…)." "$who")" || continue 2
@@ -1095,6 +1213,7 @@ case "${1:-}" in
       show-admins) nonint_show_admins ;;
       add-admin) shift; nonint_add_admin "$@" ;;
       remove-admin) shift; nonint_remove_admin "$@" ;;
+      apply-admins) shift; nonint_apply_admins "$@" ;;
       show-smtp) nonint_show_smtp ;;
       set-smtp) nonint_set_smtp ;;
       clear-smtp) nonint_clear_smtp ;;

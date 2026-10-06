@@ -349,7 +349,7 @@ later; the repo bakes in neither.
 | `set-smtp.yml`        | CT 100 (local) | Set, clear or show the cluster's outbound mail relay in `/root/.zai-secrets/smtp_url` (the engine behind `scn-config`'s Set SMTP). The URL is taken from the environment, never an argument |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
 | `ct-status.yml`       | CT 100 (local) | Read-only: list the containers on the node, so `scn-config` can mark each service as new or existing |
-| `admins.yml`          | corliss (SSH) | Show, add or remove a cluster admin by running Corliss's `list_admins` / `make_admin` on its CT. The roster record is the authority; nothing is stored in zai-ops (the engine behind `scn-config`'s Cluster Admins) |
+| `admins.yml`          | corliss (SSH) | Show, add or remove a cluster admin by running Corliss's `list_admins` / `make_admin` on its CT, or re-apply the roster to Corliss's own copy (`sync_admins`, `admin_action=apply`). The roster record is the authority; nothing is stored in zai-ops (the engine behind `scn-config`'s Cluster Admins) |
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
 | `inference.yml`       | CT 100 → SSH   | Configure inference nodes (`nvidia_cuda` + `llama_server`) |
 | `add-github-user.yml` | CT 100 (local) + SSH | Create a human admin account from GitHub keys, with sudo, on CT 100 + inference nodes |
@@ -376,7 +376,7 @@ PATH when the control node is configured. The convention:
 | Command | Does | Backed by |
 | ------- | ---- | --------- |
 | `scn-config` | Menu-driven cluster configuration: assign each service its CTID ([Service CTID assignment](#service-ctid-assignment)), provision the assigned services in dependency order, manage the cluster's admins, and set the outbound mail relay | [`assign.yml`](#playbooks), [`provision.yml`](#playbooks), [`admins.yml`](#playbooks), [`set-smtp.yml`](#playbooks) |
-| `scn-config nonint <command>` | The same, scripted: `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults`; `show-admins`, `add-admin <handle-or-did> [--admit] [--tier T]`, `remove-admin <handle-or-did>`; `show-smtp`, `set-smtp` (URL on stdin), `clear-smtp` | the same playbooks |
+| `scn-config nonint <command>` | The same, scripted: `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults`; `show-admins`, `add-admin <handle-or-did> [--admit] [--tier T]`, `remove-admin <handle-or-did>`, `apply-admins [corliss] [pds]` (gives the roster as it stands to everything that keeps a copy; all of them when none is named); `show-smtp`, `set-smtp` (URL on stdin), `clear-smtp` | the same playbooks |
 | `zai-set-domain <domain>` | Record the cluster's public base domain | [`set-domain.yml`](#playbooks) |
 | `zai-set-tls <mode> [email]` | Record how the proxy gets its certificate: `acme` (the default), `origin_ca` or `none`. See [Cluster TLS mode](#cluster-tls-mode) | [`set-tls.yml`](#playbooks) |
 | `zai-set-node <node>` | Record the Proxmox node name (bootstrap does this automatically) | [`set-node.yml`](#playbooks) |

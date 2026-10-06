@@ -240,7 +240,7 @@ architecture, networking, and a note for every role.
   - `site.yml` — configures the control node (CT 100)
   - `verify-proxmox.yml` — checks the API token authenticates
   - `provision.yml` — creates the service containers over the API, then configures them
-  - `admins.yml` — shows, adds or removes a cluster admin by running Corliss's own commands on its CT (`scn-config`, Cluster Admins)
+  - `admins.yml` — shows, adds or removes a cluster admin, or re-applies the roster to Corliss, by running Corliss's own commands on its CT (`scn-config`, Cluster Admins)
   - `enroll-inference-node.yml` — records a bare-metal inference node in the runtime inventory
   - `inference.yml` — configures inference nodes (NVIDIA/CUDA + llama-server)
   - `add-github-user.yml` — creates a human admin account from GitHub keys (CT 100 + inference nodes)

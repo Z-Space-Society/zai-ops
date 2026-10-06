@@ -175,7 +175,10 @@ the PDS and Corliss follow one list:
 
 An admin appointed in Corliss reaches the PDS on its next
 `provision.yml --limit pds`. `scn-config`'s Cluster Admins entry offers to run
-that after each add or remove.
+that after each add or remove, and its **Apply** item (`scn-config nonint
+apply-admins`, or `apply-admins pds` for the PDS alone) runs it with no roster
+change at all: the way to bring a PDS built or restored after the last change
+up to the current list.
 
 ## Backup
 

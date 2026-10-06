@@ -135,12 +135,12 @@ zai-backup restore latest --target /tmp/restore
 
 - Secrets live only in `restic.env` (`0600`) and the vault — never in the repo.
 - **Tier 2 (service data)** — service-CT state pulled into the *same* restic repo.
-  (The proxy CT needs no Tier-2 backup: its routes live in git and its TLS cert in
-  the vault, so it holds no unreproducible state.)
-  - **Postgres** — wired. Set `postgres_enabled=true` in
-    [`bin/zai-backup`](../../bin/zai-backup) once the `postgres` CT is up (assign
-    its CTID first, then re-run `backup.yml` once so `ZAI_POSTGRES_HOST` lands in
-    `restic.env`; after that the toggle is a pull-to-live edit). A run then streams
+  (The proxy CT needs no Tier-2 backup: its routes live in git and Caddy obtains
+  its own certificates again, so it holds no unreproducible state.)
+  - **Postgres**: on (`postgres_enabled=true` in
+    [`bin/zai-backup`](../../bin/zai-backup)). It needs the `postgres` CT
+    assigned before `backup.yml` runs, so `ZAI_POSTGRES_HOST` lands in
+    `restic.env`. A run streams
     a cluster-wide `pg_dumpall --clean --if-exists` over SSH straight into the
     restic repo via `--stdin` (tag `zai-postgres`) — no dump file on disk, on
     either box. **Restore:** `zai-backup restore latest --target /tmp/restore` (or

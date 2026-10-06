@@ -109,8 +109,8 @@ on the remaining service CTs:
   Proxmox status: `pveproxy` accepted the request but failed trying to *proxy* it
   to the node named in the call — because that node isn't this host. The cause is
   a stale/wrong `proxmox_node_name`. It's recorded as runtime data from the host's
-  `hostname` (`bootstrap.sh` / `zai-set-node`); fix it with
-  `zai-set-node <node>`. With too short an `api_timeout` the same root cause
+  `hostname` by `bootstrap.sh`; fix it in `scn-config` (Cluster Settings,
+  Proxmox host name) or with `scn-config nonint set-proxmox-host <name>`. With too short an `api_timeout` the same root cause
   instead surfaces as a misleading `read timeout=5` (proxmoxer gives up before
   pveproxy returns the 595).
 

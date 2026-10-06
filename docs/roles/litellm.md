@@ -233,7 +233,7 @@ model list is the knob Phase F of the deploy plan turns.
   correctly. A full [`provision.yml`](../../ansible/provision.yml) run guarantees
   the order.
 - **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts`
-  (`api.{{ cluster_domain }}`); set the domain once with `scn-config` (Set Domain).
+  (`api.{{ cluster_domain }}`); set the domain once with `scn-config` (Cluster Settings).
 
 ## Verify
 

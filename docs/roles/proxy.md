@@ -137,7 +137,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 | `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code, skip_if_cookie }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). `skip_if_cookie` names a cookie whose presence lets the request fall through to the real app instead of redirecting — see [Notes](#notes) below, it's load-bearing for open-webui, not optional. |
 
 The committed default carries one live route, with the **domain derived from
-`cluster_domain`** (set per cluster with `scn-config`, Set Domain) so the route holds no
+`cluster_domain`** (set per cluster with `scn-config`, Cluster Settings) so the route holds no
 this-cluster facts — the same number-free principle the inventory follows. The
 role asserts `cluster_domain` is set when routes exist, failing with `run:
 scn-config nonint set-domain <domain>` instead of a raw undefined-variable error.

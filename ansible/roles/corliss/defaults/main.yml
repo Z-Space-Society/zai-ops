@@ -489,7 +489,7 @@ corliss_oidc_backchannel_logout_uri: "http://{{ hostvars['open-webui'].ansible_h
 
 # The other cluster surfaces corliss links out to. All three derive from
 # cluster_domain exactly like corliss_url above — just different subdomains, so
-# a domain change (`scn-config`, Set Domain) moves every link at once and none of them can drift. Each
+# a domain change (`scn-config`, Cluster Settings) moves every link at once and none of them can drift. Each
 # is the SAME public origin the corresponding Caddy route already serves
 # (caddy_proxy_hosts), reached through the edge rather than CT-to-CT, because
 # these are hrefs a member's browser follows, not service-to-service calls.
@@ -606,12 +606,10 @@ corliss_membership_registry_port: 3000
 # `view.<domain>` entry in caddy_proxy_hosts, which is the name it routes on.
 corliss_membership_registry_host: "view.{{ cluster_domain }}"
 
-# --- Registry identity, set per cluster with `zai-set-registry` -------------
-# These two lived in the manage_console role's defaults until that role was
-# deleted; corliss is now the only consumer, so they are rehomed here rather
-# than dropped. Neither is prefixed `corliss_*` on purpose: both are the
-# REGISTRY's identity, not corliss's, and one identity should not be recorded
-# twice under two names in the same inventory.
+# --- Registry identity, set per cluster with `scn-config` (Cluster Settings) --
+# Neither is prefixed `corliss_*` on purpose: both are the REGISTRY's identity,
+# not corliss's, and one identity should not be recorded twice under two names
+# in the same inventory.
 #
 # Blank blueprint defaults — the real values are this-cluster identity and live
 # in the git-ignored runtime inventory (ADR-0001). Neither is a secret: the DID

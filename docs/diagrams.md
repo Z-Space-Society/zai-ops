@@ -141,10 +141,8 @@ flowchart LR
         direction TB
         c1["scn-config · Control Node Setup<br/>site.yml — configure the control node"]
         c2["verify-proxmox.yml, same entry<br/>confirm the token authenticates"]
-        c3["scn-config · Set Domain<br/>required before the proxy"]
-        ct["scn-config · Set TLS<br/>only if not acme, the default"]
-        c4["zai-set-registry client_key / service_did<br/>optional — blank is a working state"]
-        c1 --> c2 --> c3 --> ct --> c4
+        c3["scn-config · Cluster Settings<br/>domain: required before the proxy<br/>registry: optional, blank is a working state"]
+        c1 --> c2 --> c3
     end
 
     subgraph phase3["3 · assign — records numbers only, creates nothing"]
@@ -157,7 +155,7 @@ flowchart LR
         p1["object-store<br/>restic backend, so it comes up first"]
         p2["postgres<br/>every app below creates its own role + DB here"]
         p3["redis<br/>before open-webui builds its REDIS_URL"]
-        p4["proxy"]
+        p4["proxy<br/>acme TLS unless Set TLS recorded none"]
         p5["happyview"]
         p6["litellm"]
         p7["sync-relay<br/>~15–30 min, cargo build on a cold CT"]

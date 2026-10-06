@@ -43,7 +43,7 @@
   tasks:
     - name: Fail fast if the Proxmox node name is unrecorded
       # proxmox_node_name is runtime data in inventory/local.yml (bootstrap.sh
-      # records it from the host's hostname; zai-set-node sets it). If it's
+      # records it from the host's hostname; scn-config can correct it). If it's
       # missing — e.g. a control node that predates the runtime-node change —
       # every API call below would target an undefined node. Refuse early with an
       # actionable message instead of a cryptic undefined-variable error or, worse,
@@ -51,7 +51,7 @@
       ansible.builtin.assert:
         that: proxmox_node_name is defined
         fail_msg: >-
-          proxmox_node_name is not recorded — run: zai-set-node <node>
+          proxmox_node_name is not recorded — run: scn-config nonint set-proxmox-host <name>
           (or re-run bootstrap.sh, which records it automatically).
       run_once: true
 

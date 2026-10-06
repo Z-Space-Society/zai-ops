@@ -80,7 +80,8 @@ out and update the docs.
 - **The Proxmox node name is runtime data, not committed.** Like the CTID
   assignments and `cluster_domain`, `proxmox_node_name` lives in the git-ignored
   `inventory/local.yml` — `bootstrap.sh` records it from the host's `hostname`
-  (via `set-node.yml`), and `zai-set-node <node>` adjusts it. `provision.yml`
+  (via `set-node.yml`), and `scn-config` corrects it (Cluster Settings, where
+  the operator sees it as the Proxmox host name). `provision.yml`
   targets it as the `node:` of every API call; a stale value makes `pveproxy`
   proxy each create to a phantom node and time out (HTTP 595). Keeps the
   committed tree host-agnostic (ADR-0001).
@@ -98,13 +99,17 @@ out and update the docs.
   assignment is runtime data in `inventory/local.yml`, written by `assign.yml`.
   `scn-config` (a whiptail menu patterned on raspi-config, plus `nonint`
   subcommands) is the only front end; its menu runs in the order a new cluster
-  needs it: control node setup (`site.yml`, then `verify-proxmox.yml`), the
-  domain (`set-domain.yml`) and the proxy's TLS mode (`set-tls.yml`) come
-  before assignment. It also runs `provision.yml` per
+  needs it: control node setup (`site.yml`, then `verify-proxmox.yml`) and
+  Cluster Settings come before assignment. Cluster Settings is one screen for
+  the plain per-cluster values: the domain (`set-domain.yml`), the membership
+  registry's identity (`set-registry.yml`) and the Proxmox host name
+  (`set-node.yml`). It also runs `provision.yml` per
   service, ordered by `default_ctid` because tier order is dependency order,
-  manages cluster admins (`admins.yml`) and sets the mail relay
-  (`set-smtp.yml`). New settings go in as `scn-config` entries with a `nonint`
-  form and a playbook underneath, not as new `zai-set-*` commands.
+  manages cluster admins (`admins.yml`), sets the mail relay
+  (`set-smtp.yml`) and, last because the default needs no choice, the proxy's
+  TLS mode (`set-tls.yml`). A new plain value is a row in Cluster Settings and
+  anything with its own flow is a menu entry. Either way it gets a `nonint`
+  form and a playbook underneath, never a new `zai-set-*` command.
   The menu never changes a recorded
   assignment: the CTID is the container's VMID and address, so renumbering after
   provisioning strands the old container and its data. `nonint assign-ctid

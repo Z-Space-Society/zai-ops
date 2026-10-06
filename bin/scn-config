@@ -6,9 +6,11 @@
 #                                                #   the Proxmox API token
 #   scn-config nonint show-domain                # the cluster's public base domain
 #   scn-config nonint set-domain example.com
-#   scn-config nonint show-tls                   # how the proxy gets its certificate
-#   scn-config nonint set-tls acme ops@example.org   # acme (the default, contact
-#                                                #   optional) or none
+#   scn-config nonint show-registry              # the membership registry's identity
+#   scn-config nonint set-registry service_did did:plc:…   # or client_key hvc_…;
+#                                                #   an empty value records none
+#   scn-config nonint show-proxmox-host          # the Proxmox host's own name
+#   scn-config nonint set-proxmox-host asusnuc   # a correction: bootstrap sets it
 #   scn-config nonint show-ctid                  # service / CTID / default table
 #   scn-config nonint assign-ctid proxy 110      # assign one service
 #   scn-config nonint assign-ctid-defaults       # assign every unassigned service
@@ -21,14 +23,17 @@
 #   scn-config nonint show-smtp                  # the mail relay, minus credentials
 #   scn-config nonint set-smtp < url-file        # the relay URL, read from stdin
 #   scn-config nonint clear-smtp                 # remove it; mail off
+#   scn-config nonint show-tls                   # how the proxy gets its certificate
+#   scn-config nonint set-tls acme ops@example.org   # acme (the default, contact
+#                                                #   optional) or none
 #
 # Runs on the control node. Lives in the repo's bin/ (on PATH via
 # /etc/profile.d/zai-ops.sh) and runs in place — the script you run is always the
 # one in git, no installed copy to drift.
 #
 # This is the front end only. The playbooks (site.yml, verify-proxmox.yml,
-# set-domain.yml, set-tls.yml, assign.yml, admins.yml, set-smtp.yml) validate
-# and write; the checks here exist to give a readable message before a playbook
+# set-domain.yml, set-registry.yml, set-node.yml, assign.yml, admins.yml,
+# set-smtp.yml, set-tls.yml) validate and write; the checks here exist to give a readable message before a playbook
 # run, and the playbook stays the authority.
 set -euo pipefail
 
@@ -59,8 +64,10 @@ usage: scn-config
        scn-config nonint setup
        scn-config nonint show-domain
        scn-config nonint set-domain <domain>
-       scn-config nonint show-tls
-       scn-config nonint set-tls <acme|none> [email]
+       scn-config nonint show-registry
+       scn-config nonint set-registry <client_key|service_did> <value>
+       scn-config nonint show-proxmox-host
+       scn-config nonint set-proxmox-host <name>
        scn-config nonint show-ctid
        scn-config nonint assign-ctid <service> <ctid> [--reassign]
        scn-config nonint assign-ctid-defaults
@@ -71,6 +78,8 @@ usage: scn-config
        scn-config nonint show-smtp
        scn-config nonint set-smtp        (URL on stdin)
        scn-config nonint clear-smtp
+       scn-config nonint show-tls
+       scn-config nonint set-tls <acme|none> [email]
 EOF
   exit 64
 }
@@ -84,6 +93,7 @@ RESERVED=" "   # space-delimited, space-padded for `case` membership tests
 # TLS_MODE is not "no TLS": the proxy role's default (acme) applies, and a role
 # default is not in the inventory to be read.
 CLUSTER_DOMAIN="" TLS_MODE="" TLS_EMAIL=""
+REGISTRY_SERVICE_DID="" REGISTRY_CLIENT_KEY="" PROXMOX_HOST=""
 
 # Read the merged inventory (blueprint + runtime local.yml) in one call. python3
 # rather than jq: Ansible guarantees python on the control node, while jq only
@@ -100,6 +110,7 @@ load_state() {
   rm -f "$err"
   SVC_NAME=() SVC_CTID=() SVC_DEFAULT=() RESERVED=" "
   CLUSTER_DOMAIN="" TLS_MODE="" TLS_EMAIL=""
+  REGISTRY_SERVICE_DID="" REGISTRY_CLIENT_KEY="" PROXMOX_HOST=""
   while read -r kind name ctid default; do
     case "$kind" in
       reserved) RESERVED="${RESERVED}${name} " ;;
@@ -108,6 +119,9 @@ load_state() {
           cluster_domain) CLUSTER_DOMAIN="$ctid" ;;
           caddy_tls_mode) TLS_MODE="$ctid" ;;
           caddy_acme_email) TLS_EMAIL="$ctid" ;;
+          scn_service_did) REGISTRY_SERVICE_DID="$ctid" ;;
+          console_client_key) REGISTRY_CLIENT_KEY="$ctid" ;;
+          proxmox_node_name) PROXMOX_HOST="$ctid" ;;
         esac
         ;;
       svc)
@@ -129,7 +143,8 @@ rows.sort(key=lambda r: (r[1] or r[2] or 1000, r[0]))
 for r in reserved:
     print("reserved", r)
 # all.vars reaches every host, so any host that carries the key has the value.
-for key in ("cluster_domain", "caddy_tls_mode", "caddy_acme_email"):
+for key in ("cluster_domain", "caddy_tls_mode", "caddy_acme_email",
+            "scn_service_did", "console_client_key", "proxmox_node_name"):
     value = next((hv[key] for hv in hostvars.values() if hv.get(key)), None)
     if value:
         print("var", key, value)
@@ -218,8 +233,18 @@ run_setup() {
   echo "scn-config: the control node is configured and the API token authenticates."
 }
 
-# --- Cluster domain and TLS ---------------------------------------------------
+# --- Cluster settings and TLS -------------------------------------------------
 set_domain() { ansible-playbook set-domain.yml -e "domain=$1"; }
+
+# set_registry <client_key|service_did> <value> — an empty value records none.
+# The inventory variables keep their older names (console_client_key,
+# scn_service_did): live clusters already hold them.
+set_registry() { ansible-playbook set-registry.yml -e "key=$1" -e "value=$2"; }
+
+# The operator sees "Proxmox host name"; the playbook and the variable it
+# writes (proxmox_node_name) use Proxmox's own word for it, node.
+set_proxmox_host() { ansible-playbook set-node.yml -e "node=$1"; }
+PROXMOX_HOST_RE='^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$'
 
 # set_tls <mode> [email] — the email is always passed, empty included: that is
 # how set-tls.yml knows to drop a contact recorded earlier.
@@ -262,6 +287,27 @@ nonint_show_domain() {
 nonint_set_domain() {
   [ $# -eq 1 ] || usage
   set_domain "$1"
+}
+
+nonint_show_registry() {
+  load_state
+  echo "registry service DID: ${REGISTRY_SERVICE_DID:-not set}"
+  echo "registry client key:  ${REGISTRY_CLIENT_KEY:-not set}"
+}
+
+nonint_set_registry() {
+  [ $# -eq 2 ] || usage
+  set_registry "$1" "$2"
+}
+
+nonint_show_proxmox_host() {
+  load_state
+  echo "Proxmox host name: ${PROXMOX_HOST:-not set}"
+}
+
+nonint_set_proxmox_host() {
+  [ $# -eq 1 ] || usage
+  set_proxmox_host "$1"
 }
 
 nonint_show_tls() {
@@ -373,7 +419,7 @@ if not report["roster_exists"]:
     print("note\tNo roster has been written yet: the service account is the only admin.")
 service = report.get("service", {})
 if not service.get("configured"):
-    print("note\tNo service DID is recorded (zai-set-registry service_did).")
+    print("note\tNo service DID is recorded: set one under Cluster Settings.")
 elif not service.get("present"):
     print("note\tThe service account is not signed in to Corliss, so admins cannot be changed until it is.")
 elif not service.get("can_write_registry"):
@@ -698,23 +744,23 @@ It is the first thing to do on a new cluster, and safe to run again."
   read -r -p "Press Enter to return to the menu. " </dev/tty || true
 }
 
-do_domain_menu() {
+settings_domain() {
   local domain text out
   load_state
   domain="$CLUSTER_DOMAIN"
   while true; do
-    domain="$(ask "Set Domain" "The cluster's public base domain, e.g. example.com
+    domain="$(ask "Cluster Settings" "The cluster's public base domain, e.g. example.com
 
 Every public address is built from it: the membership site on the
 domain itself, and chat.<domain>, api.<domain> and the rest beside it." "$domain")" || return 0
     domain="$(tr '[:upper:]' '[:lower:]' <<<"$domain")"
     # A handle and a domain have the same shape.
     [[ "$domain" =~ $HANDLE_RE ]] && break
-    msgbox "Set Domain" "That is not a domain. Enter it bare, like example.com: no
+    msgbox "Cluster Settings" "That is not a domain. Enter it bare, like example.com: no
 https://, no path, no spaces."
   done
   if [ "$domain" = "$CLUSTER_DOMAIN" ]; then
-    msgbox "Set Domain" "The domain is already $domain."
+    msgbox "Cluster Settings" "The domain is already $domain."
     return 0
   fi
 
@@ -731,27 +777,159 @@ keeps the old addresses until it is provisioned again."
   else
     text="Set the cluster's domain to $domain?"
   fi
-  whiptail --backtitle "$BACKTITLE" --title "Set Domain" \
+  whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
     --yes-button Save --no-button Back \
     --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
 
   # TERM=ansi: see the infobox in do_assign_menu.
-  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Set Domain" \
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
     --infobox "Recording the domain…" 8 "$WT_WIDTH"
   if out="$(ANSIBLE_NOCOLOR=1 set_domain "$domain" 2>&1)"; then
     if [ -n "$CLUSTER_DOMAIN" ]; then
-      msgbox "Set Domain" "The domain is now $domain.
+      msgbox "Cluster Settings" "The domain is now $domain.
 
 Provision every service again, under Provision Containers, to move
 them to it."
     else
-      msgbox "Set Domain" "The domain is now $domain."
+      msgbox "Cluster Settings" "The domain is now $domain."
     fi
   else
-    msgbox "Set Domain" "The domain was refused — nothing was written.
+    msgbox "Cluster Settings" "The domain was refused — nothing was written.
 
 $(playbook_problem "$out")"
   fi
+}
+
+# settings_registry <client_key|service_did> — one of the two values that say
+# which membership registry this cluster belongs to.
+settings_registry() {
+  local key="$1" label current value prompt text saved out
+  case "$key" in
+    service_did)
+      label="service DID" current="$REGISTRY_SERVICE_DID"
+      prompt="The DID of the account whose repo holds the cluster's public admin
+roster, e.g. did:plc:…
+
+Corliss and the PDS read who the admins are through it. Leave empty to
+record none: the roster then reads as empty."
+      ;;
+    client_key)
+      label="client key" current="$REGISTRY_CLIENT_KEY"
+      prompt="The membership registry's public HappyView client key, e.g. hvc_…
+
+Corliss sends it with its registry reads. Optional: the cluster works
+without one. Leave empty to record none."
+      ;;
+  esac
+  value="$current"
+  while true; do
+    value="$(ask "Cluster Settings" "$prompt" "$value")" || return 0
+    if [[ "$value" =~ [[:space:]] ]]; then
+      msgbox "Cluster Settings" "The $label cannot contain spaces."
+    elif [ "$key" = service_did ] && [ -n "$value" ] && ! [[ "$value" =~ $DID_RE ]]; then
+      msgbox "Cluster Settings" "That is not a DID. It starts did:plc: or did:web:"
+    else
+      break
+    fi
+  done
+  if [ "$value" = "$current" ]; then
+    msgbox "Cluster Settings" "That is already what is recorded."
+    return 0
+  fi
+
+  if [ -n "$value" ]; then
+    text="Set the registry $label to:
+
+  $value" saved="The registry $label is saved."
+  else
+    text="Remove the recorded registry $label?" saved="The registry $label is removed."
+  fi
+  # The PDS takes its admins from the same roster, each time it is provisioned.
+  [ "$key" = service_did ] && saved="$saved
+
+The PDS reads the roster through it too, on its own next provision."
+  whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+    --yes-button Save --no-button Back \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+    --infobox "Recording the registry $label…" 8 "$WT_WIDTH"
+  if out="$(ANSIBLE_NOCOLOR=1 set_registry "$key" "$value" 2>&1)"; then
+    offer_provision corliss "Cluster Settings" "$saved"
+  else
+    msgbox "Cluster Settings" "The registry $label was refused. Nothing was written.
+
+$(playbook_problem "$out")"
+  fi
+}
+
+# Bootstrap records the host's name from the host itself, so this row is only
+# ever a correction.
+settings_proxmox_host() {
+  local name="$PROXMOX_HOST" text out
+  while true; do
+    name="$(ask "Cluster Settings" "The Proxmox host's own name: what the hostname command prints on it.
+
+Bootstrap records this. Change it only if it is wrong, for example
+after the host was renamed." "$name")" || return 0
+    [[ "$name" =~ $PROXMOX_HOST_RE ]] && break
+    msgbox "Cluster Settings" "That is not a host name. Enter the short name only: letters, digits
+and hyphens, no dots."
+  done
+  if [ "$name" = "$PROXMOX_HOST" ]; then
+    msgbox "Cluster Settings" "The Proxmox host name is already $name."
+    return 0
+  fi
+
+  text="Change the Proxmox host name?
+
+  from  ${PROXMOX_HOST:-(not set)}
+  to    $name
+
+Every container is created through the host with this name. If it is
+not the host's real name, provisioning times out with HTTP 595."
+  whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+    --yes-button Save --no-button Back \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+    --infobox "Recording the Proxmox host name…" 8 "$WT_WIDTH"
+  if out="$(ANSIBLE_NOCOLOR=1 set_proxmox_host "$name" 2>&1)"; then
+    msgbox "Cluster Settings" "The Proxmox host name is now $name.
+
+Provisioning uses it from the next run."
+  else
+    msgbox "Cluster Settings" "The name was refused. Nothing was written.
+
+$(playbook_problem "$out")"
+  fi
+}
+
+# The values that say which cluster this is, one row each with what is
+# recorded. Each row is its own playbook; this only lists them. The Proxmox
+# host name is last because it is the one the operator should not need.
+do_settings_menu() {
+  local choice text
+  while true; do
+    load_state
+    text="What identifies this cluster. Select one to change it."
+    choice="$(whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+      --ok-button Select --cancel-button Back \
+      --menu "$text" "$(box_height "$text" 12)" "$WT_WIDTH" 4 \
+      "Domain" " ${CLUSTER_DOMAIN:-not set}" \
+      "Registry service DID" " ${REGISTRY_SERVICE_DID:-not set}" \
+      "Registry client key" " ${REGISTRY_CLIENT_KEY:-not set}" \
+      "Proxmox host name" " ${PROXMOX_HOST:-not set}" \
+      3>&1 1>&2 2>&3)" || return 0
+    case "$choice" in
+      Domain) settings_domain ;;
+      "Registry service DID") settings_registry service_did ;;
+      "Registry client key") settings_registry client_key ;;
+      "Proxmox host name") settings_proxmox_host ;;
+    esac
+  done
 }
 
 do_tls_menu() {
@@ -1074,12 +1252,13 @@ ask() {
 
 # offer_provision <service> <title> <what changed> — for a change a service
 # reads only when it is provisioned (the PDS: the mail relay, the admin roster;
-# the proxy: the TLS mode): offer to do that now, when the service exists to
+# the proxy: the TLS mode; Corliss: the registry identity): offer to do that now, when the service exists to
 # provision.
 offer_provision() {
   local service="$1" title="$2" i ctid="" text name
   case "$service" in
     pds) name="The PDS" ;;
+    corliss) name="Corliss" ;;
     *) name="The $service" ;;
   esac
   load_state
@@ -1431,21 +1610,21 @@ interactive() {
       --ok-button Select --cancel-button Finish \
       --menu "" 18 "$WT_WIDTH" 9 \
       "1 Control Node Setup" " Configure this node, check the API token" \
-      "2 Set Domain" " The cluster's public base domain" \
-      "3 Set TLS" " How the proxy gets its certificate" \
-      "4 Container Assignment" " Set the CTID per service" \
-      "5 Provision Containers" " Build the assigned services" \
-      "6 Cluster Admins" " Who can approve members and run the PDS" \
-      "7 Set SMTP" " Outbound mail relay" \
+      "2 Cluster Settings" " Domain, membership registry, Proxmox host" \
+      "3 Container Assignment" " Set the CTID per service" \
+      "4 Provision Containers" " Build the assigned services" \
+      "5 Cluster Admins" " Who can approve members and run the PDS" \
+      "6 Set SMTP" " Outbound mail relay" \
+      "7 Set TLS" " How the proxy gets its certificate" \
       3>&1 1>&2 2>&3)" || exit 0
     case "$choice" in
       1\ *) do_setup_menu ;;
-      2\ *) do_domain_menu ;;
-      3\ *) do_tls_menu ;;
-      4\ *) do_assign_menu ;;
-      5\ *) do_provision_menu ;;
-      6\ *) do_admins_menu ;;
-      7\ *) do_smtp_menu ;;
+      2\ *) do_settings_menu ;;
+      3\ *) do_assign_menu ;;
+      4\ *) do_provision_menu ;;
+      5\ *) do_admins_menu ;;
+      6\ *) do_smtp_menu ;;
+      7\ *) do_tls_menu ;;
     esac
   done
 }
@@ -1459,8 +1638,10 @@ case "${1:-}" in
       setup) run_setup ;;
       show-domain) nonint_show_domain ;;
       set-domain) shift; nonint_set_domain "$@" ;;
-      show-tls) nonint_show_tls ;;
-      set-tls) shift; nonint_set_tls "$@" ;;
+      show-registry) nonint_show_registry ;;
+      set-registry) shift; nonint_set_registry "$@" ;;
+      show-proxmox-host) nonint_show_proxmox_host ;;
+      set-proxmox-host) shift; nonint_set_proxmox_host "$@" ;;
       show-ctid) nonint_show_ctid ;;
       assign-ctid) shift; nonint_assign_ctid "$@" ;;
       assign-ctid-defaults) nonint_assign_ctid_defaults ;;
@@ -1471,6 +1652,8 @@ case "${1:-}" in
       show-smtp) nonint_show_smtp ;;
       set-smtp) nonint_set_smtp ;;
       clear-smtp) nonint_clear_smtp ;;
+      show-tls) nonint_show_tls ;;
+      set-tls) shift; nonint_set_tls "$@" ;;
       *) usage ;;
     esac
     ;;

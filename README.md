@@ -36,59 +36,50 @@ itself from this repo.
    off-box — it's also stored on the control node at `/root/.vault_pass`.
 
 3. Enter the control node, configure CT 100 itself, verify the API token, and
-   record this cluster's identity — the public base domain and the registry
-   settings.
+   record this cluster's identity: the public base domain and the membership
+   registry.
 
    ```bash
    pct enter 100
-   scn-config    # the menu; its first three entries, in order:
+   scn-config    # the menu; its first two entries, in order:
                  #   1 Control Node Setup  site.yml, then verify-proxmox.yml
-                 #   2 Set Domain          the cluster's public base domain
-                 #   3 Set TLS             skip it unless something else terminates TLS
-
-   # the membership registry's identity (see below — neither blocks
-   # provisioning, but corliss reads both)
-   zai-set-registry client_key hvc_xxxxx
-   zai-set-registry service_did did:plc:xxxxx
+                 #   2 Cluster Settings    the domain and the membership registry
    ```
-
-   `bootstrap.sh` already recorded the **Proxmox node name** from the host's
-   `hostname`, so there's no node step here; run `zai-set-node <node>` only to
-   correct it (e.g. after renaming the host). Everything else here has no auto-source:
 
    - **Control Node Setup** runs `site.yml` (configure CT 100) and then
      `verify-proxmox.yml` (confirm the API token authenticates), stopping if
      the first fails. Scripted: `scn-config nonint setup`.
-   - **Set Domain** — required before provisioning the proxy; its Caddy
-     routes are built from `cluster_domain`, and every service's public URL
-     (`chat.`, `api.`, `view.`, …) derives from it, so setting it once moves
-     them all together. Scripted: `scn-config nonint set-domain example.com`.
-   - **Set TLS**: how the proxy gets its TLS certificate. Skip it and the
-     cluster is its own edge (`acme`: Caddy obtains and renews Let's Encrypt
-     certs, so public `:80` and `:443` must reach the proxy CT). Choose `none`
-     to stand the proxy up HTTP-only before DNS exists or behind another edge.
+   - **Cluster Settings** lists four values with what is recorded for each:
+     - **Domain**: required before provisioning the proxy. Its Caddy routes
+       are built from `cluster_domain`, and every service's public URL
+       (`chat.`, `api.`, `view.`, …) derives from it, so setting it once moves
+       them all together. Scripted: `scn-config nonint set-domain example.com`.
+     - **Registry service DID**: the account whose repo holds the public admin
+       roster. Provisioning succeeds without it and nobody is an admin, so it
+       is the one to check when admin links don't appear. Scripted:
+       `scn-config nonint set-registry service_did did:plc:…`.
+     - **Registry client key**: the registry's public HappyView client key.
+       Optional. Scripted: `scn-config nonint set-registry client_key hvc_…`.
+       [corliss](docs/roles/corliss.md) reads both registry values.
+     - **Proxmox host name**: `bootstrap.sh` already recorded it from the
+       host's `hostname`. Change it only to correct it, for example after
+       renaming the host.
+
+   All four are stored in git-ignored runtime state
+   ([`inventory/local.yml`](docs/README.md#cluster-settings)), which is what
+   keeps the committed tree free of this cluster's identity.
+
+   Two settings further down the menu matter before you provision:
+
+   - **Set SMTP**: the outbound mail relay. It is a secret, so it is kept out
+     of that file. Set it before provisioning the PDS, or the PDS runs with
+     mail off. See [Outbound email](docs/roles/pds.md#outbound-email-smtp).
+   - **Set TLS**: how the proxy gets its certificate. Skip it and the cluster
+     is its own edge (`acme`: Caddy obtains and renews Let's Encrypt certs, so
+     public `:80` and `:443` must reach the proxy CT). Choose `none` to stand
+     the proxy up HTTP-only before DNS exists or behind another edge.
      Scripted: `scn-config nonint set-tls <mode>`. See
      [TLS modes](docs/roles/proxy.md#tls-modes).
-   - **`zai-set-registry client_key`** — the registry's public, origin-bound
-     HappyView client key, passed to [corliss](docs/roles/corliss.md) for its
-     membership reconciliation reads. Optional and blank is fully working:
-     HappyView dispatches to a Lua script with no client key at all, and it has
-     to stay that way so a cluster rebuilt before this was recorded can still
-     recover its membership.
-   - **`zai-set-registry service_did`** — the SCN service DID whose repo holds
-     the public admin roster, read by corliss to decide who is an admin. Also
-     does *not* fail the run when unset — provisioning succeeds and the roster
-     is simply empty, meaning nobody sees the admin surfaces, so it's the one to
-     check when admin links don't appear.
-
-   Both are stored in git-ignored runtime state
-   ([`inventory/local.yml`](docs/README.md#networking)), which is what keeps the
-   committed tree free of this cluster's identity.
-
-   One more setting is a secret, so it is kept out of that file: the **outbound
-   mail relay**. Set it with `scn-config` (Set SMTP) before provisioning the
-   PDS, or the PDS runs with mail off. See
-   [Outbound email](docs/roles/pds.md#outbound-email-smtp).
 
 4. Build the service containers in two passes: **assign** every service its
    container ID, then **provision** them.
@@ -148,11 +139,9 @@ itself from this repo.
    zai-backup check                     # verify repository integrity
    ```
 
-   The control-node state (Tier 1) is captured automatically. To also pull
-   service-CT data into the same repo (Tier 2), set `postgres_enabled=true` in the
-   config block of [`bin/zai-backup`](bin/zai-backup) once the postgres CT is up
-   (a cluster-wide `pg_dumpall`) and `git pull` on the control node — no replay of
-   `backup.yml` needed.
+   Each run captures the control-node state (Tier 1) and a cluster-wide
+   `pg_dumpall` from the postgres CT (Tier 2). See
+   [Backups](docs/README.md#backups).
 
 6. Bring the bare-metal inference nodes (salmon, orca, …) into the cluster.
    Enrolling records the node in a git-ignored runtime inventory on the control
@@ -210,16 +199,6 @@ Ansible decrypts it automatically via `/root/.vault_pass`. To view or edit:
 ansible-vault edit group_vars/all/vault.yml
 ```
 
-The corliss signing keys (EC P-256/ES256 for ATProto, RSA/RS256 for the OIDC
-id_token) live in a git-ignored `keys/` as PKCS#8 PEM at mode `0600`, and are
-never committed — only the public halves are exposed, served at
-`/.well-known/jwks.json`. In production they're provisioned out-of-band; for
-local development the `generate_keys` management command mints a fresh pair:
-
-```bash
-python manage.py generate_keys   # writes EC + RSA keys to keys/, mode 0600
-```
-
 ## Documentation
 
 Full reference docs live in [`docs/`](docs/README.md) — the bootstrap process,
@@ -240,16 +219,11 @@ architecture, networking, and a note for every role.
   - `bootstrap.sh`: creates CT 100 (the host entry point)
   - `import-github-user.sh`: creates a sudo account on the host from GitHub keys
 - `ansible/`
-  - `site.yml` — configures the control node (CT 100)
-  - `verify-proxmox.yml` — checks the API token authenticates
-  - `provision.yml` — creates the service containers over the API, then configures them
-  - `admins.yml` — shows, adds or removes a cluster admin, or re-applies the roster to Corliss, by running Corliss's own commands on its CT (`scn-config`, Cluster Admins)
-  - `enroll-inference-node.yml` — records a bare-metal inference node in the runtime inventory
-  - `inference.yml` — configures inference nodes (NVIDIA/CUDA + llama-server)
-  - `add-github-user.yml` — creates a human admin account from GitHub keys (CT 100 + inference nodes)
+  - the playbooks, listed in the [Playbooks table](docs/README.md#playbooks)
   - `inventory/` — committed blueprint (`hosts.yml`) + git-ignored runtime roster (`local.yml`)
   - `group_vars/all/` — shared vars (`main.yml`) and the encrypted `vault.yml`
-  - `roles/` — `control_node`, `proxy`, `object_store`, `postgres`, `nvidia_cuda`, `llama_server`, and more as they come online
+  - `roles/`: one per service, each with a note in [`docs/roles/`](docs/roles/)
+- `bin/`: operator commands run on CT 100 (`scn-config`, `zai-backup`, `zai-litellm-key`)
 
 No application source lives here. The control app (ATProto-handle login, OIDC
 for Open WebUI) is [Z-Space-Society/Corliss](https://github.com/Z-Space-Society/Corliss);

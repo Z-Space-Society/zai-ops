@@ -41,7 +41,7 @@ caddy_acme_email: ""
 # public domain to an internal service; the upstream IP is DERIVED from that
 # service's CTID via hostvars (10.1.1.<ctid>), never hardcoded — same convention
 # the inventory uses. The domain derives from cluster_domain (set per cluster with
-# `scn-config`, Set Domain), so the committed route carries no this-cluster facts either.
+# `scn-config`, Cluster Settings), so the committed route carries no this-cluster facts either.
 # The :80 health/redirect site keeps the Caddyfile valid even with no routes.
 #
 # Optional `redirects: [{ from, to, code, skip_if_cookie }]` per entry —

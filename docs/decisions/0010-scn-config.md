@@ -23,11 +23,13 @@ data, and every other service's rendered config still points at the old address.
    nonint <command>` for scripts. It is meant to grow into the single place the
    cluster is configured; today it has seven screens, in the order a new
    cluster needs them: control node setup (`site.yml`, then
-   `verify-proxmox.yml`), the domain (`set-domain.yml`), the proxy's TLS mode
-   (`set-tls.yml`), container assignment,
-   provisioning (a front end to `provision.yml --limit <service>`, run in
-   dependency order), cluster admins (`admins.yml`) and the outbound mail
-   relay (`set-smtp.yml`). `assign.yml` stays underneath as the engine that validates and writes
+   `verify-proxmox.yml`), cluster settings (the domain, the membership
+   registry's identity and the Proxmox host name, each a row over its own
+   playbook: `set-domain.yml`, `set-registry.yml`, `set-node.yml`), container
+   assignment, provisioning (a front end to `provision.yml --limit <service>`,
+   run in dependency order), cluster admins (`admins.yml`), the outbound mail
+   relay (`set-smtp.yml`) and the proxy's TLS mode (`set-tls.yml`), last
+   because the default needs no choice. `assign.yml` stays underneath as the engine that validates and writes
    `inventory/local.yml`.
 2. **The blueprint carries a suggested `default_ctid` per service.** It follows
    the tier convention and is what `scn-config` pre-fills. Nothing else reads
@@ -60,9 +62,11 @@ data, and every other service's rendered config still points at the old address.
 - `whiptail` is a control-node dependency, seeded by `bootstrap.sh` and owned by
   the `control_node` role.
 - The command is named `scn-config` while the other operator commands are still
-  `zai-*`. They are expected to move into its menu over time. `zai-set-domain`
-  and `zai-set-tls` have: both wrappers are deleted, and Set Domain and Set TLS
-  (with `nonint set-domain` / `set-tls`) replace them.
+  `zai-*`. The setters have all moved into its menu and their wrappers are
+  deleted: `zai-set-domain`, `zai-set-registry` and `zai-set-node` are rows of
+  Cluster Settings, and `zai-set-tls` is Set TLS, each with a `nonint` form.
+  `zai-backup` and `zai-litellm-key` stay as commands. They are operations, not
+  settings: nothing is recorded and there is no playbook underneath.
 - There is no supported way to renumber a provisioned service. Telling
   "provisioned" from "only assigned" needs a Proxmox API lookup; with that, the
   menu could later unlock services that have no container yet.

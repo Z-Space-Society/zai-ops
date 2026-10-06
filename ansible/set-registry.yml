@@ -3,15 +3,12 @@
 #
 #   ansible-playbook set-registry.yml -e "key=client_key" -e "value=hvc_xxxxx"
 #
-# (`zai-set-registry <key> <value>`, the operator command in bin/, is sugar over
-# this — no logic lives in the wrapper.)
+# (`scn-config`'s Cluster Settings entry, and `scn-config nonint set-registry
+# <key> <value>`, are the front end; this playbook stays the authority.)
 #
-# Named for the REGISTRY, not the console: this was `set-console.yml` while the
-# manage_console role existed, and both settings were shared with it. That role
-# is gone and corliss is the only consumer left, so the name now says whose
-# identity these are. The VARIABLE names are deliberately unchanged — they are
-# what the live cluster's runtime inventory already holds, and renaming them is
-# a migration rather than an edit.
+# The variable names it writes (console_client_key, scn_service_did) are older
+# than the playbook's own name and stay as they are: live clusters already hold
+# them, so renaming is a migration. See docs/roles/corliss.md, Notes.
 #
 # Why a setter and not group_vars: both are this-cluster IDENTITY (which
 # HappyView client, which registry DID), the same category as cluster_domain and
@@ -50,6 +47,8 @@
     registry_keys:
       client_key: console_client_key
       service_did: scn_service_did
+    # The same shape scn-config checks before it gets here.
+    did_regex: '^did:(plc:[a-z2-7]{24}|web:[A-Za-z0-9.%:-]+)$'
   tasks:
     - name: Require key and value
       ansible.builtin.assert:
@@ -66,6 +65,17 @@
         fail_msg: >-
           '{{ key }}' is not a registry setting — expected one of:
           {{ registry_keys.keys() | join(', ') }}
+
+    # A mistyped DID would be recorded and then read as an empty roster, with
+    # nothing anywhere saying why. Empty is allowed: it records "none". The
+    # client key has no published format to hold it to.
+    - name: Require a service DID to look like one
+      ansible.builtin.assert:
+        that: (value | string | length) == 0 or (value | string) is match(did_regex)
+        fail_msg: >-
+          '{{ value }}' is not a DID. Expected did:plc:… or did:web:…, or an
+          empty value to record none.
+      when: key == 'service_did'
 
     - name: Resolve the inventory variable name
       ansible.builtin.set_fact:

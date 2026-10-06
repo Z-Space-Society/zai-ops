@@ -127,7 +127,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | `corliss_litellm_port` | `4000` | Local mirror of `litellm_port`, not a reach into that role's vars (same convention as `corliss_openwebui_port`). Keep the two in sync. |
 | `corliss_litellm_max_keys_per_member` | `5` | How many API keys one member may hold. LiteLLM enforces no per-user limit, so this cap is ours or there is none. |
 | `corliss_litellm_provisioner_key` | *(file lookup)* | The `proxy_admin` virtual key minted by the [`litellm`](litellm.md) role, read from `/root/.zai-secrets/corliss_litellm_provisioner_key`. |
-| `scn_service_did` | `""` | The SCN service DID whose repo holds the public admin roster; corliss reads it to decide who sees the admin block. **Not** a `corliss_*` var — it's the registry's identity, not corliss's. Recorded once by `zai-set-registry service_did <did>`. Blank is a working state (empty roster, nobody elevated). Its blank default lived in the `manage_console` role until that was deleted; it is defined in this role now, corliss being the only consumer left. |
+| `scn_service_did` | `""` | The SCN service DID whose repo holds the public admin roster; corliss reads it to decide who sees the admin block. **Not** a `corliss_*` var — it's the registry's identity, not corliss's. Recorded with `scn-config` (Cluster Settings), or `scn-config nonint set-registry service_did <did>`. Blank is a working state (empty roster, nobody elevated). |
 | `corliss_membership_registry_url` | `http://{{ hostvars['happyview'].ansible_host }}:3000` | The HappyView instance corliss reads membership back out of, for reconciliation. **Internal, over `vmbr1`** — not the public `view.<domain>` origin, which would route out through the host's NAT, across Cloudflare and back in via the proxy. This is the *recovery* path (it refills an empty cache at boot), so it must not depend on public DNS, Cloudflare and the proxy CT all being up. Derived from the inventory with the same `hostvars[...]` expression the Caddyfile routes with, so the CTID assignment stays the single source; same coupling `CORLISS_PUSH_URL` already accepts, degrading the same way. |
 | `corliss_membership_registry_port` | `3000` | HappyView's listen port, matching the `view.<domain>` entry in `caddy_proxy_hosts`. |
 | `corliss_membership_registry_host` | `view.{{ cluster_domain }}` | The `Host` header corliss presents on that internal call. happyview routes by virtual host and answers **HTTP 421 "Unknown host"** to a request whose Host is a bare `10.1.1.x` — the edge normally preserves the public name on the way through, so going direct means presenting it ourselves. This is the one job the proxy was doing that the bypass has to take over. |
@@ -142,7 +142,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | `corliss_manifest_bucket` | `{{ manifest_bucket }}` | The Garage bucket `/systems/` reads service manifests from (`zai-manifests`). See [`manifest`](manifest.md). |
 | `corliss_manifest_access_key` / `corliss_manifest_secret_key` | `{{ manifest_reader_access_key }}` / `{{ manifest_reader_secret_key }}` | The **read-only** manifest key. No grant on `zai-backups` and no write anywhere, so what Corliss holds cannot read the backups or change a manifest. Rendered in its own env block because the probe block promises no credentials. |
 | `corliss_caddy_health_url` | `http://{{ hostvars['proxy'].ansible_host }}/healthz` | What `/systems/` dials to check [Caddy](proxy.md) — the `:80` health site the Caddyfile serves whether or not TLS is on, sharing that listener with the HTTPS redirect. A full URL rather than an origin, since unlike the three above it names an endpoint Caddy publishes rather than a service root. |
-| `console_client_key` | `""` | The registry's public, origin-bound HappyView client key, passed through for corliss's registry reads. Recorded once by `zai-set-registry client_key <hvc_…>`. **Optional**: verified 2026-08-18 that HappyView dispatches to a Lua script with no session and no client key, so blank does **not** block reconciliation. It must not, or a cluster rebuilt before the key was recorded could not recover its membership. The `console_` prefix outlives the console — renaming it is a runtime-inventory migration, not an edit, so it is deliberately deferred; see [Notes](#notes). |
+| `console_client_key` | `""` | The registry's public, origin-bound HappyView client key, passed through for corliss's registry reads. Recorded with `scn-config` (Cluster Settings), or `scn-config nonint set-registry client_key <hvc_…>`. **Optional**: verified 2026-08-18 that HappyView dispatches to a Lua script with no session and no client key, so blank does **not** block reconciliation. It must not, or a cluster rebuilt before the key was recorded could not recover its membership. The `console_` prefix outlives the console — renaming it is a runtime-inventory migration, not an edit, so it is deliberately deferred; see [Notes](#notes). |
 
 ### Secrets
 
@@ -252,7 +252,7 @@ LiteLLM until deleted by hand, so it is worth pruning when that happens.
   until both are up and its `OPENID_PROVIDER_URL`/`OAUTH_CLIENT_*` are
   pointed at corliss (already wired in `open-webui`'s own defaults/template).
 - **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts` at the
-  apex `{{ cluster_domain }}`; set the domain once with `scn-config` (Set Domain). The
+  apex `{{ cluster_domain }}`; set the domain once with `scn-config` (Cluster Settings). The
   apex needs its own DNS record: a wildcard `*.<domain>` record does **not**
   cover the bare domain.
 - **A CTID assigned for [`sync-relay`](sync_relay.md), [`redis`](redis.md),
@@ -306,8 +306,7 @@ ssh root@10.1.1.<ctid> 'cd /opt/corliss/src && \
   `registry_client_key` and `SCN_SERVICE_DID` → `ADMIN_ROSTER_DID` are worth
   doing together, with a read-old-write-new step in
   [`set-registry.yml`](../../ansible/set-registry.yml). Neither is urgent and
-  neither is behaviour. The *command* was renamed (`zai-set-console` →
-  `zai-set-registry`) because that one touches no deployed state.
+  neither is behaviour.
 
 - **The venv is a `uv sync` of the app's own lockfile, and two env vars hold it
   together.** Corliss is a uv project: `pyproject.toml` pins every direct

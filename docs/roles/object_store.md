@@ -6,7 +6,7 @@ role is named for the *function* so the daemon can change without a rename.
 
 - **Source:** [`ansible/roles/object_store/`](../../ansible/roles/object_store/)
 - **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure play, `hosts: object-store`)
-- **Target:** the `object-store` CT (CT 105), over SSH, internal-only on `vmbr1`
+- **Target:** the `object-store` CT (CT 101), over SSH, internal-only on `vmbr1`
 
 ## Purpose
 
@@ -82,16 +82,16 @@ values are **generated on first run** by the `password`
 lookups in [`group_vars/all/main.yml`](../../ansible/group_vars/all/main.yml) and
 persisted under `/root/.zai-secrets` on CT 100. Re-runs reuse them, so the key
 stays stable across rebuilds (restic keeps its repo). Because the lookup runs on
-the control node, the `object_store` play (CT 105) and the [`backup`](backup.md)
+the control node, the `object_store` play (CT 101) and the [`backup`](backup.md)
 play (CT 100) resolve to the *same* credentials. Nothing to paste into the vault.
 
 ## Verify
 
 ```bash
-ssh root@10.1.1.105 'systemctl is-active garage'
-ssh root@10.1.1.105 'garage status'          # one healthy node
-ssh root@10.1.1.105 'garage bucket list'     # → zai-backups, zai-manifests
-ssh root@10.1.1.105 'garage bucket info zai-manifests'   # writer RW, reader R
+ssh root@10.1.1.101 'systemctl is-active garage'
+ssh root@10.1.1.101 'garage status'          # one healthy node
+ssh root@10.1.1.101 'garage bucket list'     # → zai-backups, zai-manifests
+ssh root@10.1.1.101 'garage bucket info zai-manifests'   # writer RW, reader R
 ```
 
 ## Notes

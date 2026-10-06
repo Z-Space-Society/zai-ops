@@ -3,7 +3,7 @@
 #
 #   ansible-playbook set-domain.yml -e "domain=zai.cascadia.design"
 #
-# (`scn-config`'s Set Domain entry, and `scn-config nonint set-domain <domain>`,
+# (`scn-config`'s Cluster Settings entry, and `scn-config nonint set-domain <domain>`,
 # are the front end; this playbook stays the authority.) From here on the domain is authoritatively
 # cluster_domain for every playbook (e.g. Caddy proxy routes like
 # api.{{ cluster_domain }}), cluster-wide.

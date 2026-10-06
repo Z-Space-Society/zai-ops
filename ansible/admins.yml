@@ -1,0 +1,109 @@
+---
+# Show or change the cluster's admins.
+#
+#   ansible-playbook admins.yml -e admin_action=show
+#   ansible-playbook admins.yml -e admin_action=add    -e who=alice.example.com
+#   ansible-playbook admins.yml -e admin_action=add    -e who=alice.example.com -e admit=true -e tier=level-0
+#   ansible-playbook admins.yml -e admin_action=remove -e who=did:plc:abc2…
+#
+# (`scn-config`, the operator command in bin/, drives this — its Cluster Admins
+# menu and `scn-config nonint show-admins | add-admin | remove-admin`.)
+#
+# Nothing here stores an admin list. The authority is the public roster record
+# in the service account's repo, and only Corliss writes it, so this reaches the
+# corliss CT and runs the app's own commands: `list_admins` to read, and
+# `make_admin` to write (roster entry, is_staff, registry space access — one
+# operation, the same one the button on /manage/ performs). The PDS follows the
+# same roster on its next `provision.yml --limit pds` (tasks/roster.yml).
+#
+# `who` is a handle or a DID. A handle is resolved and verified by Corliss; a
+# DID is taken as given.
+#
+# Admins are members. Adding a non-member is refused unless admit=true, which
+# first grants membership at `tier`, authored by the service account.
+#
+# Targets `hosts: corliss` over SSH, like the role's own migrate task: the thing
+# being changed is live app state, not runtime inventory. `vars_files` loads the
+# corliss role's defaults for the paths below without replaying the role.
+# Because vars_files outranks the inventory, nothing here reads a variable that
+# a cluster sets in local.yml (scn_service_did is one) — Corliss reports a
+# missing service DID or session itself, and its message is passed through.
+
+- name: Show or change the cluster's admins
+  hosts: corliss
+  gather_facts: false
+  vars_files:
+    - roles/corliss/defaults/main.yml
+  vars:
+    handle_regex: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+    did_regex: '^did:(plc:[a-z2-7]{24}|web:[A-Za-z0-9.%:-]+)$'
+    who_is_did: "{{ who | default('') is match(did_regex) }}"
+    # make_admin takes the handle positionally and trusts --did when given, so a
+    # DID is passed as both.
+    manage_args: >-
+      {{ ['list_admins'] if admin_action == 'show' else
+         ['make_admin', who]
+         + (['--did', who] if who_is_did else [])
+         + (['--remove'] if admin_action == 'remove' else [])
+         + (['--admit', '--tier', tier | default('level-0')]
+            if admin_action == 'add' and (admit | default(false) | bool) else []) }}
+  tasks:
+    - name: Require a known action
+      ansible.builtin.assert:
+        that: admin_action | default('') in ['show', 'add', 'remove']
+        fail_msg: "Pass -e admin_action=show, add or remove."
+
+    - name: Require a handle or a DID
+      ansible.builtin.assert:
+        that: who | default('') is match(handle_regex) or who_is_did
+        fail_msg: >-
+          Pass -e who=<handle or DID>, e.g. alice.example.com or did:plc:… —
+          got '{{ who | default('') }}'.
+      when: admin_action != 'show'
+
+    # The command needs the app's whole configuration (service DID, registry,
+    # database), which lives in the unit's EnvironmentFile and nowhere an
+    # interactive shell would find it. Load that file, then exec manage.py. No
+    # secret is in the arguments, so the task is not no_log and a refusal is
+    # readable.
+    - name: Run the Corliss admin command
+      ansible.builtin.command:
+        argv: "{{ [corliss_venv ~ '/bin/python', '-c', env_loader, corliss_env_file] + manage_args }}"
+        chdir: "{{ corliss_src }}"
+      vars:
+        env_loader: |
+          import os, sys
+          for line in open(sys.argv[1]):
+              line = line.strip()
+              if line and not line.startswith("#") and "=" in line:
+                  key, value = line.split("=", 1)
+                  os.environ[key] = value
+          os.execv(sys.executable, [sys.executable, "manage.py", *sys.argv[2:]])
+      register: admin_cmd
+      changed_when: >-
+        admin_action != 'show' and
+        ('promoted' in admin_cmd.stdout or 'removed' in admin_cmd.stdout
+         or 'admitted as' in admin_cmd.stdout)
+      failed_when: false
+
+    # Hand the result to scn-config whether it worked or not: the script shows
+    # Corliss's own words, which name the fix (sign in as the service account,
+    # admit them first, …) better than a paraphrase here could.
+    - name: Write the result for scn-config
+      ansible.builtin.copy:
+        dest: "{{ out }}"
+        content: "{{ {'rc': admin_cmd.rc, 'stdout': admin_cmd.stdout, 'stderr': admin_cmd.stderr} | to_json }}"
+        mode: "0600"
+      delegate_to: localhost
+      changed_when: false
+      when: out is defined
+
+    - name: Show the result
+      ansible.builtin.debug:
+        msg: "{{ (admin_cmd.stdout_lines + admin_cmd.stderr_lines) | select | list }}"
+      when: out is not defined
+
+    - name: Fail if Corliss refused
+      ansible.builtin.fail:
+        msg: "{{ admin_cmd.stderr_lines | select | list | last | default('the command failed') }}"
+      when: admin_cmd.rc != 0

@@ -244,9 +244,10 @@ pds_oauth_jwk_set: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_o
 
 # Outbound mail relay. One SMTP URL per cluster, credentials included, e.g.
 # smtps://user:password@smtp.example.com:465. Which relay a cluster uses is
-# that cluster's choice, so no provider is named here: an operator places the
-# whole URL in /root/.zai-secrets/smtp_url (it carries a password, so it is a
-# secret and not runtime inventory). A missing file reads as empty, and every
+# that cluster's choice, so no provider is named here: `scn-config` (Set SMTP,
+# or `nonint set-smtp`) writes the whole URL to /root/.zai-secrets/smtp_url
+# through set-smtp.yml (it carries a password, so it is a secret and not
+# runtime inventory). A missing file reads as empty, and every
 # consumer then leaves mail off. The only consumer today is the PDS, which
 # enables delivery when both this and pds_email_from_address are set.
 smtp_url: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/smtp_url', errors='ignore') | default('', true) }}"

@@ -1,0 +1,121 @@
+---
+# Read the cluster's public admin roster — the DIDs that are admins right now.
+#
+#   - ansible.builtin.include_tasks: tasks/roster.yml
+#
+# In:  scn_service_did (runtime inventory; may be blank).
+# Out: scn_roster_admin_dids, a list of DIDs.
+#
+# The roster is one public record in the service account's own repo
+# (network.sharedcomputer.admin.list / self), written by Corliss. It is the only
+# authority for who is an admin, so anything else that needs the list derives it
+# from here rather than keeping a copy that could drift. Reading it needs no
+# credentials: com.atproto.repo.getRecord is unauthenticated.
+#
+# Three answers, deliberately different:
+#   - no service DID recorded → an empty list. A cluster with no registry
+#     identity still gets a working PDS.
+#   - the record does not exist yet → the service DID alone. Mirrors Corliss's
+#     bootstrap rule (membership.is_cluster_admin): with no roster anywhere,
+#     the service account is the sole admin so the first one can be written.
+#   - anything else failed (DID unresolvable, PDS down, record malformed) →
+#     FAIL. An empty list rendered over a good one would silently lock every
+#     admin out.
+#
+# Runs on the control node whatever the play targets: it has the route out, and
+# the answer is the same for every host.
+
+- name: Roster | Read the cluster admin roster
+  delegate_to: localhost
+  run_once: true
+  vars:
+    _service_did: "{{ scn_service_did | default('', true) }}"
+    # did:plc resolves at the PLC directory; did:web at the host's own
+    # well-known path (did:web:host → /.well-known/did.json, did:web:host:a:b →
+    # /a/b/did.json).
+    _did_doc_url: >-
+      {%- if _service_did.startswith('did:web:') -%}
+      {%- set parts = (_service_did | regex_replace('^did:web:', '')).split(':') -%}
+      https://{{ parts[0] | urldecode }}/{{ parts[1:] | join('/') if parts | length > 1 else '.well-known' }}/did.json
+      {%- else -%}
+      https://plc.directory/{{ _service_did }}
+      {%- endif -%}
+  block:
+    - name: Roster | No service DID recorded, so no admins
+      ansible.builtin.set_fact:
+        scn_roster_admin_dids: []
+      when: _service_did | length == 0
+
+    - name: Roster | Fetch the service account's roster record
+      when: _service_did | length > 0
+      block:
+        - name: Roster | Resolve the service DID document
+          ansible.builtin.uri:
+            url: "{{ _did_doc_url }}"
+            return_content: true
+            timeout: 15
+          register: _roster_did_doc
+          retries: 2
+          delay: 3
+          until: _roster_did_doc is succeeded
+
+        # `content | from_json`, not `.json`: the PLC directory answers as
+        # application/did+ld+json, which uri does not parse on its own.
+        - name: Roster | Find the service account's PDS
+          ansible.builtin.set_fact:
+            _roster_pds: >-
+              {{ (_roster_did_doc.content | from_json).service | default([])
+                 | selectattr('id', 'in', ['#atproto_pds', _service_did ~ '#atproto_pds'])
+                 | map(attribute='serviceEndpoint') | first | default('') }}
+
+        - name: Roster | Require a PDS endpoint in the DID document
+          ansible.builtin.assert:
+            that: _roster_pds is match('^https?://')
+            quiet: true
+            fail_msg: >-
+              The DID document for {{ _service_did }} names no #atproto_pds
+              service, so the admin roster cannot be read.
+
+        # A PDS reports a missing record as HTTP 400 with RecordNotFound in the
+        # body, so 400 is accepted here and told apart below. Any other status
+        # fails the task.
+        - name: Roster | Fetch the roster record
+          ansible.builtin.uri:
+            url: >-
+              {{ _roster_pds | regex_replace('/+$', '') }}/xrpc/com.atproto.repo.getRecord?repo={{
+              _service_did | urlencode }}&collection=network.sharedcomputer.admin.list&rkey=self
+            return_content: true
+            status_code: [200, 400]
+            timeout: 15
+          register: _roster_record
+          retries: 2
+          delay: 3
+          until: _roster_record is succeeded
+
+        - name: Roster | Refuse an answer that is neither a roster nor "no record"
+          vars:
+            _roster_value: "{{ (_roster_record.content | from_json).value | default({}) }}"
+          ansible.builtin.assert:
+            that: >-
+              (_roster_record.status == 200 and _roster_value.admins is defined
+               and _roster_value.admins is sequence
+               and _roster_value.admins is not string)
+              or (_roster_record.status == 400
+                  and (_roster_record.content | from_json).error | default('') == 'RecordNotFound')
+            quiet: true
+            fail_msg: >-
+              {{ _roster_pds }} did not return a usable admin roster for
+              {{ _service_did }} (HTTP {{ _roster_record.status }}). Refusing to
+              guess: an empty list here would lock every admin out.
+
+        # Current = no removedAt. A departed admin's entry stays in the record
+        # as history, stamped, never deleted.
+        - name: Roster | Take the current admins
+          vars:
+            _roster_value: "{{ (_roster_record.content | from_json).value | default({}) }}"
+          ansible.builtin.set_fact:
+            scn_roster_admin_dids: >-
+              {{ (_roster_value.admins
+                  | selectattr('did', 'defined') | rejectattr('removedAt', 'defined')
+                  | map(attribute='did') | unique | list)
+                 if _roster_record.status == 200 else [_service_did] }}

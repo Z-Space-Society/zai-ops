@@ -255,8 +255,20 @@
 # First run takes ~15–30 min on a cold CT because cargo build --release
 # compiles the full Rust dependency graph. Its public route is pds.<domain>
 # (see the proxy role).
+#
+# Who may administer it is not stored anywhere in zai-ops: the list is read from
+# the cluster's public admin roster each time this play runs, so the PDS and
+# Corliss cannot disagree about who is an admin. set_fact, so it outranks a
+# stale pds_admin_dids left in a runtime inventory from before this was derived.
 - name: Configure the in-house PDS (atproto-pds)
   hosts: pds
   gather_facts: true
+  pre_tasks:
+    - name: Read the cluster admin roster
+      ansible.builtin.include_tasks: tasks/roster.yml
+
+    - name: Make the roster's current admins the PDS's delegated admins
+      ansible.builtin.set_fact:
+        pds_admin_dids: "{{ scn_roster_admin_dids }}"
   roles:
     - pds

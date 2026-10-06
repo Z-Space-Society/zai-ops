@@ -86,11 +86,12 @@ pds_did_plc_url: "plc.directory"
 # signing a service-auth token with the #atproto key of their own DID document.
 # The /admin dashboard is deliberately NOT routed publicly — see docs/roles/pds.md.
 #
-# Empty in the blueprint: who administers a cluster's PDS is that cluster's
-# identity, so it is recorded per cluster with `zai-set-pds-admin` (runtime
-# inventory, git-ignored) and nothing is committed here (ADR-0001). With the
-# list empty the env template leaves PDS_ADMIN_DIDS out and the admin password
-# is the only admin door.
+# Not set here and not recorded anywhere in zai-ops: provision.yml's pds play
+# reads the cluster's public admin roster (tasks/roster.yml) and sets this to
+# its current admins, so the PDS follows the same list Corliss does. This
+# default only applies if the role is used without that play. With the list
+# empty the env template leaves PDS_ADMIN_DIDS out and the admin password is
+# the only admin door.
 pds_admin_dids: []
 
 # Outbound mail. The relay is the cluster's `smtp_url` (group_vars/all/main.yml,

@@ -68,7 +68,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | `pds_service_did` | `did:web:pds.{{ cluster_domain }}` | the PDS's own service identity |
 | `pds_handle_domains` | `[".{{ cluster_domain }}"]` | handle namespace accounts get (SCN: `*.sharedcomputer.network`) |
 | `pds_crawlers` | `["https://bsky.network"]` | who may crawl/announce (TODO(decision): own relay?) |
-| `pds_admin_dids` | `[]` | delegated admins, per cluster: set with `zai-set-pds-admin`, nothing committed. Empty leaves `PDS_ADMIN_DIDS` out of the env file |
+| `pds_admin_dids` | from the roster | delegated admins. Not stored: `provision.yml`'s pds play reads the cluster's public admin roster and uses its current admins. Empty leaves `PDS_ADMIN_DIDS` out of the env file |
 | `pds_email_from_address` | `pds@{{ cluster_domain }}` | the From address the PDS sends as; mail is off until the cluster relay (`smtp_url`) is also set |
 | `pds_delegation_enabled` | `true` | account delegation (`/account/delegation`), default ON (boris). Needs an HTTPS origin (Caddy) and a P-256 OAuth signing key, which the server generates on first boot |
 | `pds_data_dir` | `/var/lib/pds` | accounts.sqlite + repos + blobs; the unit's only `ReadWritePaths` |
@@ -84,8 +84,8 @@ WebSocket upgrades through by default; the PDS trusts exactly one proxy hop
 
 `group_vars/all/main.yml`, all under `/root/.zai-secrets` (Tier-1 backed up).
 The first two are generated on first run with no manual step. The other two
-(and the SMTP URL below) are optional, placed there by an operator: a
-missing file reads as empty and its env line is left out. The PLC key is not
+are optional, placed there by an operator, and the SMTP URL below is set with
+`scn-config`: a missing file reads as empty and its env line is left out. The PLC key is not
 wired yet.
 
 | Secret | For |
@@ -103,9 +103,8 @@ covered by the PDS data backup below, not by the Tier-1 secrets backup.
 ### Outbound email (SMTP)
 
 The PDS sends through the cluster's mail relay: one SMTP URL, credentials
-included (`smtps://user:password@host:465`), read from
-`/root/.zai-secrets/smtp_url`. The blueprint names no provider; which relay a
-cluster uses is its own choice. `pds_email_from_address` is the address it
+included, read from `/root/.zai-secrets/smtp_url`. The blueprint names no
+provider; which relay a cluster uses is its own choice. `pds_email_from_address` is the address it
 sends as (default `pds@<domain>`).
 
 Both must be set for delivery. With the relay unset the server logs each
@@ -114,8 +113,19 @@ but nothing that mails a code works: password reset, email confirmation, and
 the token an account needs to sign a PLC operation (changing its identity, or
 migrating away).
 
-**Gap:** there is no committed setter for `smtp_url` yet, so an operator
-creates that file by hand. It is planned as a `scn-config` menu entry.
+Set it with `scn-config`'s **Set SMTP** entry, which asks for the host, port,
+username, password and how the relay does TLS, then offers to provision `pds`
+so the change takes effect. Scripted: `scn-config nonint set-smtp` with the URL
+on stdin, `show-smtp`, `clear-smtp`. The engine is
+[`set-smtp.yml`](../README.md#playbooks).
+
+The server parses the URL with `lettre`, which fixes two things:
+
+- **TLS is in the URL.** `smtps://host:465` is implicit TLS;
+  `smtp://host:587?tls=required` is STARTTLS. A bare `smtp://` with no `tls`
+  parameter is unencrypted, password included, so `set-smtp.yml` refuses it.
+- **Credentials are percent-decoded.** A username that is an email address is
+  stored as `user%40example.com`; the menu encodes both fields for you.
 
 ## Dependencies
 
@@ -142,9 +152,25 @@ publicly (deliberately absent from `caddy_proxy_hosts`). Staff operate them
 over vmbr1 — from CT 100, `ssh pds` then curl `127.0.0.1:3000/xrpc/…`, or the
 `atproto-pds-admin` binary on the CT — and administration by delegated DIDs
 (`PDS_ADMIN_DIDS`) is the sanctioned door. Reconsider exposing a public admin
-route only under explicit review. `zai-set-pds-admin <did:plc:…>` records the
-admin list in the runtime inventory (replaces wholesale; comma-separate for
-several).
+route only under explicit review. 
+
+**Who the delegated admins are is not a zai-ops setting.** Each time the pds
+play runs, [`tasks/roster.yml`](../../ansible/tasks/roster.yml) reads the
+cluster's public admin roster (the `network.sharedcomputer.admin.list` record
+in the `scn_service_did` account's repo, written by
+[Corliss](corliss.md)) and renders its current admins as `PDS_ADMIN_DIDS`. So
+the PDS and Corliss follow one list:
+
+- **No roster record yet:** the service account alone, the same bootstrap rule
+  Corliss applies.
+- **No `scn_service_did` recorded:** no delegated admins; the admin password
+  is the only door.
+- **The roster cannot be read:** the play fails before touching the PDS. It
+  never renders an empty list over a good one.
+
+An admin appointed in Corliss reaches the PDS on its next
+`provision.yml --limit pds`. `scn-config`'s Cluster Admins entry offers to run
+that after each add or remove.
 
 ## Backup
 
@@ -178,4 +204,4 @@ the pds CT (snapshot `/var/lib/pds` directly) or a checkpoint-then-tar.
   identities it issues). Both are DR-critical.
 - Downstream: when `zai-pds` operator commands are warranted (invites, account
   inspect), add a `bin/zai-pds` wrapper over `atproto-pds-admin` like
-  `zai-litellm-key`/`zai-make-admin`.
+  `zai-litellm-key`.

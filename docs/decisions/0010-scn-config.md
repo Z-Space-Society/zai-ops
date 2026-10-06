@@ -21,7 +21,10 @@ data, and every other service's rendered config still points at the old address.
 1. **`scn-config` replaces `zai-assign`.** It is one operator command in `bin/`,
    patterned on `raspi-config`: a whiptail menu when run bare, and `scn-config
    nonint <command>` for scripts. It is meant to grow into the single place the
-   cluster is configured; today it has four screens: container assignment,
+   cluster is configured; today it has seven screens, in the order a new
+   cluster needs them: control node setup (`site.yml`, then
+   `verify-proxmox.yml`), the domain (`set-domain.yml`), the proxy's TLS mode
+   (`set-tls.yml`), container assignment,
    provisioning (a front end to `provision.yml --limit <service>`, run in
    dependency order), cluster admins (`admins.yml`) and the outbound mail
    relay (`set-smtp.yml`). `assign.yml` stays underneath as the engine that validates and writes
@@ -57,7 +60,9 @@ data, and every other service's rendered config still points at the old address.
 - `whiptail` is a control-node dependency, seeded by `bootstrap.sh` and owned by
   the `control_node` role.
 - The command is named `scn-config` while the other operator commands are still
-  `zai-*`. They are expected to move into its menu over time.
+  `zai-*`. They are expected to move into its menu over time. `zai-set-domain`
+  and `zai-set-tls` have: both wrappers are deleted, and Set Domain and Set TLS
+  (with `nonint set-domain` / `set-tls`) replace them.
 - There is no supported way to renumber a provisioned service. Telling
   "provisioned" from "only assigned" needs a Proxmox API lookup; with that, the
   menu could later unlock services that have no container yet.

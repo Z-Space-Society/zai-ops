@@ -298,7 +298,7 @@ generate, and the source of the hard provisioning dependency below.
   [the trade](redis.md#the-trade-this-role-makes-stated-deliberately) before
   touching either side.
 - **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts`
-  (`chat.{{ cluster_domain }}`); set the domain once with `zai-set-domain`.
+  (`chat.{{ cluster_domain }}`); set the domain once with `scn-config` (Set Domain).
 
 ## Verify
 

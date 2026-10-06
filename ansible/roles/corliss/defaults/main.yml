@@ -485,7 +485,7 @@ corliss_oidc_backchannel_logout_uri: "http://{{ hostvars['open-webui'].ansible_h
 
 # The other cluster surfaces corliss links out to. All three derive from
 # cluster_domain exactly like corliss_url above — just different subdomains, so
-# a `zai-set-domain` moves every link at once and none of them can drift. Each
+# a domain change (`scn-config`, Set Domain) moves every link at once and none of them can drift. Each
 # is the SAME public origin the corresponding Caddy route already serves
 # (caddy_proxy_hosts), reached through the edge rather than CT-to-CT, because
 # these are hrefs a member's browser follows, not service-to-service calls.

@@ -11,7 +11,7 @@ caddy_key_path: /etc/caddy/cloudflare-origin.key
 
 # How this edge gets its certificate. Which mode is right depends on what sits in
 # front of the proxy CT, and that is a fact about the deployment, not the role,
-# so it is recorded per cluster with `zai-set-tls` (set-tls.yml writes it to the
+# so it is recorded per cluster with `scn-config`, Set TLS (set-tls.yml writes it to the
 # runtime inventory, inventory/local.yml):
 #
 #   origin_ca  Cloudflare PROXIES the domain (orange cloud) and runs Full (strict)
@@ -28,12 +28,12 @@ caddy_key_path: /etc/caddy/cloudflare-origin.key
 #
 # acme is the default, so a cluster that never runs the setter is its own edge.
 # That is the shape new clusters take (staging, COAI replication), and the
-# direction is off Cloudflare. origin_ca and none each need `zai-set-tls`.
+# direction is off Cloudflare. origin_ca and none each need `scn-config` (Set TLS).
 #
 # This deliberately reverses #10/#11, which inferred the mode from the vault
 # (origin_ca when cloudflare_origin_cert was defined, none otherwise). That made
 # the mode a side effect of what the vault held, and left acme no way to persist.
-# A cluster that relied on the inference must run `zai-set-tls` before its next
+# A cluster that relied on the inference must run `scn-config` (Set TLS) before its next
 # proxy replay; tasks/main.yml fails the run when a vault cert suggests that step
 # was skipped.
 caddy_tls_mode: acme
@@ -53,7 +53,7 @@ caddy_acme_email: ""
 # public domain to an internal service; the upstream IP is DERIVED from that
 # service's CTID via hostvars (10.1.1.<ctid>), never hardcoded — same convention
 # the inventory uses. The domain derives from cluster_domain (set per cluster with
-# `zai-set-domain`), so the committed route carries no this-cluster facts either.
+# `scn-config`, Set Domain), so the committed route carries no this-cluster facts either.
 # The :80 health/redirect site keeps the Caddyfile valid even with no routes.
 #
 # Optional `redirects: [{ from, to, code, skip_if_cookie }]` per entry —

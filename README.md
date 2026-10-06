@@ -41,11 +41,10 @@ itself from this repo.
 
    ```bash
    pct enter 100
-   cd /opt/zai-ops/ansible
-   ansible-playbook site.yml             # configure the control node
-   ansible-playbook verify-proxmox.yml   # confirm the API token authenticates
-   zai-set-domain example.com            # the cluster's public base domain
-   zai-set-tls origin_ca                 # only if Cloudflare proxies the domain (acme is the default)
+   scn-config    # the menu; its first three entries, in order:
+                 #   1 Control Node Setup  site.yml, then verify-proxmox.yml
+                 #   2 Set Domain          the cluster's public base domain
+                 #   3 Set TLS             skip it unless something else terminates TLS
 
    # the membership registry's identity (see below — neither blocks
    # provisioning, but corliss reads both)
@@ -55,18 +54,22 @@ itself from this repo.
 
    `bootstrap.sh` already recorded the **Proxmox node name** from the host's
    `hostname`, so there's no node step here; run `zai-set-node <node>` only to
-   correct it (e.g. after renaming the host). Everything else here has no
-   auto-source:
+   correct it (e.g. after renaming the host). Everything else here has no auto-source:
 
-   - **`zai-set-domain`** — required before provisioning the proxy; its Caddy
+   - **Control Node Setup** runs `site.yml` (configure CT 100) and then
+     `verify-proxmox.yml` (confirm the API token authenticates), stopping if
+     the first fails. Scripted: `scn-config nonint setup`.
+   - **Set Domain** — required before provisioning the proxy; its Caddy
      routes are built from `cluster_domain`, and every service's public URL
      (`chat.`, `api.`, `view.`, …) derives from it, so setting it once moves
-     them all together.
-   - **`zai-set-tls`**: how the proxy gets its TLS certificate. Skip it and the
-     cluster is its own edge (`acme`: Caddy obtains Let's Encrypt certs, so
-     public `:80` must reach the proxy CT). Run `zai-set-tls origin_ca` if
-     Cloudflare proxies the domain, or `zai-set-tls none` to stand the proxy up
-     HTTP-only before DNS exists. See [TLS modes](docs/roles/proxy.md#tls-modes).
+     them all together. Scripted: `scn-config nonint set-domain example.com`.
+   - **Set TLS**: how the proxy gets its TLS certificate. Skip it and the
+     cluster is its own edge (`acme`: Caddy obtains and renews Let's Encrypt
+     certs, so public `:80` must reach the proxy CT). Choose `none` to stand
+     the proxy up HTTP-only before DNS exists or behind another edge, or
+     `origin_ca` if Cloudflare proxies the domain. Scripted:
+     `scn-config nonint set-tls <mode>`. See
+     [TLS modes](docs/roles/proxy.md#tls-modes).
    - **`zai-set-registry client_key`** — the registry's public, origin-bound
      HappyView client key, passed to [corliss](docs/roles/corliss.md) for its
      membership reconciliation reads. Optional and blank is fully working:
@@ -92,7 +95,7 @@ itself from this repo.
    container ID, then **provision** them.
 
    ```bash
-   scn-config    # menu: accept the defaults (or untick and renumber), then Assign
+   scn-config    # Container Assignment: accept the defaults (or untick and renumber), then Assign
    ```
 
    Assigning only records numbers in git-ignored runtime state; nothing is
@@ -112,6 +115,7 @@ itself from this repo.
    first failure. By hand:
 
    ```bash
+   cd /opt/zai-ops/ansible
    # provision each — create over the API, configure over SSH.
    #    object store first: it's the restic backend the backup job writes to.
    #    postgres before happyview/litellm/sync-relay/corliss/open-webui —

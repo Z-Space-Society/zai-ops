@@ -13,7 +13,7 @@
 # cluster_domain — the cluster's public base domain (e.g. zai.cascadia.design),
 # consumed by Caddy proxy routes like api.{{ cluster_domain }}. Deliberately NOT
 # set here: like the service CTIDs, it's per-cluster runtime data, not committed
-# identity. Set it with `zai-set-domain <domain>`, which records it in the
+# identity. Set it with `scn-config nonint set-domain <domain>`, which records it in the
 # git-ignored runtime inventory (inventory/local.yml) under `all: vars:`. Leaving
 # it out of the committed tree keeps the blueprint generic (ADR-0001).
 

@@ -84,11 +84,14 @@ After it finishes, continue inside the control node:
 
 ```bash
 pct enter 100
+scn-config                                      # work down the menu:
+                                                #   1 Control Node Setup    site.yml, then verify-proxmox.yml
+                                                #   2 Set Domain            the public base domain
+                                                #   3 Set TLS               only if not acme, the default
+                                                #   4 Container Assignment  each service its CTID
+                                                #   5 Provision Containers  create + configure
 cd /opt/zai-ops/ansible
-ansible-playbook site.yml                       # configure the control node
-ansible-playbook verify-proxmox.yml             # confirm the API token
-scn-config                                      # assign each service its CTID
-ansible-playbook provision.yml --limit proxy    # create + configure proxy
+ansible-playbook provision.yml --limit proxy    # or provision one by hand
 ```
 
 ---
@@ -191,8 +194,8 @@ inventory is loaded as a directory, so that file merges with the committed
 | Runtime fact | Written by |
 | ------------ | ---------- |
 | Service CTIDs | `scn-config` ([Service CTID assignment](#service-ctid-assignment)) |
-| `cluster_domain` | `zai-set-domain` ([Cluster domain](#cluster-domain)) |
-| `caddy_tls_mode` | `zai-set-tls` ([Cluster TLS mode](#cluster-tls-mode)) |
+| `cluster_domain` | `scn-config`, Set Domain ([Cluster domain](#cluster-domain)) |
+| `caddy_tls_mode` | `scn-config`, Set TLS ([Cluster TLS mode](#cluster-tls-mode)) |
 | `proxmox_node_name` | `bootstrap.sh` (from the host's `hostname`), `zai-set-node` |
 | Membership-registry identity | `zai-set-registry` |
 | Inference-node roster | [`enroll-inference-node.yml`](#inference-nodes) |
@@ -255,33 +258,42 @@ anything, so no run can stomp a container the cluster didn't create.
 ### Cluster domain
 
 The cluster's public base domain is the same category of data — per-cluster, not
-committed identity — so it's set the same way, with the `zai-set-domain` operator
-command:
+committed identity — so it's set the same way, with `scn-config`'s **Set
+Domain** entry, or scripted:
 
 ```bash
-zai-set-domain zai.cascadia.design    # cluster_domain, cluster-wide
+scn-config nonint show-domain                       # what is recorded
+scn-config nonint set-domain zai.cascadia.design    # cluster_domain, cluster-wide
 ```
 
-`zai-set-domain` is thin sugar over [`set-domain.yml`](#playbooks). The playbook
+Both are a front end to [`set-domain.yml`](#playbooks). The playbook
 validates the value is a plausible lowercase FQDN, then **read-modify-writes** the
 same `inventory/local.yml` into `all.vars.cluster_domain` — so the CTID assignments
 and inference roster sharing the file survive. Re-recording the current value is an
 idempotent no-op. From then on `cluster_domain` resolves for every playbook;
 later proxy routes build on it (e.g. `api.{{ cluster_domain }}`).
 
+Changing a recorded domain changes nothing that is running: each service
+renders its public URLs when it is provisioned, so every provisioned service
+keeps the old addresses until it is provisioned again. The menu says so before
+it saves.
+
 ### Cluster TLS mode
 
 How the [`proxy`](roles/proxy.md) edge gets its certificate depends on what sits
-in front of it, so it is per-cluster data too, set with `zai-set-tls`:
+in front of it, so it is per-cluster data too, set with `scn-config`'s **Set
+TLS** entry, or scripted:
 
 ```bash
-zai-set-tls origin_ca                 # Cloudflare proxies the domain (needs the vault cert/key)
-zai-set-tls none                      # external edge in front, or pre-DNS smoke test
-zai-set-tls acme ops@example.org      # explicit acme, optional Let's Encrypt contact
+scn-config nonint show-tls                          # what is recorded, or the default
+scn-config nonint set-tls acme ops@example.org      # explicit acme, optional Let's Encrypt contact
+scn-config nonint set-tls none                      # external edge in front, or pre-DNS smoke test
+scn-config nonint set-tls origin_ca                 # Cloudflare proxies the domain (needs the vault cert/key)
 ```
 
-`acme` is the role default, so a cluster that never runs it is its own edge and
-Caddy obtains Let's Encrypt certs. `zai-set-tls` is thin sugar over
+`acme` is the role default, so a cluster that never sets it is its own edge and
+Caddy obtains and renews Let's Encrypt certs. The menu offers to provision the
+proxy once a mode is saved. Both are a front end to
 [`set-tls.yml`](#playbooks). The playbook validates that the mode is one of the
 three, that an email comes only with `acme`, and that `origin_ca` has
 `cloudflare_origin_cert` and `cloudflare_origin_key` in the vault. It then
@@ -339,11 +351,11 @@ later; the repo bakes in neither.
 
 | Playbook              | Runs on        | Purpose                                              |
 | --------------------- | -------------- | --------------------------------------------------- |
-| `site.yml`            | CT 100 (local) | Configure the control node (applies `control_node`) |
-| `verify-proxmox.yml`  | CT 100 (local) | Read-only check that the API token authenticates    |
+| `site.yml`            | CT 100 (local) | Configure the control node (applies `control_node`). Run by `scn-config`'s Control Node Setup |
+| `verify-proxmox.yml`  | CT 100 (local) | Read-only check that the API token authenticates. Run by Control Node Setup, after `site.yml` |
 | `assign.yml`          | CT 100 (local) | Record service → CTID assignments in runtime inventory (the `scn-config` engine) |
-| `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the `zai-set-domain` engine) |
-| `set-tls.yml`         | CT 100 (local) | Record the proxy's TLS mode, and the acme contact email, in runtime inventory (the `zai-set-tls` engine) |
+| `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the engine behind `scn-config`'s Set Domain) |
+| `set-tls.yml`         | CT 100 (local) | Record the proxy's TLS mode, and the acme contact email, in runtime inventory (the engine behind `scn-config`'s Set TLS) |
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox node name in runtime inventory (the `zai-set-node` engine; `bootstrap.sh` calls it automatically) |
 | `set-registry.yml`    | CT 100 (local) | Record the membership registry's per-cluster identity in runtime inventory (the `zai-set-registry` engine) |
 | `set-smtp.yml`        | CT 100 (local) | Set, clear or show the cluster's outbound mail relay in `/root/.zai-secrets/smtp_url` (the engine behind `scn-config`'s Set SMTP). The URL is taken from the environment, never an argument |
@@ -375,10 +387,8 @@ PATH when the control node is configured. The convention:
 
 | Command | Does | Backed by |
 | ------- | ---- | --------- |
-| `scn-config` | Menu-driven cluster configuration: assign each service its CTID ([Service CTID assignment](#service-ctid-assignment)), provision the assigned services in dependency order, manage the cluster's admins, and set the outbound mail relay | [`assign.yml`](#playbooks), [`provision.yml`](#playbooks), [`admins.yml`](#playbooks), [`set-smtp.yml`](#playbooks) |
-| `scn-config nonint <command>` | The same, scripted: `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults`; `show-admins`, `add-admin <handle-or-did> [--admit] [--tier T]`, `remove-admin <handle-or-did>`, `apply-admins [corliss] [pds]` (gives the roster as it stands to everything that keeps a copy; all of them when none is named); `show-smtp`, `set-smtp` (URL on stdin), `clear-smtp` | the same playbooks |
-| `zai-set-domain <domain>` | Record the cluster's public base domain | [`set-domain.yml`](#playbooks) |
-| `zai-set-tls <mode> [email]` | Record how the proxy gets its certificate: `acme` (the default), `origin_ca` or `none`. See [Cluster TLS mode](#cluster-tls-mode) | [`set-tls.yml`](#playbooks) |
+| `scn-config` | Menu-driven cluster configuration, in the order a new cluster needs it: configure the control node and check the API token, set the [domain](#cluster-domain) and the [TLS mode](#cluster-tls-mode), assign each service its CTID ([Service CTID assignment](#service-ctid-assignment)), provision the assigned services in dependency order, manage the cluster's admins, and set the outbound mail relay | [`assign.yml`](#playbooks), [`provision.yml`](#playbooks), [`admins.yml`](#playbooks), [`set-smtp.yml`](#playbooks), and `site.yml`, `verify-proxmox.yml`, `set-domain.yml`, `set-tls.yml` |
+| `scn-config nonint <command>` | The same, scripted: `setup`; `show-domain`, `set-domain <domain>`; `show-tls`, `set-tls <acme\|none\|origin_ca> [email]`; `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults`; `show-admins`, `add-admin <handle-or-did> [--admit] [--tier T]`, `remove-admin <handle-or-did>`, `apply-admins [corliss] [pds]` (gives the roster as it stands to everything that keeps a copy; all of them when none is named); `show-smtp`, `set-smtp` (URL on stdin), `clear-smtp` | the same playbooks |
 | `zai-set-node <node>` | Record the Proxmox node name (bootstrap does this automatically) | [`set-node.yml`](#playbooks) |
 | `zai-set-registry <key> <value>` | Record a membership-registry identity (`client_key`, `service_did`), read by [corliss](roles/corliss.md) | [`set-registry.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |

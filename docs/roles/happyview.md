@@ -122,7 +122,7 @@ on CT 100 (same posture as all other cluster secrets):
   `--limit happyview` run still needs postgres already up.
 - **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts`
   (`view.{{ cluster_domain }}`); re-run the proxy play after adding the route or set
-  the domain once with `zai-set-domain`.
+  the domain once with `scn-config` (Set Domain).
 
 ## Verify
 

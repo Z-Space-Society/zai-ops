@@ -2,6 +2,13 @@
 # scn-config — the cluster's configuration tool, patterned on raspi-config.
 #
 #   scn-config                                   # the menu
+#   scn-config nonint setup                      # configure this node, then check
+#                                                #   the Proxmox API token
+#   scn-config nonint show-domain                # the cluster's public base domain
+#   scn-config nonint set-domain example.com
+#   scn-config nonint show-tls                   # how the proxy gets its certificate
+#   scn-config nonint set-tls acme ops@example.org   # acme (the default, contact
+#                                                #   optional), none or origin_ca
 #   scn-config nonint show-ctid                  # service / CTID / default table
 #   scn-config nonint assign-ctid proxy 110      # assign one service
 #   scn-config nonint assign-ctid-defaults       # assign every unassigned service
@@ -19,8 +26,9 @@
 # /etc/profile.d/zai-ops.sh) and runs in place — the script you run is always the
 # one in git, no installed copy to drift.
 #
-# This is the front end only. The playbooks (assign.yml, admins.yml,
-# set-smtp.yml) validate and write; the checks here exist to give a readable message before a playbook
+# This is the front end only. The playbooks (site.yml, verify-proxmox.yml,
+# set-domain.yml, set-tls.yml, assign.yml, admins.yml, set-smtp.yml) validate
+# and write; the checks here exist to give a readable message before a playbook
 # run, and the playbook stays the authority.
 set -euo pipefail
 
@@ -48,6 +56,11 @@ die() { echo "scn-config: $*" >&2; exit 1; }
 usage() {
   cat >&2 <<'EOF'
 usage: scn-config
+       scn-config nonint setup
+       scn-config nonint show-domain
+       scn-config nonint set-domain <domain>
+       scn-config nonint show-tls
+       scn-config nonint set-tls <acme|none|origin_ca> [email]
        scn-config nonint show-ctid
        scn-config nonint assign-ctid <service> <ctid> [--reassign]
        scn-config nonint assign-ctid-defaults
@@ -67,6 +80,10 @@ EOF
 # else default). SVC_CTID / SVC_DEFAULT hold "" when there is none.
 SVC_NAME=() SVC_CTID=() SVC_DEFAULT=()
 RESERVED=" "   # space-delimited, space-padded for `case` membership tests
+# What local.yml records under all.vars, "" when it records nothing. An empty
+# TLS_MODE is not "no TLS": the proxy role's default (acme) applies, and a role
+# default is not in the inventory to be read.
+CLUSTER_DOMAIN="" TLS_MODE="" TLS_EMAIL=""
 
 # Read the merged inventory (blueprint + runtime local.yml) in one call. python3
 # rather than jq: Ansible guarantees python on the control node, while jq only
@@ -82,9 +99,17 @@ load_state() {
   fi
   rm -f "$err"
   SVC_NAME=() SVC_CTID=() SVC_DEFAULT=() RESERVED=" "
+  CLUSTER_DOMAIN="" TLS_MODE="" TLS_EMAIL=""
   while read -r kind name ctid default; do
     case "$kind" in
       reserved) RESERVED="${RESERVED}${name} " ;;
+      var)
+        case "$name" in
+          cluster_domain) CLUSTER_DOMAIN="$ctid" ;;
+          caddy_tls_mode) TLS_MODE="$ctid" ;;
+          caddy_acme_email) TLS_EMAIL="$ctid" ;;
+        esac
+        ;;
       svc)
         SVC_NAME+=("$name")
         SVC_CTID+=("${ctid#-}")
@@ -103,6 +128,11 @@ for name in inv.get("service_containers", {}).get("hosts", []):
 rows.sort(key=lambda r: (r[1] or r[2] or 1000, r[0]))
 for r in reserved:
     print("reserved", r)
+# all.vars reaches every host, so any host that carries the key has the value.
+for key in ("cluster_domain", "caddy_tls_mode", "caddy_acme_email"):
+    value = next((hv[key] for hv in hostvars.values() if hv.get(key)), None)
+    if value:
+        print("var", key, value)
 for name, ctid, default in rows:
     print("svc", name, ctid or "-", default or "-")
 ' <<<"$json")
@@ -165,7 +195,83 @@ run_assign() {
   ansible-playbook assign.yml -e "$(assignments_json)" "$@"
 }
 
+# --- Control node setup -------------------------------------------------------
+# The first thing done on every cluster: configure this node (site.yml), then
+# prove the API token works (verify-proxmox.yml) before anything is built with
+# it. The check is skipped when the configure fails, since it would be testing
+# a node that is not set up.
+run_setup() {
+  printf '\n=== scn-config: configuring the control node (site.yml) ===\n\n'
+  if ! ansible-playbook site.yml </dev/null; then
+    echo
+    echo "scn-config: configuring the control node FAILED — see the output above."
+    echo "scn-config: not run: the Proxmox API check"
+    return 1
+  fi
+  printf '\n=== scn-config: checking the Proxmox API token (verify-proxmox.yml) ===\n\n'
+  if ! ansible-playbook verify-proxmox.yml </dev/null; then
+    echo
+    echo "scn-config: the Proxmox API check FAILED — see the output above."
+    return 1
+  fi
+  echo
+  echo "scn-config: the control node is configured and the API token authenticates."
+}
+
+# --- Cluster domain and TLS ---------------------------------------------------
+set_domain() { ansible-playbook set-domain.yml -e "domain=$1"; }
+
+# set_tls <mode> [email] — the email is always passed, empty included: that is
+# how set-tls.yml knows to drop a contact recorded earlier.
+set_tls() { ansible-playbook set-tls.yml -e "tls_mode=$1" -e "acme_email=${2:-}"; }
+
+# proxy_tls_label <acme|none|origin_ca> — how to say it to a person.
+proxy_tls_label() {
+  case "$1" in
+    acme) echo "Caddy's own Let's Encrypt certificates" ;;
+    none) echo "plain HTTP, no certificate" ;;
+    origin_ca) echo "Cloudflare Origin CA certificate from the vault" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+proxy_tls_summary() {
+  if [ -z "$TLS_MODE" ]; then
+    echo "acme — $(proxy_tls_label acme) (the default; nothing recorded)"
+  else
+    echo "$TLS_MODE — $(proxy_tls_label "$TLS_MODE")${TLS_EMAIL:+, contact $TLS_EMAIL}"
+  fi
+}
+
+# playbook_problem <output> — the sentence a setter playbook refused with, or
+# the tail of its output when it failed some other way.
+playbook_problem() {
+  local problem
+  problem="$(grep -a -m1 'Action failed:' <<<"$1" | sed 's/.*Action failed: //')"
+  echo "${problem:-$(tail -n 8 <<<"$1")}"
+}
+
 # --- Non-interactive mode ----------------------------------------------------
+nonint_show_domain() {
+  load_state
+  echo "cluster domain: ${CLUSTER_DOMAIN:-not set}"
+}
+
+nonint_set_domain() {
+  [ $# -eq 1 ] || usage
+  set_domain "$1"
+}
+
+nonint_show_tls() {
+  load_state
+  echo "proxy TLS: $(proxy_tls_summary)"
+}
+
+nonint_set_tls() {
+  [ $# -ge 1 ] && [ $# -le 2 ] || usage
+  set_tls "$@"
+}
+
 nonint_show_ctid() {
   local i
   load_state
@@ -572,6 +678,138 @@ edit_pending() {
   done
 }
 
+do_setup_menu() {
+  local text
+  text="This runs, in order:
+
+  site.yml             Configure this control node
+  verify-proxmox.yml   Check that the Proxmox API token authenticates
+
+It is the first thing to do on a new cluster, and safe to run again."
+  whiptail --backtitle "$BACKTITLE" --title "Control Node Setup" \
+    --yes-button Run --no-button Back \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+  # Leaves whiptail for the run, like run_provision: the playbook output is the
+  # progress display.
+  clear
+  run_setup || true
+  read -r -p "Press Enter to return to the menu. " </dev/tty || true
+}
+
+do_domain_menu() {
+  local domain text out
+  load_state
+  domain="$CLUSTER_DOMAIN"
+  while true; do
+    domain="$(ask "Set Domain" "The cluster's public base domain, e.g. example.com
+
+Every public address is built from it: the membership site on the
+domain itself, and chat.<domain>, api.<domain> and the rest beside it." "$domain")" || return 0
+    domain="$(tr '[:upper:]' '[:lower:]' <<<"$domain")"
+    # A handle and a domain have the same shape.
+    [[ "$domain" =~ $HANDLE_RE ]] && break
+    msgbox "Set Domain" "That is not a domain. Enter it bare, like example.com: no
+https://, no path, no spaces."
+  done
+  if [ "$domain" = "$CLUSTER_DOMAIN" ]; then
+    msgbox "Set Domain" "The domain is already $domain."
+    return 0
+  fi
+
+  if [ -n "$CLUSTER_DOMAIN" ]; then
+    # Every service renders its own and its neighbours' public URLs when it is
+    # provisioned, so a changed domain reaches none of them until then.
+    text="Change the cluster's domain?
+
+  from  $CLUSTER_DOMAIN
+  to    $domain
+
+Nothing running changes yet. Every service that is already provisioned
+keeps the old addresses until it is provisioned again."
+  else
+    text="Set the cluster's domain to $domain?"
+  fi
+  whiptail --backtitle "$BACKTITLE" --title "Set Domain" \
+    --yes-button Save --no-button Back \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Set Domain" \
+    --infobox "Recording the domain…" 8 "$WT_WIDTH"
+  if out="$(ANSIBLE_NOCOLOR=1 set_domain "$domain" 2>&1)"; then
+    if [ -n "$CLUSTER_DOMAIN" ]; then
+      msgbox "Set Domain" "The domain is now $domain.
+
+Provision every service again, under Provision Containers, to move
+them to it."
+    else
+      msgbox "Set Domain" "The domain is now $domain."
+    fi
+  else
+    msgbox "Set Domain" "The domain was refused — nothing was written.
+
+$(playbook_problem "$out")"
+  fi
+}
+
+do_tls_menu() {
+  local mode email="" text out
+  load_state
+  text="The proxy's certificate: $(proxy_tls_summary)
+
+Caddy gets and renews its own certificates unless you choose otherwise."
+  mode="$(whiptail --backtitle "$BACKTITLE" --title "Set TLS" \
+    --ok-button Select --cancel-button Back --default-item "${TLS_MODE:-acme}" \
+    --menu "$text" "$(box_height "$text" 11)" "$WT_WIDTH" 3 \
+    "acme" " (default) Caddy's own Let's Encrypt certificates" \
+    "none" " Plain HTTP: another edge in front, or before DNS exists" \
+    "origin_ca" " Cloudflare proxies the domain (cert from the vault)" \
+    3>&1 1>&2 2>&3)" || return 0
+
+  if [ "$mode" = acme ]; then
+    email="$TLS_EMAIL"
+    while true; do
+      email="$(ask "Set TLS" "Contact email for the Let's Encrypt account. Optional: leave empty
+for none." "$email")" || return 0
+      # As loose as set-tls.yml's own check: Let's Encrypt judges the address.
+      [ -z "$email" ] || [[ "$email" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] && break
+      msgbox "Set TLS" "That does not look like an email address."
+    done
+  fi
+  if [ "$mode" = "$TLS_MODE" ] && [ "$email" = "$TLS_EMAIL" ]; then
+    msgbox "Set TLS" "That is already what is recorded."
+    return 0
+  fi
+
+  text="Set the proxy's TLS to:
+
+  $mode — $(proxy_tls_label "$mode")${email:+
+  contact $email}"
+  case "$mode" in
+    acme) text="$text
+
+Public ports 80 and 443 must reach the proxy for certificates to be
+issued, and the domain must resolve straight to it." ;;
+    none) text="$text
+
+The proxy will serve plain HTTP only." ;;
+  esac
+  whiptail --backtitle "$BACKTITLE" --title "Set TLS" \
+    --yes-button Save --no-button Back \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Set TLS" \
+    --infobox "Recording the TLS mode…" 8 "$WT_WIDTH"
+  if out="$(ANSIBLE_NOCOLOR=1 set_tls "$mode" "$email" 2>&1)"; then
+    offer_provision proxy "Set TLS" "The TLS mode is saved: $mode."
+  else
+    msgbox "Set TLS" "The TLS mode was refused — nothing was written.
+
+$(playbook_problem "$out")"
+  fi
+}
+
 do_assign_menu() {
   local i title intro text default args=() picked name status label out duplicate rc
   local total assigned unassigned
@@ -833,27 +1071,32 @@ ask() {
     --inputbox "$2" "$(box_height "$2" 8)" "$WT_WIDTH" "$3" 3>&1 1>&2 2>&3
 }
 
-# offer_pds_provision <title> <what changed> — for a change the PDS reads only
-# when it is provisioned (the mail relay, the admin roster): offer to do that
-# now, when the PDS exists to provision.
-offer_pds_provision() {
-  local i ctid="" text
+# offer_provision <service> <title> <what changed> — for a change a service
+# reads only when it is provisioned (the PDS: the mail relay, the admin roster;
+# the proxy: the TLS mode): offer to do that now, when the service exists to
+# provision.
+offer_provision() {
+  local service="$1" title="$2" i ctid="" text name
+  case "$service" in
+    pds) name="The PDS" ;;
+    *) name="The $service" ;;
+  esac
   load_state
-  i="$(index_of pds)" && ctid="${SVC_CTID[$i]}"
+  i="$(index_of "$service")" && ctid="${SVC_CTID[$i]}"
   if [ -z "$ctid" ]; then
-    msgbox "$1" "$2
+    msgbox "$title" "$3
 
-The PDS has no container ID yet, so there is nothing to update there.
+$name has no container ID yet, so there is nothing to update there.
 It will pick this up when it is first provisioned."
     return 0
   fi
-  text="$2
+  text="$3
 
-The PDS picks this up on its next provision. Run that now?"
-  whiptail --backtitle "$BACKTITLE" --title "$1" \
-    --yes-button "Provision pds" --no-button Later \
+$name picks this up on its next provision. Run that now?"
+  whiptail --backtitle "$BACKTITLE" --title "$title" \
+    --yes-button "Provision $service" --no-button Later \
     --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
-  run_provision pds
+  run_provision "$service"
 }
 
 # Best-effort lookup so the operator sees who they are about to appoint. Prints
@@ -905,7 +1148,7 @@ Admit them as a member first, then make them an admin?"
     admins_run -e admin_action=add -e "who=$who" -e admit=true -e "tier=$tier" || true
   fi
   if [ "$ADMIN_RC" = 0 ]; then
-    offer_pds_provision "Cluster Admins" "$ADMIN_OUT"
+    offer_provision pds "Cluster Admins" "$ADMIN_OUT"
   else
     msgbox "Cluster Admins" "Corliss refused:
 
@@ -1064,7 +1307,7 @@ print(scheme, host, port, tls, "auth" if auth else "", f"{scheme}://{auth}{host}
 '
 
 do_smtp_menu() {
-  local choice text host tls port user pass url scheme query out problem parsed
+  local choice text host tls port user pass url scheme query out parsed
   # TERM=ansi: see the infobox in do_assign_menu.
   TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Set SMTP" \
     --infobox "Reading the mail relay…" 8 "$WT_WIDTH"
@@ -1088,7 +1331,7 @@ password resets through it."
       --yesno "Remove the mail relay? Mail will be off for every service." \
       8 "$WT_WIDTH" || return 0
     if out="$(ANSIBLE_NOCOLOR=1 nonint_clear_smtp 2>&1)"; then
-      offer_pds_provision "Set SMTP" "The mail relay is cleared."
+      offer_provision pds "Set SMTP" "The mail relay is cleared."
     else
       msgbox "Set SMTP" "Could not clear the relay.
 
@@ -1168,12 +1411,11 @@ print(f"{scheme}://{auth}{host}:{port}{query}")
     --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
 
   if out="$(ANSIBLE_NOCOLOR=1 set_smtp "$url" 2>&1)"; then
-    offer_pds_provision "Set SMTP" "The mail relay is saved."
+    offer_provision pds "Set SMTP" "The mail relay is saved."
   else
-    problem="$(grep -a -m1 'Action failed:' <<<"$out" | sed 's/.*Action failed: //')"
     msgbox "Set SMTP" "The relay was refused — nothing was written.
 
-${problem:-$(tail -n 8 <<<"$out")}"
+$(playbook_problem "$out")"
   fi
 }
 
@@ -1187,16 +1429,22 @@ interactive() {
     choice="$(whiptail --backtitle "$BACKTITLE" --title "$TITLE" \
       --ok-button Select --cancel-button Finish \
       --menu "" 18 "$WT_WIDTH" 9 \
-      "1 Container Assignment" " Set the CTID per service" \
-      "2 Provision Containers" " Build the assigned services" \
-      "3 Cluster Admins" " Who can approve members and run the PDS" \
-      "4 Set SMTP" " Outbound mail relay" \
+      "1 Control Node Setup" " Configure this node, check the API token" \
+      "2 Set Domain" " The cluster's public base domain" \
+      "3 Set TLS" " How the proxy gets its certificate" \
+      "4 Container Assignment" " Set the CTID per service" \
+      "5 Provision Containers" " Build the assigned services" \
+      "6 Cluster Admins" " Who can approve members and run the PDS" \
+      "7 Set SMTP" " Outbound mail relay" \
       3>&1 1>&2 2>&3)" || exit 0
     case "$choice" in
-      1\ *) do_assign_menu ;;
-      2\ *) do_provision_menu ;;
-      3\ *) do_admins_menu ;;
-      4\ *) do_smtp_menu ;;
+      1\ *) do_setup_menu ;;
+      2\ *) do_domain_menu ;;
+      3\ *) do_tls_menu ;;
+      4\ *) do_assign_menu ;;
+      5\ *) do_provision_menu ;;
+      6\ *) do_admins_menu ;;
+      7\ *) do_smtp_menu ;;
     esac
   done
 }
@@ -1207,6 +1455,11 @@ case "${1:-}" in
   nonint)
     shift
     case "${1:-}" in
+      setup) run_setup ;;
+      show-domain) nonint_show_domain ;;
+      set-domain) shift; nonint_set_domain "$@" ;;
+      show-tls) nonint_show_tls ;;
+      set-tls) shift; nonint_set_tls "$@" ;;
       show-ctid) nonint_show_ctid ;;
       assign-ctid) shift; nonint_assign_ctid "$@" ;;
       assign-ctid-defaults) nonint_assign_ctid_defaults ;;

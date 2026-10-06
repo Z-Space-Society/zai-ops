@@ -12,7 +12,7 @@
     that: cluster_domain is defined and (cluster_domain | string | length) > 0
     fail_msg: >-
       caddy_proxy_hosts has routes but cluster_domain is unset —
-      run: zai-set-domain <domain>
+      run: scn-config nonint set-domain <domain>
   when: caddy_proxy_hosts | length > 0
 
 # The template branches on the exact mode string, so a typo would render a
@@ -36,7 +36,7 @@
 # Origin CA cert served, Let's Encrypt attempted from behind Cloudflare, and 52x
 # errors on every public route. A vault holding the cert is the sign of such a
 # cluster, so refuse to render until the mode is chosen. hostvars carries the
-# inventory (where zai-set-tls records the mode, in local.yml) and -e, but not
+# inventory (where scn-config (Set TLS) records the mode, in local.yml) and -e, but not
 # role defaults, so this passes only for a mode someone actually picked.
 - name: Require a recorded caddy_tls_mode when the vault holds an Origin CA cert
   ansible.builtin.assert:
@@ -45,8 +45,8 @@
       hostvars[inventory_hostname]['caddy_tls_mode'] is defined
     fail_msg: >-
       The vault holds cloudflare_origin_cert but no caddy_tls_mode is recorded,
-      and the default is now acme. Run: zai-set-tls origin_ca (Cloudflare
-      proxies this domain), or zai-set-tls acme to confirm acme.
+      and the default is now acme. Run: scn-config nonint set-tls origin_ca (Cloudflare
+      proxies this domain), or scn-config nonint set-tls acme to confirm acme.
 
 # Caddy from Debian BACKPORTS, version-pinned. Still Debian-built and
 # Debian-signed, so this keeps the original "no third-party apt key" property

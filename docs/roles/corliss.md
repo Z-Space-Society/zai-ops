@@ -252,7 +252,7 @@ LiteLLM until deleted by hand, so it is worth pruning when that happens.
   until both are up and its `OPENID_PROVIDER_URL`/`OAUTH_CLIENT_*` are
   pointed at corliss (already wired in `open-webui`'s own defaults/template).
 - **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts` at the
-  apex `{{ cluster_domain }}`; set the domain once with `zai-set-domain`. The
+  apex `{{ cluster_domain }}`; set the domain once with `scn-config` (Set Domain). The
   origin cert must cover the apex — a wildcard-only `*.<domain>` cert does
   **not**, and Cloudflare answers such a request with a 526.
 - **A CTID assigned for [`sync-relay`](sync_relay.md), [`redis`](redis.md),

@@ -97,7 +97,10 @@ out and update the docs.
   *suggested* `default_ctid` per service and nothing else reads it; the
   assignment is runtime data in `inventory/local.yml`, written by `assign.yml`.
   `scn-config` (a whiptail menu patterned on raspi-config, plus `nonint`
-  subcommands) is the only front end; its menu also runs `provision.yml` per
+  subcommands) is the only front end; its menu runs in the order a new cluster
+  needs it: control node setup (`site.yml`, then `verify-proxmox.yml`), the
+  domain (`set-domain.yml`) and the proxy's TLS mode (`set-tls.yml`) come
+  before assignment. It also runs `provision.yml` per
   service, ordered by `default_ctid` because tier order is dependency order,
   manages cluster admins (`admins.yml`) and sets the mail relay
   (`set-smtp.yml`). New settings go in as `scn-config` entries with a `nonint`

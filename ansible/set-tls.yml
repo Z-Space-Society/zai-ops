@@ -4,8 +4,8 @@
 #   ansible-playbook set-tls.yml -e "tls_mode=origin_ca"
 #   ansible-playbook set-tls.yml -e "tls_mode=acme" -e "acme_email=ops@example.org"
 #
-# (`zai-set-tls <mode> [email]`, the operator command in bin/, is sugar over
-# this. No logic lives in the wrapper.) The proxy role reads caddy_tls_mode and
+# (`scn-config`'s Set TLS entry, and `scn-config nonint set-tls <mode> [email]`,
+# are the front end; this playbook stays the authority.) The proxy role reads caddy_tls_mode and
 # caddy_acme_email; docs/roles/proxy.md "TLS modes" explains each mode.
 #
 # Why a setter and not group_vars: the right mode depends on what sits in front
@@ -42,7 +42,7 @@
           - (tls_mode | string) in tls_modes
         fail_msg: >-
           '{{ tls_mode | default('') }}' is not a TLS mode. Expected one of:
-          {{ tls_modes | join(', ') }}, e.g. zai-set-tls origin_ca
+          {{ tls_modes | join(', ') }}, e.g. scn-config nonint set-tls origin_ca
 
     # The contact renders only in acme mode, so accepting one with another mode
     # would record a value nothing reads.
@@ -54,7 +54,7 @@
         fail_msg: >-
           '{{ requested_email }}' is not usable here: the contact email is for
           acme mode only and must look like an address, e.g.
-          zai-set-tls acme ops@example.org
+          scn-config nonint set-tls acme ops@example.org
 
     # The proxy role asserts the same material. Checking here as well means a
     # cluster cannot record a mode it has no cert for and find out only at the

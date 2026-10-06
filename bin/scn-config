@@ -378,7 +378,7 @@ interactive() {
     choice="$(whiptail --backtitle "$BACKTITLE" --title "$TITLE" \
       --ok-button Select --cancel-button Finish \
       --menu "" 18 "$WT_WIDTH" 9 \
-      "1 Container Assignment" "Choose the container ID for each service" \
+      "1 Container Assignment" " Set the CTID per service" \
       3>&1 1>&2 2>&3)" || exit 0
     case "$choice" in
       1\ *) do_assign_menu ;;

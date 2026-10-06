@@ -102,6 +102,10 @@ itself from this repo.
    accepting the defaults is `scn-config nonint assign-ctid-defaults`; see
    [Service CTID assignment](docs/README.md#service-ctid-assignment).
 
+   Then provision. `scn-config`'s **Provision Containers** entry runs the
+   commands below for the services you tick, in this order, stopping at the
+   first failure. By hand:
+
    ```bash
    # provision each — create over the API, configure over SSH.
    #    object store first: it's the restic backend the backup job writes to.

@@ -21,8 +21,9 @@ data, and every other service's rendered config still points at the old address.
 1. **`scn-config` replaces `zai-assign`.** It is one operator command in `bin/`,
    patterned on `raspi-config`: a whiptail menu when run bare, and `scn-config
    nonint <command>` for scripts. It is meant to grow into the single place the
-   cluster is configured; today it has one screen, container assignment.
-   `assign.yml` stays underneath as the engine that validates and writes
+   cluster is configured; today it has two screens, container assignment and
+   provisioning (a front end to `provision.yml --limit <service>`, run in
+   dependency order). `assign.yml` stays underneath as the engine that validates and writes
    `inventory/local.yml`.
 2. **The blueprint carries a suggested `default_ctid` per service.** It follows
    the tier convention and is what `scn-config` pre-fills. Nothing else reads

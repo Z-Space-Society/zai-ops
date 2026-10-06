@@ -227,7 +227,12 @@ is outside 100–999, in `reserved_ctids`, or already taken.
 
 From then on every playbook resolves the service to `ctid` and a derived
 `ansible_host` of `10.1.1.{ctid}`. `provision.yml --limit <service>` creates
-exactly that CT, and fails fast if the service was never assigned.
+exactly that CT, and fails fast if the service was never assigned. The menu's
+**Provision Containers** entry runs that for each ticked service, one at a time
+in dependency order (core, then platform, then apps), stopping at the first
+failure. It asks Proxmox what exists first, marks each service `new: create` or
+`exists: rebuild`, and refuses a CTID held by a container that isn't that
+service's.
 
 **An assignment is set once.** The CTID is the container's VMID and its address,
 so changing it after provisioning moves nothing: the next provision creates a
@@ -342,6 +347,7 @@ later; the repo bakes in neither.
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox node name in runtime inventory (the `zai-set-node` engine; `bootstrap.sh` calls it automatically) |
 | `set-registry.yml`    | CT 100 (local) | Record the membership registry's per-cluster identity in runtime inventory (the `zai-set-registry` engine) |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
+| `ct-status.yml`       | CT 100 (local) | Read-only: list the containers on the node, so `scn-config` can mark each service as new or existing |
 | `make-admin.yml`      | corliss (SSH) | Promote an ATProto handle to corliss admin, keyed on DID (the `zai-make-admin` engine) |
 | `enroll-inference-node.yml` | CT 100 (local) | Record a bare-metal inference node in the runtime inventory (records only) |
 | `inference.yml`       | CT 100 → SSH   | Configure inference nodes (`nvidia_cuda` + `llama_server`) |
@@ -368,7 +374,7 @@ PATH when the control node is configured. The convention:
 
 | Command | Does | Backed by |
 | ------- | ---- | --------- |
-| `scn-config` | Menu-driven cluster configuration. Today: assign each service its CTID. See [Service CTID assignment](#service-ctid-assignment) | [`assign.yml`](#playbooks) |
+| `scn-config` | Menu-driven cluster configuration. Today: assign each service its CTID ([Service CTID assignment](#service-ctid-assignment)), and provision the assigned services in dependency order | [`assign.yml`](#playbooks), [`provision.yml`](#playbooks) |
 | `scn-config nonint <command>` | The same, scripted: `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults` | [`assign.yml`](#playbooks) |
 | `zai-set-domain <domain>` | Record the cluster's public base domain | [`set-domain.yml`](#playbooks) |
 | `zai-set-tls <mode> [email]` | Record how the proxy gets its certificate: `acme` (the default), `origin_ca` or `none`. See [Cluster TLS mode](#cluster-tls-mode) | [`set-tls.yml`](#playbooks) |

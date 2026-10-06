@@ -54,9 +54,15 @@ RESERVED=" "   # space-delimited, space-padded for `case` membership tests
 # rather than jq: Ansible guarantees python on the control node, while jq only
 # arrives with site.yml and this must work straight after bootstrap.
 load_state() {
-  local json line kind name ctid default
-  json="$(ansible-inventory --list 2>/dev/null)" \
-    || die "could not read the inventory — run: ansible-inventory --list"
+  local json err line kind name ctid default
+  # Keep ansible's own complaint: "could not read the inventory" alone sends
+  # the operator off to rerun the command from the wrong directory.
+  err="$(mktemp)"
+  if ! json="$(ansible-inventory --list 2>"$err")"; then
+    cat "$err" >&2; rm -f "$err"
+    die "could not read the inventory (ansible-inventory --list, run in $PWD)"
+  fi
+  rm -f "$err"
   SVC_NAME=() SVC_CTID=() SVC_DEFAULT=() RESERVED=" "
   while read -r kind name ctid default; do
     case "$kind" in
@@ -207,19 +213,40 @@ msgbox() {  # msgbox <title> <text>
     --msgbox "$2" "$(box_height "$2" 7)" "$WT_WIDTH"
 }
 
-# The recorded assignments as "  name   ctid" lines, for dialog text.
-assigned_lines() {
+# ctid_label <ctid> — "CTID: 102  IP: 10.1.1.102". The address is derived from
+# the CTID, so every screen that shows one shows the other.
+ctid_label() { echo "CTID: $1  IP: 10.1.1.$1"; }
+
+# whiptail has no table widget, so tables are fixed-width text: a header, a
+# rule, then one table_row per service.
+table_header() {
+  printf '  %-14s %-6s %s\n' "Service" "CTID" "IP Address"
+  printf '  %-14s %-6s %s\n' "--------------" "----" "----------"
+}
+
+table_row() {  # table_row <service> <ctid, or "" when not set yet>
+  if [ -n "$2" ]; then
+    printf '  %-14s %-6s %s\n' "$1" "$2" "10.1.1.$2"
+  else
+    printf '  %-14s %s\n' "$1" "(not set)"
+  fi
+}
+
+# The recorded assignments, as a table for dialog text.
+assigned_table() {
   local i
+  table_header
   for i in "${!SVC_NAME[@]}"; do
-    [ -n "${SVC_CTID[$i]}" ] && printf '  %-14s %s\n' "${SVC_NAME[$i]}" "${SVC_CTID[$i]}"
+    [ -n "${SVC_CTID[$i]}" ] && table_row "${SVC_NAME[$i]}" "${SVC_CTID[$i]}"
   done
   return 0
 }
 
-pending_lines() {
+pending_table() {
   local i
+  table_header
   for i in "${!P_NAME[@]}"; do
-    printf '  %-14s %s\n' "${P_NAME[$i]}" "${P_CTID[$i]:-(not set)}"
+    table_row "${P_NAME[$i]}" "${P_CTID[$i]}"
   done
 }
 
@@ -274,7 +301,7 @@ do_assign_menu() {
     fi
     default="$(usable_default "$i")"
     if [ -n "$default" ]; then
-      label="CTID $default" status=ON
+      label="$(ctid_label "$default")" status=ON
     else
       label="(no free default)" status=OFF
     fi
@@ -285,7 +312,7 @@ do_assign_menu() {
   if [ "$unassigned" -eq 0 ]; then
     msgbox "Container Assignment" "Every service is assigned:
 
-$(assigned_lines)
+$(assigned_table)
 
 An assignment is set once and cannot be changed here. To correct one
 BEFORE its service has been provisioned:
@@ -306,7 +333,7 @@ assignment is permanent once saved — it cannot be changed here."
     title="Container Assignment"
     intro="Already assigned ($assigned of $total) — these are locked:
 
-$(assigned_lines)
+$(assigned_table)
 
 Tick the services to assign now."
   fi
@@ -330,7 +357,7 @@ Tick the services to assign now."
     fi
     text="About to assign:
 
-$(pending_lines)
+$(pending_table)
 
 This is permanent — an assignment cannot be changed here once saved.
 Press Esc to leave without writing anything."
@@ -356,7 +383,7 @@ Press Esc to leave without writing anything."
   if out="$(ANSIBLE_NOCOLOR=1 run_assign 2>&1)"; then
     msgbox "$title" "Assigned:
 
-$(pending_lines)
+$(pending_table)
 
 Nothing has been created yet. Next, provision each service:
 
@@ -366,6 +393,148 @@ Nothing has been created yet. Next, provision each service:
 
 $(tail -n 12 <<<"$out")"
   fi
+}
+
+# provision_order — echo the indices of the assigned services in the order to
+# provision them. That is default_ctid order, not assigned order: the defaults
+# follow the tiers (core, platform, apps) and dependencies only point down the
+# tiers, so the blueprint's numbering is the dependency order even on a cluster
+# that assigned different CTIDs.
+provision_order() {
+  local i
+  for i in "${!SVC_NAME[@]}"; do
+    [ -n "${SVC_CTID[$i]}" ] && echo "${SVC_DEFAULT[$i]:-${SVC_CTID[$i]}} $i"
+  done | sort -n | cut -d' ' -f2
+}
+
+# --- What exists on the node ---
+# CT_KNOWN is 1 once the node has been asked; CT_VMID / CT_NAME are its
+# containers. Asking needs the API token, so it fails off the control node — the
+# provision screen then simply shows no status.
+CT_KNOWN=0 CT_VMID=() CT_NAME=()
+
+load_ct_status() {
+  local out vmid name
+  CT_KNOWN=0 CT_VMID=() CT_NAME=()
+  out="$(mktemp)"
+  if ANSIBLE_NOCOLOR=1 ansible-playbook ct-status.yml -e "out=$out" >/dev/null 2>&1; then
+    CT_KNOWN=1
+    while read -r vmid name; do
+      [ -n "$vmid" ] && CT_VMID+=("$vmid") && CT_NAME+=("$name")
+    done <"$out"
+  fi
+  rm -f "$out"
+}
+
+# ct_status <service> <ctid> — echo "new" (no container at that CTID), "exists"
+# (one with this service's name), "taken <name>" (someone else's), or "unknown".
+ct_status() {
+  local i
+  [ "$CT_KNOWN" -eq 1 ] || { echo unknown; return 0; }
+  for i in "${!CT_VMID[@]}"; do
+    [ "${CT_VMID[$i]}" = "$2" ] || continue
+    if [ "${CT_NAME[$i]}" = "$1" ]; then echo exists; else echo "taken ${CT_NAME[$i]}"; fi
+    return 0
+  done
+  echo new
+}
+
+do_provision_menu() {
+  local i args=() picked text name unassigned=0 note="" failed="" remaining=()
+  local status label ticked plan=""
+  load_state
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Provision Containers" \
+    --infobox "Checking which containers exist…" 8 "$WT_WIDTH"
+  load_ct_status
+
+  for i in "${!SVC_NAME[@]}"; do
+    [ -z "${SVC_CTID[$i]}" ] && unassigned=$((unassigned + 1))
+  done
+  for i in $(provision_order); do
+    status="$(ct_status "${SVC_NAME[$i]}" "${SVC_CTID[$i]}")"
+    label="$(ctid_label "${SVC_CTID[$i]}")" ticked=ON
+    case "$status" in
+      new) label="$label  new: create" ;;
+      exists) label="$label  exists: rebuild" ;;
+      taken\ *) label="$label  IN USE by ${status#taken }" ticked=OFF ;;
+    esac
+    args+=("${SVC_NAME[$i]}" "$label" "$ticked")
+  done
+  if [ "${#args[@]}" -eq 0 ]; then
+    msgbox "Provision Containers" "No service has a container ID yet.
+
+Assign them first, under Container Assignment."
+    return 0
+  fi
+
+  # Services reference each other's addresses (the proxy renders litellm's), so
+  # an unassigned one can fail a different service's provision.
+  [ "$unassigned" -gt 0 ] && note="
+
+$unassigned service(s) have no CTID yet and are not listed. Provisioning can
+fail where a listed service refers to one of them."
+  [ "$CT_KNOWN" -eq 1 ] || note="$note
+
+Could not ask Proxmox which containers exist, so none are marked."
+  text="Ticked services run in the order shown, which is dependency order.
+Rebuilding an existing container is safe.$note"
+
+  picked="$(whiptail --backtitle "$BACKTITLE" --title "Provision Containers" \
+    --separate-output --ok-button Next --cancel-button Back \
+    --checklist "$text" "$(box_height "$text" $((${#args[@]} / 3 + 8)))" "$WT_WIDTH" \
+    "$((${#args[@]} / 3))" "${args[@]}" 3>&1 1>&2 2>&3)" || return 0
+  [ -n "$picked" ] || return 0
+
+  # A CTID held by a container that isn't this service's is not ours to build
+  # on: provision would try to configure someone else's container.
+  while read -r name; do
+    i="$(index_of "$name")"
+    status="$(ct_status "$name" "${SVC_CTID[$i]}")"
+    case "$status" in
+      taken\ *)
+        msgbox "Provision Containers" "CTID ${SVC_CTID[$i]} is in use by '${status#taken }', which is not $name.
+
+Nothing was run. Untick $name, or free that CTID first."
+        return 0
+        ;;
+      new) plan="$plan$(printf '  %-14s %s' "$name" "create")"$'\n' ;;
+      exists) plan="$plan$(printf '  %-14s %s' "$name" "rebuild")"$'\n' ;;
+      *) plan="$plan  $name"$'\n' ;;
+    esac
+  done <<<"$picked"
+
+  text="About to provision, in this order:
+
+${plan%$'\n'}
+
+This can take a while: a service built from source needs 15-30 minutes
+on a new container. The run stops at the first failure."
+  whiptail --backtitle "$BACKTITLE" --title "Provision Containers" \
+    --yes-button Provision --no-button Back \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+
+  # Leave whiptail for the run: the playbook output is the progress display,
+  # and it is what the operator needs on screen if a task fails.
+  clear
+  while read -r name; do
+    if [ -n "$failed" ]; then
+      remaining+=("$name")
+      continue
+    fi
+    printf '\n=== scn-config: provisioning %s ===\n\n' "$name"
+    # </dev/null: keep ansible from consuming the list this loop is reading.
+    ansible-playbook provision.yml --limit "$name" </dev/null || failed="$name"
+  done <<<"$picked"
+
+  echo
+  if [ -n "$failed" ]; then
+    echo "scn-config: provisioning $failed FAILED — see the output above."
+    [ "${#remaining[@]}" -gt 0 ] && echo "scn-config: not run: ${remaining[*]}"
+  else
+    echo "scn-config: provisioning finished."
+  fi
+  read -r -p "Press Enter to return to the menu. " </dev/tty || true
 }
 
 interactive() {
@@ -379,9 +548,11 @@ interactive() {
       --ok-button Select --cancel-button Finish \
       --menu "" 18 "$WT_WIDTH" 9 \
       "1 Container Assignment" " Set the CTID per service" \
+      "2 Provision Containers" " Build the assigned services" \
       3>&1 1>&2 2>&3)" || exit 0
     case "$choice" in
       1\ *) do_assign_menu ;;
+      2\ *) do_provision_menu ;;
     esac
   done
 }

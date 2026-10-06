@@ -49,8 +49,13 @@ and merged with the committed blueprint via the directory inventory:
 
 Only genuine blueprint constants stay committed: the `10.1.1.0/24` net, the
 `10.1.1.{ctid}` addressing *convention*, the `reserved_ctids` defaults, and each
-service's create specs. The committed tree carries no node, no domain, and no
-container numbers — the same blueprint stands up a cluster on any host.
+service's create specs and suggested `default_ctid`. The committed tree carries
+no node, no domain, and no container *assignments* — the same blueprint stands up
+a cluster on any host.
+
+Amended 2026-10-06 ([ADR-0010](0010-scn-config.md)): the blueprint used to carry
+no container numbers at all. It now carries a `default_ctid` per service, which
+is only what `scn-config` proposes. The assignment itself is still runtime data.
 
 ## Consequences
 

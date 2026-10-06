@@ -13,9 +13,11 @@ that makes claims nothing checks.
 
 - Add the host to [`ansible/inventory/hosts.yml`](../ansible/inventory/hosts.yml)
   under `service_containers`, named as the service (e.g. `sync-relay`).
-- Assign it a container ID on each cluster: `zai-assign <service> <ctid>`. The
-  number is runtime data in the git-ignored `inventory/local.yml` and is never
-  committed. See [Service CTID assignment](README.md#service-ctid-assignment).
+- Give it a `default_ctid` there: a free number in its tier's range (see
+  [Networking](README.md#networking)). It is only what `scn-config` proposes.
+- Assign it on each cluster with `scn-config`. The assignment is runtime data in
+  the git-ignored `inventory/local.yml` and is never committed. See
+  [Service CTID assignment](README.md#service-ctid-assignment).
 - If it depends on another service's data (a Postgres database, Redis, the
   object store), add a row to the ordering table in
   [`diagrams.md`](diagrams.md).

@@ -20,7 +20,7 @@ so `password_encryption` is already `scram-sha-256` when a role password is set
 own repo, so the role just `apt install`s `postgresql-17`. That deliberately
 avoids the third-party apt-key / Sequoia `sqv` gotcha that any SHA1-bound
 third-party apt repo hits on Debian 13 (see
-[main docs](../README.md#known-gotchas)).
+[main docs](../gotchas.md)).
 
 ## Tasks
 
@@ -74,7 +74,7 @@ ssh root@10.1.1.<ctid> "su - postgres -c \"psql -c 'SELECT version()'\""
   than sequencing around it with `After=network-online.target`. It is safe *only*
   because the CT is `vmbr1`-only with no LAN NIC and `pg_hba.conf` restricts TCP
   to `10.1.1.0/24` under `scram-sha-256` — if either changes, revisit the bind.
-  See [Known gotchas](../README.md#known-gotchas).
+  See [Known gotchas](../gotchas.md).
 - **Remote auth is inert on a fresh server.** No role has a password yet, so the
   internal-subnet HBA rule has nothing to authenticate until an app role creates
   a password-bearing role. The `pg_isready` verify confirms the listener is up,

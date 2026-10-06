@@ -69,4 +69,4 @@ ssh ansible@<node> 'mokutil --sb-state'    # SecureBoot disabled
   format (confirmed present on salmon/orca). A deb822-only node would need that
   handled differently.
 - Secure Boot disable is a manual BIOS step, like the Proxmox-side prerequisites
-  elsewhere in this repo — see the [Known gotchas](../README.md#known-gotchas).
+  elsewhere in this repo — see the [Known gotchas](../gotchas.md).

@@ -22,11 +22,11 @@ collections, and prepares the SSH key used to reach service containers.
 | Update apt cache and run a full upgrade | `ansible.builtin.apt` (`upgrade: full`) | Keep the control node current. |
 | Install the Proxmox API client library | `ansible.builtin.apt` (`python3-proxmoxer`, `python3-requests`) | `community.proxmox` modules talk to the API through `proxmoxer`. |
 | Install the S3 client library | `ansible.builtin.apt` (`python3-boto3`) | The [`manifest`](manifest.md) role writes to Garage with `amazon.aws.s3_object`, delegated here, which needs boto3. The collection ships in Debian 13's ansible 12 bundle (10.x) and trixie's boto3 1.37 clears its floor, so nothing is added to `requirements.yml`. |
-| Install/upgrade pinned Ansible collections | `ansible.builtin.command` (`ansible-galaxy collection install -r requirements.yml --upgrade`) | Debian's `ansible` 12 bundles `community.proxmox` 1.3.0, which can't set the API connection timeout (no `api_timeout` until 1.6.0), so the LXC-create POST dies at proxmoxer's 5s read default. Installs the pin (`>=1.6.0`) into `~/.ansible/collections`, which precedes dist-packages in the search path. **Bootstrap seeds this**; the role re-asserts it (seed-then-own, like the locale). `--upgrade` is required — galaxy otherwise treats the dist-packages 1.3.0 as already-satisfied and skips. See [Known gotchas](../README.md#known-gotchas). |
-| Install operator diagnostic CLI tools | `ansible.builtin.apt` (`curl`, `jq`) | `debian-13-standard` is minimal; give the operator `curl`/`jq` to probe a service CT's HTTP health endpoint by hand (playbooks themselves use `ansible.builtin.uri`). |
+| Install/upgrade pinned Ansible collections | `ansible.builtin.command` (`ansible-galaxy collection install -r requirements.yml --upgrade`) | Debian's `ansible` 12 bundles `community.proxmox` 1.3.0, which can't set the API connection timeout (no `api_timeout` until 1.6.0), so the LXC-create POST dies at proxmoxer's 5s read default. Installs the pin (`>=1.6.0`) into `~/.ansible/collections`, which precedes dist-packages in the search path. **Bootstrap seeds this**; the role re-asserts it (seed-then-own, like the locale). `--upgrade` is required — galaxy otherwise treats the dist-packages 1.3.0 as already-satisfied and skips. See [Known gotchas](../gotchas.md). |
+| Install operator CLI tools | `ansible.builtin.apt` (`curl`, `jq`, `whiptail`) | `debian-13-standard` is minimal; give the operator `curl`/`jq` to probe a service CT's HTTP health endpoint by hand (playbooks themselves use `ansible.builtin.uri`). `whiptail` draws `scn-config`'s menu; bootstrap seeds it so the menu works before this role runs. |
 | Ensure root has an ed25519 SSH keypair | `ansible.builtin.user` (`generate_ssh_key`) | The public key is injected into each service CT at create time (the proxmox module's `pubkey`) so Ansible can SSH in afterward. Idempotent — only generates if absent. |
 | Assert the vault password file is root-only | `ansible.builtin.file` (`mode: 0600`) | Defense-in-depth: catches permission drift on `/root/.vault_pass`. The bootstrap already writes it with `umask 077`. |
-| Put the repo's `bin/` on PATH + land in the repo | `ansible.builtin.copy` (`/etc/profile.d/zai-ops.sh`) | Make the operator commands (`zai-assign`, `zai-backup`, …) discoverable as `zai-*` for interactive shells. They run in place from git — nothing is copied to `/usr/local/bin`, so `git pull` is enough to update them. The same snippet also `cd`s a fresh login/`pct enter` into `/opt/zai-ops`, guarded on `$PWD = $HOME` so it doesn't relocate a shell that's already navigated elsewhere. |
+| Put the repo's `bin/` on PATH + land in the repo | `ansible.builtin.copy` (`/etc/profile.d/zai-ops.sh`) | Make the operator commands (`scn-config`, `zai-backup`, …) discoverable by name for interactive shells. They run in place from git — nothing is copied to `/usr/local/bin`, so `git pull` is enough to update them. The same snippet also `cd`s a fresh login/`pct enter` into `/opt/zai-ops`, guarded on `$PWD = $HOME` so it doesn't relocate a shell that's already navigated elsewhere. |
 
 ## Variables
 
@@ -48,7 +48,7 @@ well-known control node.
 
 - **Order matters:** the locale task runs before the upgrade on purpose (see the
   table). Don't reorder.
-- **Operator commands live in [`bin/`](../../bin/), run in place.** `zai-assign`,
+- **Operator commands live in [`bin/`](../../bin/), run in place.** `scn-config`,
   `zai-backup`, … are named for what they *do*, not the tool underneath; this role
   only puts the directory on PATH. Nothing is installed to `/usr/local/bin`, so the
   command you run is always the one in git — `git pull` updates them with no replay.

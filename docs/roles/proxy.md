@@ -181,7 +181,7 @@ ssh root@10.1.1.<ctid> 'journalctl -u caddy --no-pager | grep -iE "obtain|challe
 ```
 
 If issuance fails, check public `:80` first (see
-[Known gotchas](../README.md#known-gotchas)).
+[Known gotchas](../gotchas.md)).
 
 ## Notes
 
@@ -252,7 +252,7 @@ If issuance fails, check public `:80` first (see
   address is derived from the service's CTID, so a route whose service has no
   CTID yet has nothing to render. The template leaves a comment naming the
   domain and the service in its place, and the route appears on the first
-  proxy run after `zai-assign`. This is what lets a new service's route sit in
+  proxy run after the service is assigned in `scn-config`. This is what lets a new service's route sit in
   the committed defaults before every cluster runs that service. The cost: a
   core service that was never assigned no longer fails the proxy play, so
   check the rendered Caddyfile for `not routed` lines if a hostname is missing.

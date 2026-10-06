@@ -24,8 +24,8 @@ docs for "later":
   the run steps in the top-level `README.md` if the operator flow changes).
 - **Networking, bootstrap phases, addressing, or trust model change** → update
   the relevant section of `docs/README.md` (and the table/diagram).
-- **A new gotcha learned the hard way** → add it to the "Known gotchas" section
-  of `docs/README.md` so it isn't re-debugged.
+- **A new gotcha learned the hard way** → add it to
+  [`docs/gotchas.md`](docs/gotchas.md) so it isn't re-debugged.
 
 When you finish a task, double-check whether any doc above needs the same edit.
 
@@ -88,8 +88,19 @@ out and update the docs.
   pattern.
 - **Inventory is data-driven.** Per-CT create specs (cores/memory/disk/netif)
   live on the host entry in `inventory/hosts.yml`; the create play reads them.
+- **CTIDs are assigned once, with `scn-config`.** The blueprint carries a
+  *suggested* `default_ctid` per service and nothing else reads it; the
+  assignment is runtime data in `inventory/local.yml`, written by `assign.yml`.
+  `scn-config` (a whiptail menu patterned on raspi-config, plus `nonint`
+  subcommands) is the only front end; its menu also runs `provision.yml` per
+  service, ordered by `default_ctid` because tier order is dependency order.
+  The menu never changes a recorded
+  assignment: the CTID is the container's VMID and address, so renumbering after
+  provisioning strands the old container and its data. `nonint assign-ctid
+  --reassign` exists only for correcting a number *before* provisioning. A new
+  service gets a `default_ctid` in its tier's range. See ADR-0010.
 - **Operator commands live in `bin/`, run in place from git.** Things a human runs
-  by hand on CT 100 (`zai-assign`, `zai-backup`) live in the repo's `bin/` (scripts
+  by hand on CT 100 (`scn-config`, `zai-backup`) live in the repo's `bin/` (scripts
   that run on the Proxmox host go in `host/` instead), put on PATH via
   two hooks — `/etc/profile.d/zai-ops.sh` for login/ssh shells, and the same
   snippet sourced from `/etc/bash.bashrc` for the interactive *non-login* shell

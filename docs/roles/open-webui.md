@@ -205,7 +205,7 @@ Python client: `/auth/client-metadata.json` is the atproto `client_id` document,
 fetched server-side by each member's PDS. Bluesky's PDS is Go/TS and passes
 today, but a Python-based PDS or authorization server would be 403'd, and
 nothing on this side can help. See the [Known
-gotchas](../README.md#known-gotchas) entry.
+gotchas](../gotchas.md) entry.
 
 ### OIDC login: corliss is the only way in
 
@@ -224,7 +224,7 @@ makes Open WebUI always trust the environment instead, which is also just the
 *correct* model here: this repo's whole premise is that config lives in git,
 not a mutable runtime database (same reasoning as the proxy role's
 git-tracked Caddyfile). See the [Known
-gotchas](../README.md#known-gotchas) entry — this one first surfaced as a
+gotchas](../gotchas.md) entry — this one first surfaced as a
 non-obvious bug (`ENABLE_LOGIN_FORM=false` deployed cleanly but the local
 email/password form kept showing) precisely because open-webui had already
 booted once before this setting existed.
@@ -363,7 +363,7 @@ The **first** user to sign up becomes the admin; there's no seeded account.
   `nomic-embed-text-v1.5` retrieves poorly without them, and litellm passes input
   through verbatim — so the *client* (Open WebUI's RAG pipeline) must add them. Noted
   so mediocre retrieval isn't re-debugged as a model fault (see the litellm floor
-  embedder gotcha in the [main docs](../README.md#known-gotchas)).
+  embedder gotcha in the [main docs](../gotchas.md)).
 - **Don't "simplify" the trust setup to one CA file.** `SSL_CERT_FILE` must point
   at the **merged** system bundle, not at an Origin CA root on its own — the app
   also makes ordinary public HTTPS calls, and a single-CA bundle would break

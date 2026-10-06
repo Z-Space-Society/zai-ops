@@ -1,0 +1,43 @@
+---
+# List the containers that exist on the Proxmox node — read-only.
+#
+#   ansible-playbook ct-status.yml -e out=/tmp/cts
+#
+# Writes one "<vmid> <name>" line per container to `out`. scn-config's
+# Provision Containers screen reads it to mark each service as new (will be
+# created) or existing (will be rebuilt), and to catch a CTID that is held by a
+# container the cluster didn't create. Same token and module family as
+# verify-proxmox.yml; VM.Audit in the ZaiProvision role is what allows the list.
+
+- name: List the containers on the Proxmox node
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require an output path
+      ansible.builtin.assert:
+        that: out is defined and (out | string | length) > 0
+        fail_msg: "Pass the file to write, e.g. -e out=/tmp/cts"
+
+    - name: Query the node's containers via the API token
+      community.proxmox.proxmox_vm_info:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        # Proxmox serves a self-signed cert; keep validation off. Explicit because
+        # community.proxmox 2.0.0 flips the default to true (see provision.yml).
+        validate_certs: false
+        node: "{{ proxmox_node_name }}"
+        type: lxc
+      register: pve_cts
+
+    - name: Write the container list
+      ansible.builtin.copy:
+        dest: "{{ out }}"
+        content: |
+          {% for ct in pve_cts.proxmox_vms %}
+          {{ ct.vmid }} {{ ct.name | default('-') }}
+          {% endfor %}
+        mode: "0600"
+      changed_when: false

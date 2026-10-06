@@ -4,7 +4,7 @@
 # injected below). A service must be assigned a CTID first; then drive it by its
 # logical name:
 #
-#   zai-assign proxy 110                  # record proxy → CTID 110 (10.1.1.110)
+#   scn-config                            # record each service's CTID (10.1.1.<ctid>)
 #   ansible-playbook provision.yml --limit proxy
 #
 # The CTID comes from the runtime assignment (inventory/local.yml); this play
@@ -64,7 +64,7 @@
         that: ctid is defined
         fail_msg: >-
           {{ inventory_hostname }} has no CTID —
-          run: zai-assign {{ inventory_hostname }} <ctid>
+          run: scn-config
       when: ct_netif is defined
 
     - name: List the container templates on local storage

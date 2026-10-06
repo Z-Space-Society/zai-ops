@@ -1,10 +1,10 @@
 ---
 # Group vars for every service container. These DERIVE per-host facts from the
 # one piece of runtime data the assign action records — `ctid` — so the committed
-# blueprint (inventory/hosts.yml) stays number-free and nothing can drift.
+# blueprint (inventory/hosts.yml) carries no assignments and nothing can drift.
 #
 # `ctid` is supplied per host by the git-ignored inventory/local.yml, written by
-# `zai-assign <service> <ctid>` (ansible/assign.yml). A service with no assignment
+# `scn-config` (ansible/assign.yml). A service with no assignment
 # has no ctid, so these templates stay unresolved until one exists — provision.yml
 # asserts ctid is present before it tries to create the CT.
 

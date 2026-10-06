@@ -81,7 +81,7 @@
 {% endif %}
 {% for h in caddy_proxy_hosts %}
 {# A route to a service with no CTID has no upstream address to render
-   (ansible_host is 10.1.1.<ctid>), so it is skipped until `zai-assign` gives
+   (ansible_host is 10.1.1.<ctid>), so it is skipped until `scn-config` assigns
    the service one. Without this, a route added to the defaults for a new
    service fails this template on every cluster that has not assigned it yet.
    `root:` routes name a directory, not a service, and always render. #}

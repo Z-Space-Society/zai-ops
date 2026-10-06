@@ -152,7 +152,7 @@ Out of the box, everything unreproducible on the PDS is in `/var/lib/pds`.
 `bin/zai-backup` carries a guarded (`pds_enabled=false`) Tier-2 block that
 streams that dir over SSH into the restic repo (`--tag zai-pds`); to enable:
 
-1. `zai-assign pds <ctid>` and provision, so the CT exists and
+1. Assign `pds` a CTID in `scn-config` and provision, so the CT exists and
    `hostvars['pds'].ansible_host` resolves.
 2. Add `export ZAI_PDS_HOST="10.1.1.<ctid>"` to `/etc/zai-backup/restic.env`
    (rendered by the `backup` role — a follow-up can add it to

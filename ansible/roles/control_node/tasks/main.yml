@@ -58,11 +58,14 @@
 # control node can't probe a service CT's HTTP health endpoint by hand (the
 # playbooks use ansible.builtin.uri, but an operator at a shell reaches for curl).
 # Install them here so `curl http://10.1.1.<ctid>:4000/health/...` just works.
-- name: Install operator diagnostic CLI tools
+# whiptail draws scn-config's menu; bootstrap seeds it so the menu works before
+# this role has run, and it is re-asserted here as the owning role.
+- name: Install operator CLI tools
   ansible.builtin.apt:
     name:
       - curl
       - jq
+      - whiptail
     state: present
 
 # Service CTs are created with this public key injected into their root
@@ -85,10 +88,10 @@
     owner: root
     group: root
 
-# Operator commands (zai-assign, zai-backup, …) live in the repo's bin/ and run
+# Operator commands (scn-config, zai-backup, …) live in the repo's bin/ and run
 # in place — nothing is copied to /usr/local/bin, so the command you run is always
 # the one in git and a `git pull` is enough to update it. Put bin/ on PATH so
-# they're discoverable as `zai-*`. Bootstrap seeds these same hooks (so a fresh
+# they're discoverable by name. Bootstrap seeds these same hooks (so a fresh
 # `pct enter` works before site.yml runs); we re-assert them here as the owning
 # role — same seed-then-own pattern as the locale above.
 - name: Put the repo's bin/ on PATH (login shells via /etc/profile.d)
@@ -99,7 +102,7 @@
     mode: "0644"
     # Guard against re-prepending in nested shells so PATH doesn't grow.
     content: |
-      # Managed by zai-ops. Operator commands (zai-assign, zai-backup) live in the repo.
+      # Managed by zai-ops. Operator commands (scn-config, zai-backup) live in the repo.
       case ":$PATH:" in
         *:/opt/zai-ops/bin:*) ;;
         *) export PATH="/opt/zai-ops/bin:$PATH" ;;

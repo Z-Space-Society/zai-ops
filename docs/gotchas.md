@@ -379,11 +379,6 @@ Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
   re-consent at their PDS, and in-flight sessions die. Nothing errors; it just
   silently becomes a different client. Bundle any such move into a single
   cutover rather than paying the re-consent twice.
-- **A wildcard origin cert does not cover the apex.** `*.example.com` matches
-  `chat.example.com` but *not* `example.com`, and corliss is served at the
-  apex — so a wildcard-only Cloudflare Origin CA cert makes the bare domain
-  answer **526** under Full (strict) while every subdomain keeps working. Issue
-  the cert for `example.com, *.example.com`.
 
 Lessons on **Caddy obtaining its own certs** (the [`proxy`](roles/proxy.md)
 role's `caddy_tls_mode: acme`). Both of these look like bugs in the rendered

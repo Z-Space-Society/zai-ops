@@ -65,10 +65,9 @@ itself from this repo.
      them all together. Scripted: `scn-config nonint set-domain example.com`.
    - **Set TLS**: how the proxy gets its TLS certificate. Skip it and the
      cluster is its own edge (`acme`: Caddy obtains and renews Let's Encrypt
-     certs, so public `:80` must reach the proxy CT). Choose `none` to stand
-     the proxy up HTTP-only before DNS exists or behind another edge, or
-     `origin_ca` if Cloudflare proxies the domain. Scripted:
-     `scn-config nonint set-tls <mode>`. See
+     certs, so public `:80` and `:443` must reach the proxy CT). Choose `none`
+     to stand the proxy up HTTP-only before DNS exists or behind another edge.
+     Scripted: `scn-config nonint set-tls <mode>`. See
      [TLS modes](docs/roles/proxy.md#tls-modes).
    - **`zai-set-registry client_key`** — the registry's public, origin-bound
      HappyView client key, passed to [corliss](docs/roles/corliss.md) for its

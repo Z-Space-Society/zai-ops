@@ -1,7 +1,7 @@
 ---
 # Install and configure Caddy as the reverse-proxy edge. A single apt package,
 # and the config is a declarative Caddyfile rendered from caddy_proxy_hosts, so
-# the CT keeps no unreproducible state (routes in git, cert in the vault).
+# the CT keeps no unreproducible state (routes in git, certs reissued on demand).
 
 # Routes derive their public domain from cluster_domain (api.{{ cluster_domain }}),
 # which is per-cluster runtime data. Fail fast with an actionable message if routes
@@ -15,38 +15,31 @@
       run: scn-config nonint set-domain <domain>
   when: caddy_proxy_hosts | length > 0
 
+# origin_ca (a Cloudflare Origin CA cert from the vault, for a domain Cloudflare
+# proxied) was removed. A cluster that still has it recorded in local.yml would
+# otherwise hit the generic mode assert below, which says what is wrong but not
+# what to do about it. Rendering acme for it instead would be worse: Let's
+# Encrypt attempted from behind Cloudflare, and 52x on every public route.
+- name: Refuse the removed origin_ca TLS mode
+  ansible.builtin.assert:
+    that: caddy_tls_mode != 'origin_ca'
+    fail_msg: >-
+      caddy_tls_mode is 'origin_ca', which this repo no longer supports: Caddy
+      gets its own Let's Encrypt certificates now. Nothing was changed on the
+      proxy. To move this cluster: set its DNS records to DNS-only (not proxied
+      by Cloudflare), make sure public ports 80 and 443 reach the proxy CT, then
+      run: scn-config nonint set-tls acme [email] and provision the proxy again.
+      See docs/roles/proxy.md, "origin_ca was removed".
+
 # The template branches on the exact mode string, so a typo would render a
 # Caddyfile meant for no mode at all, and `caddy validate` checks syntax, not
-# intent. Forcing origin_ca without the vault material would otherwise fail
-# inside a no_log task, which hides the undefined-variable error it hit.
-- name: Require a known caddy_tls_mode, with the material origin_ca needs
+# intent.
+- name: Require a known caddy_tls_mode
   ansible.builtin.assert:
-    that:
-      - caddy_tls_mode in ['origin_ca', 'acme', 'none']
-      - >-
-        caddy_tls_mode != 'origin_ca' or
-        (cloudflare_origin_cert is defined and cloudflare_origin_key is defined)
+    that: caddy_tls_mode in ['acme', 'none']
     fail_msg: >-
-      caddy_tls_mode is '{{ caddy_tls_mode }}': it must be origin_ca, acme or
-      none, and origin_ca needs cloudflare_origin_cert and cloudflare_origin_key
-      in the vault.
-
-# acme is the default, so a cluster that relied on the old vault inference would
-# quietly switch from origin_ca to acme on its first replay after pulling: no
-# Origin CA cert served, Let's Encrypt attempted from behind Cloudflare, and 52x
-# errors on every public route. A vault holding the cert is the sign of such a
-# cluster, so refuse to render until the mode is chosen. hostvars carries the
-# inventory (where scn-config (Set TLS) records the mode, in local.yml) and -e, but not
-# role defaults, so this passes only for a mode someone actually picked.
-- name: Require a recorded caddy_tls_mode when the vault holds an Origin CA cert
-  ansible.builtin.assert:
-    that: >-
-      cloudflare_origin_cert is not defined or
-      hostvars[inventory_hostname]['caddy_tls_mode'] is defined
-    fail_msg: >-
-      The vault holds cloudflare_origin_cert but no caddy_tls_mode is recorded,
-      and the default is now acme. Run: scn-config nonint set-tls origin_ca (Cloudflare
-      proxies this domain), or scn-config nonint set-tls acme to confirm acme.
+      caddy_tls_mode is '{{ caddy_tls_mode }}': it must be acme or none. Record
+      it with: scn-config nonint set-tls <acme|none>
 
 # Caddy from Debian BACKPORTS, version-pinned. Still Debian-built and
 # Debian-signed, so this keeps the original "no third-party apt key" property
@@ -110,33 +103,16 @@
     state: present
     update_cache: true
 
-# Cloudflare Origin CA cert + key (long-lived, no ACME) come from the vault, in
-# origin_ca mode only. Gated on the mode, not caddy_tls_enabled: acme serves TLS
-# too but has no vault material, so these vars are undefined there. Installed
-# before the Caddyfile so the `tls` directive's files exist when the config is
-# validated/started. Key is 0600 owned by the caddy daemon user; the cert is
-# world-readable (it's public).
-- name: Install the Cloudflare Origin CA certificate
-  ansible.builtin.copy:
-    content: "{{ cloudflare_origin_cert }}"
-    dest: "{{ caddy_cert_path }}"
-    owner: caddy
-    group: caddy
-    mode: "0644"
-  no_log: true
-  when: caddy_tls_mode == 'origin_ca'
-  notify: reload caddy
-
-- name: Install the Cloudflare Origin CA private key
-  ansible.builtin.copy:
-    content: "{{ cloudflare_origin_key }}"
-    dest: "{{ caddy_key_path }}"
-    owner: caddy
-    group: caddy
-    mode: "0600"
-  no_log: true
-  when: caddy_tls_mode == 'origin_ca'
-  notify: reload caddy
+# What origin_ca mode left behind: the Origin CA cert and its private key. No
+# mode reads them any more, so a cluster that moved to acme would otherwise keep
+# a private key on disk until someone removed it by hand.
+- name: Remove the Origin CA cert and key left by the removed origin_ca mode
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/caddy/cloudflare-origin.pem
+    - /etc/caddy/cloudflare-origin.key
 
 # Render the routes. `validate` is the nginx -t analog — a bad Caddyfile (e.g. an
 # upstream service with no CTID) fails the task instead of being deployed.

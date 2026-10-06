@@ -8,7 +8,7 @@
 #   scn-config nonint set-domain example.com
 #   scn-config nonint show-tls                   # how the proxy gets its certificate
 #   scn-config nonint set-tls acme ops@example.org   # acme (the default, contact
-#                                                #   optional), none or origin_ca
+#                                                #   optional) or none
 #   scn-config nonint show-ctid                  # service / CTID / default table
 #   scn-config nonint assign-ctid proxy 110      # assign one service
 #   scn-config nonint assign-ctid-defaults       # assign every unassigned service
@@ -60,7 +60,7 @@ usage: scn-config
        scn-config nonint show-domain
        scn-config nonint set-domain <domain>
        scn-config nonint show-tls
-       scn-config nonint set-tls <acme|none|origin_ca> [email]
+       scn-config nonint set-tls <acme|none> [email]
        scn-config nonint show-ctid
        scn-config nonint assign-ctid <service> <ctid> [--reassign]
        scn-config nonint assign-ctid-defaults
@@ -225,12 +225,14 @@ set_domain() { ansible-playbook set-domain.yml -e "domain=$1"; }
 # how set-tls.yml knows to drop a contact recorded earlier.
 set_tls() { ansible-playbook set-tls.yml -e "tls_mode=$1" -e "acme_email=${2:-}"; }
 
-# proxy_tls_label <acme|none|origin_ca> — how to say it to a person.
+# proxy_tls_label <acme|none>: how to say it to a person. origin_ca is a mode
+# that was removed: a cluster can still have it recorded, and the proxy refuses
+# to provision until it is changed.
 proxy_tls_label() {
   case "$1" in
     acme) echo "Caddy's own Let's Encrypt certificates" ;;
     none) echo "plain HTTP, no certificate" ;;
-    origin_ca) echo "Cloudflare Origin CA certificate from the vault" ;;
+    origin_ca) echo "removed, choose acme or none" ;;
     *) echo "$1" ;;
   esac
 }
@@ -760,10 +762,9 @@ do_tls_menu() {
 Caddy gets and renews its own certificates unless you choose otherwise."
   mode="$(whiptail --backtitle "$BACKTITLE" --title "Set TLS" \
     --ok-button Select --cancel-button Back --default-item "${TLS_MODE:-acme}" \
-    --menu "$text" "$(box_height "$text" 11)" "$WT_WIDTH" 3 \
+    --menu "$text" "$(box_height "$text" 10)" "$WT_WIDTH" 2 \
     "acme" " (default) Caddy's own Let's Encrypt certificates" \
     "none" " Plain HTTP: another edge in front, or before DNS exists" \
-    "origin_ca" " Cloudflare proxies the domain (cert from the vault)" \
     3>&1 1>&2 2>&3)" || return 0
 
   if [ "$mode" = acme ]; then

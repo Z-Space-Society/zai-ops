@@ -108,8 +108,8 @@ ansible-playbook provision.yml --limit proxy    # or provision one by hand
   the internal services. Its routes are declarative in git ([`proxy`
   role](roles/proxy.md)) — rendered into a `Caddyfile` from `caddy_proxy_hosts`,
   not held in a UI database — so the CT holds nothing that needs backing up. Only
-  one public hostname should point at a given proxy at a time (controlled at
-  Cloudflare).
+  one public hostname should point at a given proxy at a time (controlled in
+  DNS).
 - **Every other CT** (postgres, redis, happyview, litellm, sync-relay, corliss,
   open-webui) lives only on the internal network and is reached through the
   proxy — except [`sync-relay`](roles/sync_relay.md), which has no route at all
@@ -288,15 +288,13 @@ TLS** entry, or scripted:
 scn-config nonint show-tls                          # what is recorded, or the default
 scn-config nonint set-tls acme ops@example.org      # explicit acme, optional Let's Encrypt contact
 scn-config nonint set-tls none                      # external edge in front, or pre-DNS smoke test
-scn-config nonint set-tls origin_ca                 # Cloudflare proxies the domain (needs the vault cert/key)
 ```
 
 `acme` is the role default, so a cluster that never sets it is its own edge and
 Caddy obtains and renews Let's Encrypt certs. The menu offers to provision the
 proxy once a mode is saved. Both are a front end to
 [`set-tls.yml`](#playbooks). The playbook validates that the mode is one of the
-three, that an email comes only with `acme`, and that `origin_ca` has
-`cloudflare_origin_cert` and `cloudflare_origin_key` in the vault. It then
+two and that an email comes only with `acme`. It then
 **read-modify-writes** `all.vars.caddy_tls_mode` (and `caddy_acme_email`) in the
 same `inventory/local.yml`, keeping the CTID assignments, inference roster and
 `cluster_domain`. The email is rebuilt with the mode rather than merged, so
@@ -304,9 +302,9 @@ switching away from `acme`, or re-running `acme` without an email, removes a sta
 contact. Re-recording the current setting is an idempotent no-op. Replay the proxy
 to apply it.
 
-The mode used to be inferred from the vault. An existing cluster must record its
-mode after pulling that change and before its next proxy replay; see
-[the migration table](roles/proxy.md#migration-record-the-mode-before-the-first-replay).
+A third mode, `origin_ca` (a Cloudflare Origin CA cert from the vault), was
+removed. A cluster that still has it recorded gets a failed proxy run that names
+the fix; see [`origin_ca` was removed](roles/proxy.md#origin_ca-was-removed).
 
 ---
 
@@ -388,7 +386,7 @@ PATH when the control node is configured. The convention:
 | Command | Does | Backed by |
 | ------- | ---- | --------- |
 | `scn-config` | Menu-driven cluster configuration, in the order a new cluster needs it: configure the control node and check the API token, set the [domain](#cluster-domain) and the [TLS mode](#cluster-tls-mode), assign each service its CTID ([Service CTID assignment](#service-ctid-assignment)), provision the assigned services in dependency order, manage the cluster's admins, and set the outbound mail relay | [`assign.yml`](#playbooks), [`provision.yml`](#playbooks), [`admins.yml`](#playbooks), [`set-smtp.yml`](#playbooks), and `site.yml`, `verify-proxmox.yml`, `set-domain.yml`, `set-tls.yml` |
-| `scn-config nonint <command>` | The same, scripted: `setup`; `show-domain`, `set-domain <domain>`; `show-tls`, `set-tls <acme\|none\|origin_ca> [email]`; `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults`; `show-admins`, `add-admin <handle-or-did> [--admit] [--tier T]`, `remove-admin <handle-or-did>`, `apply-admins [corliss] [pds]` (gives the roster as it stands to everything that keeps a copy; all of them when none is named); `show-smtp`, `set-smtp` (URL on stdin), `clear-smtp` | the same playbooks |
+| `scn-config nonint <command>` | The same, scripted: `setup`; `show-domain`, `set-domain <domain>`; `show-tls`, `set-tls <acme\|none> [email]`; `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults`; `show-admins`, `add-admin <handle-or-did> [--admit] [--tier T]`, `remove-admin <handle-or-did>`, `apply-admins [corliss] [pds]` (gives the roster as it stands to everything that keeps a copy; all of them when none is named); `show-smtp`, `set-smtp` (URL on stdin), `clear-smtp` | the same playbooks |
 | `zai-set-node <node>` | Record the Proxmox node name (bootstrap does this automatically) | [`set-node.yml`](#playbooks) |
 | `zai-set-registry <key> <value>` | Record a membership-registry identity (`client_key`, `service_did`), read by [corliss](roles/corliss.md) | [`set-registry.yml`](#playbooks) |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |

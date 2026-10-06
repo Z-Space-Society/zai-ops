@@ -26,7 +26,7 @@ are bare metal, outside the Proxmox host entirely.
 ```mermaid
 flowchart TB
     members["Members<br/>browsers and API clients"]
-    cf["Cloudflare<br/>DNS + origin cert"]
+    cf["DNS"]
 
     subgraph host["Proxmox host — NAT gateway 10.1.1.1"]
         direction TB

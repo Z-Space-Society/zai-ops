@@ -253,8 +253,8 @@ LiteLLM until deleted by hand, so it is worth pruning when that happens.
   pointed at corliss (already wired in `open-webui`'s own defaults/template).
 - **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts` at the
   apex `{{ cluster_domain }}`; set the domain once with `scn-config` (Set Domain). The
-  origin cert must cover the apex — a wildcard-only `*.<domain>` cert does
-  **not**, and Cloudflare answers such a request with a 526.
+  apex needs its own DNS record: a wildcard `*.<domain>` record does **not**
+  cover the bare domain.
 - **A CTID assigned for [`sync-relay`](sync_relay.md), [`redis`](redis.md),
   [`object-store`](object_store.md) and [`proxy`](proxy.md)** — the `/systems/`
   probe URLs derive from their `hostvars`, unguarded, so an unassigned one fails

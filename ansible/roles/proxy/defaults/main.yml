@@ -1,41 +1,29 @@
 ---
 # Caddy — the cluster's reverse-proxy edge. Routes are declarative and committed
 # here (caddy_proxy_hosts), not held in a UI/SQLite DB, so the CT holds no
-# unreproducible state (config in git, cert in the vault).
-
-# Where the Cloudflare Origin CA cert/key land on the CT. The material itself is
-# a secret and comes from the vault (cloudflare_origin_cert/_key); these are just
-# the install paths the Caddyfile points its `tls` directive at.
-caddy_cert_path: /etc/caddy/cloudflare-origin.pem
-caddy_key_path: /etc/caddy/cloudflare-origin.key
+# unreproducible state (config in git, certs reissued by Caddy on demand).
 
 # How this edge gets its certificate. Which mode is right depends on what sits in
 # front of the proxy CT, and that is a fact about the deployment, not the role,
 # so it is recorded per cluster with `scn-config`, Set TLS (set-tls.yml writes it to the
 # runtime inventory, inventory/local.yml):
 #
-#   origin_ca  Cloudflare PROXIES the domain (orange cloud) and runs Full (strict)
-#              to this origin. The long-lived Origin CA cert comes from the vault.
-#              Only Cloudflare trusts that cert, so it is useless anywhere else.
-#   acme       The domain resolves straight to this edge (DNS-only, grey cloud, or
-#              no Cloudflare at all). Caddy obtains and renews its own Let's
-#              Encrypt cert per hostname over HTTP-01, so public :80 MUST reach
-#              the proxy CT. Nothing about the cert lives in the vault or git.
+#   acme       The domain resolves straight to this edge. Caddy obtains and
+#              renews its own Let's Encrypt cert per hostname, so public :80 and
+#              :443 MUST reach the proxy CT. Nothing about the cert lives in the
+#              vault or git.
 #   none       Plain HTTP on :80. Either no cert can be issued yet (bring the CT
 #              up and smoke-test it before DNS and the :80/:443 forwards exist),
 #              or an external edge terminates TLS in front of this one (see
 #              caddy_trusted_proxies).
 #
 # acme is the default, so a cluster that never runs the setter is its own edge.
-# That is the shape new clusters take (staging, COAI replication), and the
-# direction is off Cloudflare. origin_ca and none each need `scn-config` (Set TLS).
+# none needs `scn-config` (Set TLS).
 #
-# This deliberately reverses #10/#11, which inferred the mode from the vault
-# (origin_ca when cloudflare_origin_cert was defined, none otherwise). That made
-# the mode a side effect of what the vault held, and left acme no way to persist.
-# A cluster that relied on the inference must run `scn-config` (Set TLS) before its next
-# proxy replay; tasks/main.yml fails the run when a vault cert suggests that step
-# was skipped.
+# There was a third mode, origin_ca, which served a Cloudflare Origin CA cert
+# from the vault for a domain Cloudflare proxied. It is removed: every cluster
+# terminates its own TLS now. tasks/main.yml fails the run for a cluster that
+# still has it recorded, naming the fix. See docs/roles/proxy.md.
 caddy_tls_mode: acme
 
 # Derived, not a knob: "does this edge serve :443 at all". Kept because the :80
@@ -93,9 +81,7 @@ caddy_proxy_hosts:
   # PDS_ADMIN_DIDS is the whole door; see docs/roles/pds.md.
   - { domain: "pds.{{ cluster_domain }}", service: pds, port: 3000 }
   # Corliss owns the APEX (ADR-0006), not a subdomain: its OIDC issuer is the
-  # bare origin, and discovery has to sit at <issuer>/.well-known/... . Note
-  # this is the one route a wildcard-only origin cert does NOT cover — the
-  # cert must carry the apex as a SAN too.
+  # bare origin, and discovery has to sit at <issuer>/.well-known/... .
   - { domain: "{{ cluster_domain }}", service: corliss, port: 8000 }
 
 # --- Caddy package source and version ---------------------------------------

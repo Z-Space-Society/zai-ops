@@ -90,6 +90,12 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # --locked` and v0.1.0 aren't compatible in either direction, so don't pin back
 # past v0.2.0 without reverting the uv tasks with it.
 #
+# v1.3.1 shows the in-house PDS on /systems/: a new Platform row that asks the
+# PDS's readiness endpoint and reads its version from the pds manifest. Needs
+# the PDS_URL key in the "Health probes" section at the foot of this file, which
+# is blank on a cluster with no PDS assigned (the row then reads "unknown"). A
+# pin below v1.3.1 ignores the key and shows no row. No migration.
+#
 # v1.3.0 lets the control node manage admins: `make_admin --admit [--tier T]`
 # admits a non-member (an ordinary grant, authored by the service account)
 # before appointing them, and a new `list_admins` prints the roster and the
@@ -353,7 +359,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v1.3.0
+corliss_version: v1.3.1
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -655,6 +661,22 @@ console_client_key: ""
 # play. Keep in sync with sync_relay_port.
 corliss_sync_relay_port: 7030
 corliss_sync_relay_url: "http://{{ hostvars['sync-relay'].ansible_host }}:{{ corliss_sync_relay_port }}"
+
+# The in-house PDS. Probed at /xrpc/_health, its readiness endpoint, so "up"
+# means the process is serving and its storage answered. Needs corliss_version
+# v1.3.1 or later; an older pin ignores the key and shows no row.
+#
+# GUARDED, unlike its neighbours, and on purpose: the PDS is the one service a
+# cluster can run without. An unguarded reach into hostvars would fail this
+# whole role, and with it every Corliss deploy, on a cluster that has not
+# assigned pds. Blank is the honest answer there and Corliss shows the row as
+# "unknown". Same reasoning as the proxy role skipping the route of a service
+# with no CTID.
+#
+# The port is a local default, the corliss_sync_relay_port convention. Keep in
+# sync with pds_port.
+corliss_pds_port: 3000
+corliss_pds_url: "{{ ('http://' ~ hostvars['pds'].ansible_host ~ ':' ~ corliss_pds_port) if hostvars['pds'].ctid is defined else '' }}"
 
 # Redis, as something to DIAL — not a cache backend. Corliss holds no Redis
 # client and no redis dependency: the probe writes PING to a socket and reads the

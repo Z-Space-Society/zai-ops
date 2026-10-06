@@ -133,6 +133,11 @@ None beyond the build toolchain — no Postgres, no Redis, no S3; SQLite-only
 and single-instance by design. `provision.yml` runs the `pds` play after
 nothing in particular.
 
+Nothing depends on it either, which is why it is the one optional service: the
+proxy skips its route, and [Corliss](corliss.md) renders a blank `PDS_URL`,
+until `pds` has a CTID. Once it does, replay `corliss` so the PDS row on
+`/systems/` gets an address to check. The row's Version comes from `pds.json`.
+
 ## Verify
 
 ```

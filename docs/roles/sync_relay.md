@@ -80,7 +80,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/sync_relay/defaults/main.ym
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `sync_relay_version` | `0.1.0` | Tag checked out and built (the role prefixes `v`). Bump to upgrade; the clone and build tasks re-run when this changes. `0.1.0` is Phase A — protocol + storage, no enforcement. |
+| `sync_relay_version` | `0.1.2` | Tag checked out and built (the role prefixes `v`). Bump to upgrade; the clone and build tasks re-run when this changes. `0.1.2` is Phase A (protocol and storage, no enforcement) on samod 0.15. |
 | `sync_relay_require_auth` | `false` | **Phase A only.** The binary defaults this to `true` and refuses to start when true. See the danger note above before changing it. |
 | `sync_relay_port` / `sync_relay_host` | `7030` / `0.0.0.0` | Listen socket. The wildcard is mandatory — binding a literal `10.1.1.x` loses a cold-boot race with `systemd-networkd` and comes up silently loopback-only. |
 | `sync_relay_home` / `_bin` / `_src` | `/opt/scn-sync-relay[/bin/scn-sync-relay, /src]` | Install path, binary path, source checkout. |

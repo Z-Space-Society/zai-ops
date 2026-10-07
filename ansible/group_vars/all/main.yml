@@ -189,6 +189,18 @@ corliss_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir 
 corliss_atproto_ec_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/corliss_atproto_ec.pem && cat ' ~ _zai_secrets_dir ~ '/corliss_atproto_ec.pem || (openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve | tee ' ~ _zai_secrets_dir ~ '/corliss_atproto_ec.pem)') }}"
 corliss_oidc_rsa_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/corliss_oidc_rsa.pem && cat ' ~ _zai_secrets_dir ~ '/corliss_oidc_rsa.pem || (openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | tee ' ~ _zai_secrets_dir ~ '/corliss_oidc_rsa.pem)') }}"
 
+# scn-chat secrets, same generate-once-and-persist posture as the corliss pair
+# above. SECRET_KEY is the app's symmetric signing secret; OAUTH_PRIVATE_KEYS is
+# the ES256 JWK the atproto OAuth client signs with — lose it and every member
+# re-consents (corliss_atproto_ec_key's argument). The app's OWN `pnpm keys`
+# generator is authoritative for the JWK (it must be the privateJwk the
+# oauth-client library produced), so we cache ITS output; when the file is
+# absent the lookup bootstraps a throwaway /root/scn-chat checkout on the
+# control node (one-time, ~30s). Both ride the Tier-1 control-node backup of
+# /root/.zai-secrets — no separate escrow path.
+scn_chat_secret_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/scn_chat_secret_key && cat ' ~ _zai_secrets_dir ~ '/scn_chat_secret_key || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/scn_chat_secret_key)') }}"
+scn_chat_oauth_private_keys: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/scn_chat_oauth_private_keys && cat ' ~ _zai_secrets_dir ~ '/scn_chat_oauth_private_keys || (test -d /root/scn-chat || git clone --depth 1 https://github.com/Z-Space-Society/scn-chat /root/scn-chat && cd /root/scn-chat && pnpm install --silent --frozen-lockfile >/dev/null 2>&1 && pnpm keys 2>/dev/null | grep '^OAUTH_PRIVATE_KEYS=' | cut -d= -f2- | tee ' ~ _zai_secrets_dir ~ '/scn_chat_oauth_private_keys)') }}"
+
 # The sync relay's Postgres password, same generate-once-and-persist posture as
 # the pairs above. Hex, so it needs no percent-encoding inside the
 # SCN_SYNC_RELAY_DATABASE_URL the role builds from it.

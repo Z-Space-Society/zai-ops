@@ -56,6 +56,7 @@ sides in the same change.
 | `happyview.json` | [`happyview`](happyview.md) | `happyview_version` |
 | `sync-relay.json` | [`sync_relay`](sync_relay.md) | `sync_relay_version` |
 | `pds.json` | [`pds`](pds.md) | `pds_version` |
+| `scn-chat.json` | [`scn_chat`](scn_chat.md) | `scn_chat_version` |
 
 Each object is:
 

@@ -676,6 +676,15 @@ console_client_key: ""
 corliss_sync_relay_port: 7030
 corliss_sync_relay_url: "http://{{ hostvars['sync-relay'].ansible_host }}:{{ corliss_sync_relay_port }}"
 
+# scn-chat — the SCN AI-assistant chat app. Probed at /api/health, which runs
+# a `select 1` against sqlite and 503s on failure — a green dot means the
+# process is serving AND its storage answered (the strongest probe in the
+# list). Needs a corliss release that renders the SCN_CHAT_URL key; an older
+# pin ignores the key and shows no row. Unguarded like sync-relay: scn-chat is
+# a service we run, not a maybe.
+corliss_scn_chat_port: 3000
+corliss_scn_chat_url: "http://{{ hostvars['scn-chat'].ansible_host }}:{{ corliss_scn_chat_port }}"
+
 # The in-house PDS. Probed at /xrpc/_health, its readiness endpoint, so "up"
 # means the process is serving and its storage answered. Needs corliss_version
 # v1.3.1 or later; an older pin ignores the key and shows no row.

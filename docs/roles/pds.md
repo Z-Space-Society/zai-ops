@@ -23,7 +23,8 @@ the two deployments. It is identity infrastructure: platform tier, beside the
 gateway and the sync relay.
 
 Why this engine (see zai-ops#7): it is the only candidate with **delegated
-admin today** (`PDS_ADMIN_DIDS`, `com.atproto.admin.*`) **and** permissioned
+invite minting today** (`PDS_ADMIN_DIDS`; narrower than first read, see
+[Admin surface](#admin-surface)) **and** permissioned
 data (0016 spaces), builds as one Rust binary (no Docker), and fits the
 Caddy-edge + systemd conventions of this repo. It is **SQLite-only** (per-actor
 DBs + shared `accounts.sqlite`, Postgres/S3 refuse at boot) and **single
@@ -68,7 +69,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | `pds_service_did` | `did:web:pds.{{ cluster_domain }}` | the PDS's own service identity |
 | `pds_handle_domains` | `[".{{ cluster_domain }}"]` | handle namespace accounts get (SCN: `*.sharedcomputer.network`) |
 | `pds_crawlers` | `["https://bsky.network"]` | who may crawl/announce (TODO(decision): own relay?) |
-| `pds_admin_dids` | from the roster | delegated admins. Not stored: `provision.yml`'s pds play reads the cluster's public admin roster and uses its current admins. Empty leaves `PDS_ADMIN_DIDS` out of the env file |
+| `pds_admin_dids` | from the roster | DIDs that may mint invite codes, and nothing else. Not stored: `provision.yml`'s pds play reads the cluster's public admin roster and uses its current admins. Empty leaves `PDS_ADMIN_DIDS` out of the env file |
 | `pds_email_from_address` | `pds@{{ cluster_domain }}` | the From address the PDS sends as; mail is off until the cluster relay (`smtp_url`) is also set |
 | `pds_delegation_enabled` | `true` | account delegation (`/account/delegation`), default ON (boris). Needs an HTTPS origin (Caddy) and a P-256 OAuth signing key, which the server generates on first boot |
 | `pds_data_dir` | `/var/lib/pds` | accounts.sqlite + repos + blobs; the unit's only `ReadWritePaths` |
@@ -91,7 +92,7 @@ wired yet.
 | Secret | For |
 |---|---|
 | `pds_jwt_secret` | signing JWTs the server issues, access and refresh tokens included |
-| `pds_admin_password` | the `/admin` staff dashboard (break-glass) |
+| `pds_admin_password` | the admin credential: HTTP basic auth for the `/admin` dashboard, every `com.atproto.admin.*` route and the `atproto-pds-admin` CLI. Not break-glass; it is how the server is administered |
 | `pds_oauth_jwk_set` *(optional override)* | the PDS's service signing key, as `{"keys": [<private jwk>, ...]}`. Unset, the server generates a **P-256** key on first boot and keeps it in its key store under `/var/lib/pds`, so a fresh install needs nothing here. Only a PDS first booted on a build older than the `f74a3e1` pin needs it: those generated K-256, which account delegation refuses |
 | `pds_plc_rotation_key_private` *(required for recovery)* | operator recovery for identities this server issues; **losing it is losing the accounts**. Wire before the SCN DID migration |
 
@@ -150,16 +151,77 @@ dig pds.<domain>                           # DNS at the edge
 # DID document at https://plc.directory/did:plc:… resolves to our hostname
 ```
 
+## Who signs in where
+
+The server has three separate doors, and none of them accepts another's
+credential. This is the part that is not obvious from the pages themselves.
+
+| Door | Who it is for | Credential |
+|---|---|---|
+| `/account/signin` | someone whose account is **hosted on this PDS**, to change their password or end their sessions | that account's handle (or DID, or email) and its own password. Not an app password, and not the admin password |
+| `/admin`, `com.atproto.admin.*`, `atproto-pds-admin` | the operator | HTTP basic auth with `pds_admin_password` |
+| `com.atproto.server.createInviteCode` | the DIDs in `PDS_ADMIN_DIDS` | a service-auth token signed with the `#atproto` key of their own DID document. There is no page for this |
+
+Two consequences:
+
+- **A cluster admin cannot sign in at `/account/signin`** unless they also hold
+  an account here. Their admin DID lives on whichever PDS hosts it, and that
+  password means nothing to this server. Being on the roster gives a DID the
+  third door only.
+- **A fresh PDS has no accounts**, so `/account/signin` has nothing to accept
+  until the first one is created.
+
+### Creating an account
+
+`PDS_INVITE_REQUIRED=true`, so every account starts with an invite code, and
+the first code has to come from the admin CLI. From CT 100:
+
+```
+ssh pds
+env $(grep -E '^PDS_ADMIN_(PASSWORD|BASE_URL)=' /etc/pds/pds.env) \
+  /opt/pds/bin/atproto-pds-admin invite create
+```
+
+The binary is not on `PATH`, and it reads the password and target from the
+environment; the `env $(grep ...)` prefix lends it those two values from the
+root-only env file without exporting the rest. Then open
+`https://pds.<domain>/account/signin`, follow **Create one**, and enter the
+code. The new account gets a `*.<domain>` handle and can use `/account/signin`
+from then on.
+
+**A code only works on the PDS that minted it.** Staging and production are
+separate servers with separate code tables; a code from one fails on the other
+with `invite code unknown disabled or exhausted`. Check which cluster the shell
+is on before minting (both control nodes show the same prompt).
+
+The same prefix runs the rest of the CLI: `invite list`, `invite disable`,
+`account info`, `account search`, `account delete`, `takedown apply / lift /
+status`. `--help` on any of them lists its flags.
+
 ## Admin surface
 
-The `/admin` dashboard and the `com.atproto.admin.*` API are **not** routed
-publicly (deliberately absent from `caddy_proxy_hosts`). Staff operate them
-over vmbr1 — from CT 100, `ssh pds` then curl `127.0.0.1:3000/xrpc/…`, or the
-`atproto-pds-admin` binary on the CT — and administration by delegated DIDs
-(`PDS_ADMIN_DIDS`) is the sanctioned door. Reconsider exposing a public admin
-route only under explicit review. 
+Administration is by the **admin password**. It is generated on the first
+provision and kept on the control node at `/root/.zai-secrets/pds_admin_password`
+(rendered into `/etc/pds/pds.env` as `PDS_ADMIN_PASSWORD`). It opens:
 
-**Who the delegated admins are is not a zai-ops setting.** Each time the pds
+- the `atproto-pds-admin` CLI on the pds CT, as shown above;
+- the `com.atproto.admin.*` XRPC routes, with basic auth;
+- the HTML dashboard at `GET /admin`, with basic auth.
+
+`PDS_ADMIN_DIDS` is **not** a second admin door. Upstream scopes it to
+`createInviteCode` only: every `com.atproto.admin.*` route still requires the
+password. An account hosted here gets no admin rights either, whoever it
+belongs to.
+
+**The edge does not hide `/admin` yet.** The intent recorded here was that the
+dashboard and admin API stay off the public route and are reached over vmbr1.
+The proxy does not implement that: the `pds.<domain>` entry in
+`caddy_proxy_hosts` forwards the whole hostname, so `/admin` and
+`/xrpc/com.atproto.admin.*` answer at the edge, behind basic auth alone.
+TODO(decision): add a path block at the proxy, or accept basic auth as the
+boundary and drop the claim.
+
+**Who may mint invites is not a zai-ops setting.** Each time the pds
 play runs, [`tasks/roster.yml`](../../ansible/tasks/roster.yml) reads the
 cluster's public admin roster (the `network.sharedcomputer.admin.list` record
 in the `scn_service_did` account's repo, written by
@@ -168,8 +230,8 @@ the PDS and Corliss follow one list:
 
 - **No roster record yet:** the service account alone, the same bootstrap rule
   Corliss applies.
-- **No `scn_service_did` recorded:** no delegated admins; the admin password
-  is the only door.
+- **No `scn_service_did` recorded:** `PDS_ADMIN_DIDS` is left out, and invites
+  come from the admin CLI only.
 - **The roster cannot be read:** the play fails before touching the PDS. It
   never renders an empty list over a good one.
 

@@ -82,16 +82,17 @@ pds_bsky_app_view_did: "did:web:api.bsky.app"
 pds_bsky_app_view_url: "https://api.bsky.app"
 pds_did_plc_url: "plc.directory"
 
-# Delegated admin — DIDs (public, not secrets) allowed to administer the PDS by
-# signing a service-auth token with the #atproto key of their own DID document.
-# The /admin dashboard is deliberately NOT routed publicly — see docs/roles/pds.md.
+# Delegated invite minting: DIDs (public, not secrets) allowed to call
+# createInviteCode by signing a service-auth token with the #atproto key of
+# their own DID document. That is all it grants: every com.atproto.admin.*
+# route and the /admin dashboard take the admin password. See docs/roles/pds.md.
 #
 # Not set here and not recorded anywhere in zai-ops: provision.yml's pds play
 # reads the cluster's public admin roster (tasks/roster.yml) and sets this to
 # its current admins, so the PDS follows the same list Corliss does. This
 # default only applies if the role is used without that play. With the list
-# empty the env template leaves PDS_ADMIN_DIDS out and the admin password is
-# the only admin door.
+# empty the env template leaves PDS_ADMIN_DIDS out and invites come from the
+# admin CLI only.
 pds_admin_dids: []
 
 # Outbound mail. The relay is the cluster's `smtp_url` (group_vars/all/main.yml,

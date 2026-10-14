@@ -204,7 +204,7 @@
 - name: Install the scn-chat systemd unit
   ansible.builtin.template:
     src: scn-chat.service.j2
-    dest: /etc/systemd/system/scn-chat.service
+    dest: "/etc/systemd/system/{{ scn_chat_unit_name }}.service"
     owner: root
     group: root
     mode: "0644"
@@ -214,7 +214,7 @@
 
 - name: Ensure scn-chat is started and enabled
   ansible.builtin.systemd:
-    name: scn-chat
+    name: "{{ scn_chat_unit_name }}"
     state: started
     enabled: true
     daemon_reload: true
@@ -247,5 +247,94 @@
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: scn-chat
+    manifest_service: "{{ scn_chat_manifest_service }}"
     manifest_version: "{{ scn_chat_deployed_version }}"
+
+# --- Webhook auto-deploy receiver (staging profile, spec 0006) --------------
+# A plain Node-stdlib HTTP service + deploy script on the same CT. The
+# receiver validates GitHub's X-Hub-Signature-256 (shared secret), filters
+# pushes on refs/heads/main, then runs the deploy script under a single-flight
+# lock and answers 202 immediately. Node is already here (pinned tarball
+# above); no new deps. Production keeps scn_chat_webhook_enabled=false.
+
+- name: Require the webhook secret before rendering the receiver
+  ansible.builtin.assert:
+    that:
+      - scn_chat_webhook_secret is defined and scn_chat_webhook_secret | length > 0
+    quiet: true
+    fail_msg: >-
+      scn-chat webhook needs scn_chat_webhook_secret (generate-once lookup in
+      group_vars/all/main.yml, /root/.zai-secrets) — docs/roles/scn_chat.md.
+  when: scn_chat_webhook_enabled
+
+- name: Install the scn-chat webhook deploy script
+  ansible.builtin.template:
+    src: scn-chat-deploy.sh.j2
+    dest: "{{ scn_chat_deploy_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: scn_chat_webhook_enabled
+
+- name: Install the scn-chat webhook receiver
+  ansible.builtin.template:
+    src: webhook.js.j2
+    dest: "{{ scn_chat_config_dir }}/webhook.js"
+    owner: root
+    group: root
+    mode: "0644"
+  when: scn_chat_webhook_enabled
+  notify: restart scn-chat-webhook
+
+- name: Install the scn-chat webhook environment
+  ansible.builtin.template:
+    src: scn-chat-webhook.env.j2
+    dest: "{{ scn_chat_config_dir }}/scn-chat-webhook.env"
+    owner: root
+    group: root
+    mode: "0600"
+  when: scn_chat_webhook_enabled
+  no_log: true
+  notify: restart scn-chat-webhook
+
+- name: Install the scn-chat webhook systemd unit
+  ansible.builtin.template:
+    src: scn-chat-webhook.service.j2
+    dest: /etc/systemd/system/scn-chat-webhook.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: scn_chat_webhook_enabled
+  notify:
+    - reload systemd
+    - restart scn-chat-webhook
+
+- name: Ensure the scn-chat webhook is started and enabled
+  ansible.builtin.systemd:
+    name: scn-chat-webhook
+    state: started
+    enabled: true
+    daemon_reload: true
+  when: scn_chat_webhook_enabled
+
+- name: Apply pending webhook restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+  when: scn_chat_webhook_enabled
+
+- name: Verify the webhook receiver is up and rejects unsigned deliveries
+  # A bogus signature must come back 400 — proves the listener answers AND the
+  # HMAC gate is armed (a 200 would mean the signature check is broken). Same
+  # "prove the feature" habit as the /api/health probe above.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ scn_chat_webhook_port }}{{ scn_chat_webhook_path }}"
+    method: POST
+    body: "{}"
+    headers:
+      Content-Type: application/json
+      X-Hub-Signature-256: "sha256=0000000000000000000000000000000000000000000000000000000000000000"
+  register: scn_chat_webhook_probe
+  until: scn_chat_webhook_probe.status == 400
+  retries: 10
+  delay: 3
+  failed_when: scn_chat_webhook_probe.status != 400
+  when: scn_chat_webhook_enabled

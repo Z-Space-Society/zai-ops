@@ -154,6 +154,20 @@ http://{{ h.domain }} {
     handle {
         reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
     }
+{% elif h.paths is defined and h.paths %}
+    # Extra same-host endpoints (e.g. a webhook receiver on its own port):
+    # each `paths:` entry is a handle path-matcher proxied to the port on the
+    # SAME service CT — mutually exclusive with the catch-all below (same
+    # guarantee as the redirects branch). Used by the chat-staging webhook
+    # receiver (spec 0006).
+{% for p in h.paths %}
+    handle {{ p.from }} {
+        reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ p.port }}
+    }
+{% endfor %}
+    handle {
+        reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
+    }
 {% else %}
     reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
 {% endif %}

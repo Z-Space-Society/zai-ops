@@ -201,6 +201,22 @@ corliss_oidc_rsa_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secre
 scn_chat_secret_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/scn_chat_secret_key && cat ' ~ _zai_secrets_dir ~ '/scn_chat_secret_key || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/scn_chat_secret_key)') }}"
 scn_chat_oauth_private_keys: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/scn_chat_oauth_private_keys && cat ' ~ _zai_secrets_dir ~ '/scn_chat_oauth_private_keys || (test -d /root/scn-chat || git clone --depth 1 https://github.com/Z-Space-Society/scn-chat /root/scn-chat && cd /root/scn-chat && pnpm install --silent --frozen-lockfile >/dev/null 2>&1 && pnpm keys 2>/dev/null | grep '^OAUTH_PRIVATE_KEYS=' | cut -d= -f2- | tee ' ~ _zai_secrets_dir ~ '/scn_chat_oauth_private_keys)') }}"
 
+# scn-chat STAGING secrets (spec 0006). The staging preview has its own
+# identity: the OAuth client id is a did:web bound to the staging origin
+# (chat-staging.{{ cluster_domain }}), so it must never share the prod JWK —
+# separate SECRET_KEY + OAUTH_PRIVATE_KEYS, generated the same way (the lookup
+# bootstraps a one-time /root/scn-chat-staging checkout for `pnpm keys`).
+# The staging play maps these into the role's single-tenant var names.
+scn_chat_staging_secret_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/scn_chat_staging_secret_key && cat ' ~ _zai_secrets_dir ~ '/scn_chat_staging_secret_key || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/scn_chat_staging_secret_key)') }}"
+scn_chat_staging_oauth_private_keys: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/scn_chat_staging_oauth_private_keys && cat ' ~ _zai_secrets_dir ~ '/scn_chat_staging_oauth_private_keys || (test -d /root/scn-chat-staging || git clone --depth 1 https://github.com/Z-Space-Society/scn-chat /root/scn-chat-staging && cd /root/scn-chat-staging && pnpm install --silent --frozen-lockfile >/dev/null 2>&1 && pnpm keys 2>/dev/null | grep '^OAUTH_PRIVATE_KEYS=' | cut -d= -f2- | tee ' ~ _zai_secrets_dir ~ '/scn_chat_staging_oauth_private_keys)') }}"
+
+# The GitHub webhook shared secret for the staging auto-deploy receiver (spec
+# 0006) — the HMAC key checked against X-Hub-Signature-256. Hex so it is safe
+# in URLs/headers/env. It lives in two places by design: this lookup (control
+# node, /root/.zai-secrets) + the repo's webhook settings (manual one-time
+# step — rotate BOTH together, see docs/roles/scn_chat.md).
+scn_chat_webhook_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/scn_chat_webhook_secret chars=hexdigits length=64') }}"
+
 # The sync relay's Postgres password, same generate-once-and-persist posture as
 # the pairs above. Hex, so it needs no percent-encoding inside the
 # SCN_SYNC_RELAY_DATABASE_URL the role builds from it.

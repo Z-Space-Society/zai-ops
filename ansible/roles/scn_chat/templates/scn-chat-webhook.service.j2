@@ -1,0 +1,17 @@
+[Unit]
+Description=scn-chat GitHub webhook receiver (auto-deploy, spec 0006)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs as root: the deploy script restarts {{ scn_chat_unit_name }} and owns
+# the /opt checkout (git reset --hard + pnpm install/build), which the
+# scn-chat service user must not be able to mutate.
+ExecStart=/usr/local/bin/node {{ scn_chat_config_dir }}/webhook.js
+EnvironmentFile={{ scn_chat_config_dir }}/scn-chat-webhook.env
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

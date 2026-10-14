@@ -239,6 +239,28 @@
   roles:
     - scn_chat
 
+# scn-chat staging (spec 0006) — the same role on its own CT, with staging
+# secrets mapped into the role's var names here (the play is the seam between
+# the estate's prod-per-service secret naming and the role's single-tenant
+# naming), the path/URL/unit overrides come from the host's inventory vars.
+- name: Configure scn-chat staging
+  hosts: scn-chat-staging
+  gather_facts: true
+  pre_tasks:
+    - name: Read the cluster admin roster
+      ansible.builtin.include_tasks: tasks/roster.yml
+
+    - name: Make the roster's current admins staging's admins
+      ansible.builtin.set_fact:
+        scn_chat_admin_dids: "{{ scn_roster_admin_dids }}"
+
+    - name: Map the staging secrets into the role's var names
+      ansible.builtin.set_fact:
+        scn_chat_secret_key: "{{ scn_chat_staging_secret_key }}"
+        scn_chat_oauth_private_keys: "{{ scn_chat_staging_oauth_private_keys }}"
+  roles:
+    - scn_chat
+
 # happyview runs AFTER postgres: its role creates the happyview role + database ON
 # the postgres CT (delegate_to: postgres). A --limit happyview run still needs
 # postgres already provisioned (its host facts + SSH reachability are required for

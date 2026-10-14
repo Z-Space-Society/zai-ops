@@ -5,5 +5,10 @@
 
 - name: restart scn-chat
   ansible.builtin.systemd:
-    name: scn-chat
+    name: "{{ scn_chat_unit_name }}"
+    state: restarted
+
+- name: restart scn-chat-webhook
+  ansible.builtin.systemd:
+    name: scn-chat-webhook
     state: restarted

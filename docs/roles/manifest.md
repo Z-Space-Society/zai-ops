@@ -57,6 +57,7 @@ sides in the same change.
 | `sync-relay.json` | [`sync_relay`](sync_relay.md) | `sync_relay_version` |
 | `pds.json` | [`pds`](pds.md) | `pds_version` |
 | `scn-chat.json` | [`scn_chat`](scn_chat.md) | `scn_chat_deployed_version` |
+| `scn-chat-staging.json` | [`scn_chat`](scn_chat.md) (staging profile, spec 0006) | `scn_chat_deployed_version` |
 
 Each object is:
 

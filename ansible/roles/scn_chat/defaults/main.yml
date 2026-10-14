@@ -25,6 +25,22 @@ scn_chat_node_dir: "/opt/node-{{ scn_chat_node_version }}"
 
 scn_chat_port: 3000
 
+# Unit + manifest identity — prod uses scn-chat / scn-chat.json; the staging
+# profile (spec 0006) overrides to scn-chat-staging / scn-chat-staging.json.
+scn_chat_unit_name: scn-chat
+scn_chat_manifest_service: scn-chat
+
+# Webhook auto-deploy receiver (spec 0006 — the staging profile). A minimal
+# Node-stdlib HTTP service (no deps; Node is already on the CT) that validates
+# GitHub's X-Hub-Signature-256 against a shared secret, filters pushes on
+# refs/heads/main, then runs the deploy script under a single-flight lock and
+# answers 202 immediately. Off for production — prod deploys on play runs.
+scn_chat_webhook_enabled: false
+scn_chat_webhook_port: 3001
+scn_chat_webhook_path: /api/gh-webhook
+scn_chat_deploy_script: /usr/local/bin/scn-chat-deploy.sh
+scn_chat_deploy_lock_dir: /run/scn-chat-deploy.lockd
+
 scn_chat_user: scn-chat
 scn_chat_group: scn-chat
 scn_chat_home: /opt/scn-chat

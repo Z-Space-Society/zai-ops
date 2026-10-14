@@ -94,3 +94,75 @@ scn-chat has no other admin door, unlike the PDS's admin password.
   visible in `/systems/` immediately.
 - **Corliss pin**: the probe renders `SCN_CHAT_URL`; a corliss release without
   the key ignores it and shows no row (no migration — same as PDS).
+
+---
+
+# Staging profile + webhook auto-deploy (spec 0006)
+
+The **same role** deploys the staging preview at
+`chat-staging.{{ cluster_domain }}` (SCN: `chat-staging.sharedcomputer.network`)
+— a second CT (`scn-chat-staging`, app tier, default CTID 123) with path/URL
+overrides from its inventory host vars:
+
+| Var (host vars) | Staging value |
+| --- | --- |
+| `scn_chat_home` / `scn_chat_src` / `scn_chat_data_dir` | `/opt/scn-chat-staging`(…`/src`, `/data`) |
+| `scn_chat_config_dir` / `scn_chat_env_file` | `/etc/scn-chat-staging`(…`/scn-chat.env`) |
+| `scn_chat_public_url` | `https://chat-staging.{{ cluster_domain }}` |
+| `scn_chat_unit_name` | `scn-chat-staging` (systemd unit) |
+| `scn_chat_manifest_service` | `scn-chat-staging` (`scn-chat-staging.json`) |
+| `scn_chat_webhook_enabled` | `true` |
+
+The staging play (`Configure scn-chat staging` in `provision.yml`) maps the
+separate staging secrets into the role's names:
+`scn_chat_staging_secret_key` → `scn_chat_secret_key`, and
+`scn_chat_staging_oauth_private_keys` → `scn_chat_oauth_private_keys`. The
+staging OAuth client is a different `did:web` (its own PUBLIC_URL) — **never
+share the prod JWK** (0006 Q1).
+
+## The webhook receiver (auto-deploy on commits to `main`)
+
+`scn_chat_webhook_enabled: true` installs two extra systemd-managed pieces on
+the staging CT (Node is already there — no new deps):
+
+- **`scn-chat-webhook.service`** — a Node-stdlib HTTP receiver on
+  `0.0.0.0:{{ scn_chat_webhook_port }}` (3001). It verifies
+  `X-Hub-Signature-256` (HMAC-SHA256 under `scn_chat_webhook_secret`), ignores
+  everything but `push` on `refs/heads/main` (204), takes a single-flight lock
+  (atomic `mkdir` in `/run/scn-chat-deploy.lockd`), spawns the deploy script
+  detached and answers **202 immediately**. Logs: `journalctl -u scn-chat-webhook`.
+- **`{{ scn_chat_deploy_script }}`** (`/usr/local/bin/scn-chat-deploy.sh`) —
+  `git fetch --depth 1 origin main` → skip if HEAD unchanged → `git reset
+  --hard` → `pnpm install --frozen-lockfile` → `pnpm build` →
+  `systemctl restart {{ scn_chat_unit_name }}` → wait on `/api/health` 200
+  (40×3s). Same HEAD-of-main, no-pin policy as the role; the lock is released
+  by a trap on every exit path. The deploy does **not** write the manifest —
+  staging's `/systems/` version updates on the next play run (0006 Q7).
+
+The role's smoke test posts a bogus signature to the receiver and requires a
+**400** — the listener is up AND the HMAC gate is armed.
+
+## Caddy route
+
+```yaml
+- domain: "chat-staging.{{ cluster_domain }}"
+  service: scn-chat-staging
+  port: 3000
+  paths:
+    - from: "/api/gh-webhook*"
+      port: 3001
+```
+
+The `paths:` entry (optional) renders a `handle` path-matcher proxy before the
+catch-all in `Caddyfile.j2` — GitHub's webhook delivery hits the receiver,
+everything else reaches the app.
+
+## Webhook secret + rotation
+
+`scn_chat_webhook_secret` is a generate-once hex `password` lookup in
+`group_vars/all/main.yml` → `/root/.zai-secrets/scn_chat_webhook_secret`. It
+lives in **two places**: the control node AND the repo's webhook settings
+(`Z-Space-Society/scn-chat` → Settings → Webhooks). Rotate **both together**:
+regenerate the file (`rm` + re-run the play, or generate a new hex string),
+paste the new value into the repo's webhook secret, and redeliver a test
+delivery to confirm 202.

@@ -1,0 +1,48 @@
+#!/bin/bash
+# scn-chat auto-deploy (spec 0006) — run by the webhook receiver on pushes to
+# main. Same build sequence as the scn_chat role: HEAD-of-main, no pins, and
+# the same health-gated finish (a 200 proves unit + migration + sqlite).
+set -euo pipefail
+
+SRC={{ scn_chat_src }}
+SVC={{ scn_chat_unit_name }}
+PORT={{ scn_chat_port }}
+LOCK={{ scn_chat_deploy_lock_dir }}
+export PATH=/usr/local/bin:/usr/bin:/bin
+export HOME=/root
+
+# The receiver takes the single-flight lock; this trap releases it on every
+# exit path so the next push can deploy.
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+cd "$SRC"
+
+git fetch --depth 1 origin main >/dev/null 2>&1
+NEW=$(git rev-parse FETCH_HEAD)
+OLD=$(git rev-parse HEAD)
+
+if [ "$NEW" = "$OLD" ]; then
+  echo "scn-chat: no change — already at $NEW"
+  exit 0
+fi
+
+echo "scn-chat: deploying $NEW (was $OLD)"
+git reset --hard "$NEW"
+
+# Frozen lockfile first (fails fast if package.json moved without the lock),
+# then the web build — the same two commands the role runs.
+pnpm install --frozen-lockfile
+pnpm build
+
+systemctl restart "$SVC"
+
+for i in $(seq 1 40); do
+  if curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+    echo "scn-chat: ${SVC} healthy at $NEW"
+    exit 0
+  fi
+  sleep 3
+done
+
+echo "scn-chat: ${SVC} did not pass /api/health after deploying $NEW" >&2
+exit 1

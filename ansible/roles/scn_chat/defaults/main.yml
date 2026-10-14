@@ -10,11 +10,11 @@
 # or object-store dependency — the upstream compose file is only a build
 # wrapper.
 #
-# Pin policy: scn_chat_version is a git COMMIT ref, not a tag — the repo is
-# pre-1.0 and its atproto deps are spaces-alpha (spec 0005 Q9, deferred to
-# hadsie). Bump the ref to upgrade; the role re-clones and reinstalls when it
-# changes.
-scn_chat_version: "0ce8ad21045e37f41b06726004511c155429a9fd"
+# Version policy (Q9 answered 2026-10-14): track origin/main HEAD — NO pinning.
+# The repo is pre-1.0 and moving fast; boris: "we'll use HEAD of main". The role
+# fetches latest main on every run and rebuilds + restarts only when HEAD moved;
+# the manifest records the exact deployed sha (scn_chat_deployed_version).
+scn_chat_branch: main
 scn_chat_repo_url: "https://github.com/Z-Space-Society/scn-chat"
 
 # Node.js — pinned LTS tarball with its SHA-256, the tarball + checksum

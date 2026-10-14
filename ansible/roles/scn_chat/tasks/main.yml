@@ -3,9 +3,9 @@
 #
 # scn-chat is a pnpm TS monorepo built for a single node:24-slim container; we
 # reproduce that one container as a plain CT: pinned Node 24 tarball + corepack,
-# source clone at a pinned commit, pnpm install + build, sqlite on the rootfs,
-# systemd. Same shape as the sync_relay role — source-build, and a smoke test
-# at the end that proves the feature.
+# source clone tracking origin/main HEAD (no pins, Q9), pnpm install + build,
+# sqlite on the rootfs, systemd. Same shape as the sync_relay role —
+# source-build, and a smoke test at the end that proves the feature.
 
 # --- Node.js ---------------------------------------------------------------
 # Tarball + checksum, the Garage/uv pattern. /opt/node-<ver> keeps multiple
@@ -75,24 +75,51 @@
 
 # --- Clone + build ----------------------------------------------------------
 
-- name: Check the checked-out scn-chat revision
+- name: Check whether a scn-chat checkout exists
+  ansible.builtin.stat:
+    path: "{{ scn_chat_src }}"
+  register: scn_chat_src_stat
+
+- name: Read the deployed scn-chat revision
   ansible.builtin.command: git -C "{{ scn_chat_src }}" rev-parse HEAD
-  register: scn_chat_src_version
+  register: scn_chat_deployed_rev
   changed_when: false
   failed_when: false
+  when: scn_chat_src_stat.stat.exists
 
-- name: Clone scn-chat source at the pinned commit
-  # ansible.builtin.git can only check out what origin advertises, so the pin
-  # must be pushed to origin/main — the same push-ahead-of-pin rule the
-  # sync_relay role records for tags.
+- name: Fetch the latest {{ scn_chat_branch }}
+  # HEAD-of-main policy (Q9): every run compares against upstream and moves the
+  # checkout only when main moved. depth 1 keeps the clone lean.
+  ansible.builtin.command: git -C "{{ scn_chat_src }}" fetch --depth 1 origin "{{ scn_chat_branch }}"
+  changed_when: false
+  when: scn_chat_src_stat.stat.exists
+
+- name: Read upstream {{ scn_chat_branch }}'s revision
+  ansible.builtin.command: git -C "{{ scn_chat_src }}" rev-parse FETCH_HEAD
+  register: scn_chat_upstream_rev
+  changed_when: false
+  when: scn_chat_src_stat.stat.exists
+
+- name: Check out the latest {{ scn_chat_branch }}
   ansible.builtin.git:
     repo: "{{ scn_chat_repo_url }}"
     dest: "{{ scn_chat_src }}"
-    version: "{{ scn_chat_version }}"
+    version: "{{ scn_chat_branch }}"
     depth: 1
     force: true
-  register: scn_chat_clone
-  when: scn_chat_src_version.stdout | trim != scn_chat_version
+  register: scn_chat_update
+  when: >-
+    (not scn_chat_src_stat.stat.exists)
+    or (scn_chat_deployed_rev.stdout | default('') | trim != scn_chat_upstream_rev.stdout | default('') | trim)
+
+- name: Record the now-deployed revision
+  ansible.builtin.command: git -C "{{ scn_chat_src }}" rev-parse HEAD
+  register: scn_chat_deployed_rev_final
+  changed_when: false
+
+- name: Set the deployed scn-chat version fact
+  ansible.builtin.set_fact:
+    scn_chat_deployed_version: "{{ scn_chat_deployed_rev_final.stdout | trim }}"
 
 - name: Check whether node_modules is present
   ansible.builtin.stat:
@@ -106,7 +133,7 @@
   environment:
     PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
     HOME: /root
-  when: (scn_chat_clone is changed) or (not scn_chat_node_modules.stat.exists)
+  when: (scn_chat_update is changed) or (not scn_chat_node_modules.stat.exists)
   notify: restart scn-chat
 
 - name: Build the web app (pnpm build)
@@ -116,7 +143,7 @@
   environment:
     PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
     HOME: /root
-  when: (scn_chat_clone is changed) or (not scn_chat_node_modules.stat.exists)
+  when: (scn_chat_update is changed) or (not scn_chat_node_modules.stat.exists)
   notify: restart scn-chat
 
 # --- Service account + directories ------------------------------------------
@@ -221,4 +248,4 @@
     name: manifest
   vars:
     manifest_service: scn-chat
-    manifest_version: "{{ scn_chat_version }}"
+    manifest_version: "{{ scn_chat_deployed_version }}"

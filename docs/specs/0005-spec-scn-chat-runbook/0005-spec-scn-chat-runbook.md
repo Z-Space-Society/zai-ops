@@ -5,7 +5,7 @@ project: zai-ops
 owner: quill
 agent: quill
 created: 2026-10-06
-updated: 2026-10-06
+updated: 2026-10-14
 tags:
   - zai-ops
   - scn-chat
@@ -60,7 +60,7 @@ upstream as the dev/CI path, not the SCN runtime.
 | `node:24-slim` image | Node 24 linux-x64 tarball on the CT (pinned, checksummed) + `build-essential python3` for better-sqlite3 |
 | `pnpm install --frozen-lockfile && pnpm build` | same on the CT via corepack |
 | `.env:/app/.env:ro` | rendered `/opt/scn-chat/.env` (0600) from ansible-vault vars |
-| `./data:/data` (sqlite) | `/data` on the CT rootfs; add to restic paths in `bin/zai-backup` |
+| `./data:/data` (sqlite) | `/data` on the CT rootfs — covered by the SCN-wide backup setup (Q7 answered) |
 | `127.0.0.1:3000` | `10.1.1.{{ ctid }}:3000` (internal only) |
 | reverse proxy + TLS | `proxy` role: Caddy route `chat.{{ cluster_domain }}` — on SCN: `chat.sharedcomputer.network` |
 | "lexicons and permission set published" | **the app's responsibility** (upstream deploy concern; Q5 answered) |
@@ -75,8 +75,9 @@ upstream as the dev/CI path, not the SCN runtime.
    `sync_relay`):
    - Install pinned Node 24 tarball → `/usr/local`; `corepack enable` (pnpm).
    - `apt`: `python3 make g++` (better-sqlite3 native build).
-   - `git` clone `Z-Space-Society/scn-chat` pinned at `scn_chat_version`
-     (commit ref — repo is young; see Q9) → `/opt/scn-chat`.
+   - `git` clone `Z-Space-Society/scn-chat` tracking **origin/main HEAD — no
+     pinning (Q9 answered)**; every run fetches latest main and re-installs +
+     restarts only when HEAD moved → `/opt/scn-chat`.
    - `pnpm install --frozen-lockfile` → `pnpm build` → `pnpm migrate`.
    - Render `.env` (0600) from vault vars; `ADMIN_DIDS` is **not** a hardcoded
      var — `include_tasks: tasks/roster.yml` (`scn_roster_admin_dids`, the
@@ -86,8 +87,9 @@ upstream as the dev/CI path, not the SCN runtime.
    - **Smoke test** at role end: `wait_for` `10.1.1.{{ctid}}:3000`, then `uri`
      `GET /api/health` (proves the feature, not just systemd "active").
 3. **Manifest** — last task records `manifest_service: scn-chat`,
-   `manifest_version: "{{ scn_chat_version }}"`; add `scn-chat.json` to the key
-   table in `docs/roles/manifest.md` (Corliss reads it by that exact name).
+   `manifest_version: "{{ scn_chat_deployed_version }}"` (the exact sha checked
+   out this run); add `scn-chat.json` to the key table in
+   `docs/roles/manifest.md` (Corliss reads it by that exact name).
 4. **Play + route** — configure play in `provision.yml` (after `proxy`);
    `caddy_proxy_hosts` entry `chat.{{ cluster_domain }}` →
    `10.1.1.{{ctid}}:3000`. On SCN `cluster_domain == sharedcomputer.network`
@@ -138,22 +140,26 @@ up and which version").
 
 ## 7. Rollout (phased)
 
-1. **Phase 1 — staging (Ronchamp)**: role + play, source pin, smoke test
-   `/api/health`; verify OAuth login with a test atproto account; confirm the
-   app serves its OAuth client metadata at `PUBLIC_URL` (Q6).
-2. **Phase 2 — production (Heron)**: assign CTID, deploy, Caddy route live
-   (`chat.sharedcomputer.network`), first admin login (roster-derived).
+Boris approved skipping staging: **"we can take chat straight to production"**
+— feature-branch development on `scn-chat-runbook` before merging.
+
+1. **Phase 1 — production deploy (Heron)**: role + play, HEAD-of-main tracking,
+   smoke test `/api/health`; confirm the app serves its OAuth client metadata
+   at `PUBLIC_URL` (Q6).
+2. **Phase 2 — route live**: assign CTID, deploy, Caddy route
+   `chat.sharedcomputer.network`, first admin login (roster-derived).
 3. **Phase 3 — observability**: Corliss probe + manifest, `/systems/` shows
    scn-chat up + version.
-4. **Phase 4 — operations**: backups (Q7 → hadsie), provider/model config
-   (Q8), announce to members.
+4. **Phase 4 — operations**: provider/model config (Q8), announce to members.
 
 ## 8. Risks
 
 - **spaces-alpha atproto packages** (root `pnpm.overrides` pins
-  `0.0.0-spaces-alpha-…`) — breaking changes expected; the pin+rebuild path is
-  our only stability lever (Q9 → hadsie).
-- **Single-CT sqlite** — no HA; backup discipline is the safeguard (Q7 → hadsie).
+  `0.0.0-spaces-alpha-…`) — breaking changes expected; HEAD-of-main + the
+  manifest-recorded sha is the visibility lever: a bad upstream commit deploys
+  itself on the next play run but shows up in `/systems/` immediately (Q9).
+- **Single-CT sqlite** — no HA; the SCN-wide backup setup is the safeguard
+  (Q7 answered).
 - **`did:web` OAuth client tied to `PUBLIC_URL`** — changing the public domain
   later breaks the client id; choose it once (Q3, answered: `chat.` subdomain).
 - **Experimental status upstream** ("do not store anything sensitive").

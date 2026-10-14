@@ -5,7 +5,7 @@ status: draft
 owner: quill
 agent: quill
 created: 2026-10-06
-updated: 2026-10-06
+updated: 2026-10-14
 tags:
   - zai-ops
   - scn-chat
@@ -16,9 +16,10 @@ tags:
 
 Deploys **scn-chat**, the SCN AI-assistant chat app, as one native LXC
 (**no Docker** — zai-ops #17): a pinned Node 24 tarball, the monorepo cloned
-at a pinned commit, `pnpm install --frozen-lockfile` + `pnpm build`, sqlite in
-`DATA_DIR` on the CT rootfs, and a systemd unit. The upstream `node:24-slim`
-compose container is reproduced one-to-one on the CT.
+tracking **origin/main HEAD (no pins — Q9)**, `pnpm install
+--frozen-lockfile` + `pnpm build`, sqlite in `DATA_DIR` on the CT rootfs, and
+a systemd unit. The upstream `node:24-slim` compose container is reproduced
+one-to-one on the CT.
 
 Spec: `docs/specs/0005-spec-scn-chat-runbook/`. Issue: scn-chat#8. This
 service has **no data dependencies** — no postgres/redis/object-store — so no
@@ -30,8 +31,9 @@ provision-order edge in `diagrams.md`.
 | --- | --- |
 | `node:24-slim` image | `node-v24.21.0` tarball (sha256-pinned) → `/opt/node-…`, symlinked onto PATH |
 | `pnpm install --frozen-lockfile && pnpm build` | same on the CT via corepack (pnpm 10.33.0, the repo's `packageManager`) |
-| `.env:/app/.env:ro` | `/etc/scn-chat/scn-chat.env` (0600, root) from ansible-vault + the admin roster |
-| `./data:/data` (sqlite) | `/opt/scn-chat/data` on the rootfs — the backup unit (Q7) |
+| `.env:/app/.env:ro` | `/etc/scn-chat/scn-chat.env` (0600, root) from `/root/.zai-secrets` lookups + the admin roster |
+| `./data:/data` (sqlite) | `/opt/scn-chat/data` on the rootfs — covered by the SCN-wide backup (Q7) |
+| source | `origin/main` HEAD each run; rebuild+restart only when HEAD moved; manifest records the deployed sha |
 | `127.0.0.1:3000` | listens on all interfaces; vmbr1-only CT, `10.1.1.{{ ctid }}:3000` internally |
 | reverse proxy + TLS | proxy role, Caddy route `chat.{{ cluster_domain }}` → `scn-chat:3000` |
 | admin bootstrap | `ADMIN_DIDS` from the cluster admin roster (`tasks/roster.yml`) |
@@ -66,11 +68,12 @@ scn-chat has no other admin door, unlike the PDS's admin password.
 
 ## Operations
 
-- **Upgrade** = bump `scn_chat_version` (a commit ref — repo is pre-1.0, Q9
-  deferred to hadsie), re-run the play; the role re-clones, reinstalls and the
-  unit's `ExecStartPre` migrates (drizzle is idempotent).
-- **Backups** = `scn_chat_data_dir` (sqlite). Decision pending hadsie (Q7):
-  restic path in `bin/zai-backup` vs per-CT snapshot.
+- **Upgrade** = re-run the play. The role fetches `origin/main` and
+  reinstalls + restarts **only when HEAD moved** (no pins — Q9); the manifest
+  (`scn_chat_deployed_version`) records the exact deployed sha, and the unit's
+  `ExecStartPre` migrates the sqlite schema (drizzle is idempotent).
+- **Backups** = `scn_chat_data_dir` (sqlite). **Deferred to the SCN-wide
+  backup setup** (Q7 answered 2026-10-14) — no per-service restic path.
 - **Secrets rotation** = delete the file under `/root/.zai-secrets`
   (`scn_chat_secret_key` and/or `scn_chat_oauth_private_keys`), re-run the
   play; the next provision regenerates and restarts. Rotating the JWK makes
@@ -85,6 +88,9 @@ scn-chat has no other admin door, unlike the PDS's admin password.
   gating (Q2/Q10). Corliss is not in the auth path, only the probe/manifest.
 - **`OAUTH_SCOPE_MODE=permission-set` and `ALLOW_PRIVATE_NETWORKS=false`** in
   production; a fresh commit changing either is a deliberate decision.
-- **The repo is experimental upstream** ("do not store anything sensitive").
+- **The repo is experimental upstream** ("do not store anything sensitive");
+  HEAD-of-main means a breaking upstream commit deploys itself on the next play
+  run — the manifest's recorded sha is what Corliss reports, so a bad bump is
+  visible in `/systems/` immediately.
 - **Corliss pin**: the probe renders `SCN_CHAT_URL`; a corliss release without
   the key ignores it and shows no row (no migration — same as PDS).

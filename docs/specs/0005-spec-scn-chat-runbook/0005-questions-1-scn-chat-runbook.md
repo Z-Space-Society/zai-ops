@@ -5,7 +5,7 @@ project: zai-ops
 owner: quill
 agent: quill
 created: 2026-10-06
-updated: 2026-10-06
+updated: 2026-10-14
 tags:
   - zai-ops
   - scn-chat
@@ -16,11 +16,13 @@ tags:
 # 0005 Q1 — scn-chat runbook: open questions
 
 Companion to `0005-spec-scn-chat-runbook.md`. Statuses from the 2026-10-06
-review with boris; two items deferred to **hadsie** (Scott Hadfield, @hadsie).
+review with boris; Q7 and Q9 were the last deferred items, both **answered by
+boris on 2026-10-14** (SCN-wide backups; HEAD-of-main, no pinning) — the
+question set is now closed.
 
-1. **Q1 · Node install method.** Official Node 24 tarball (pinned, checksummed)
-   vs nodesource apt repo. Recommendation: tarball — matches the Go/`tg`
-   pattern, no third-party repo. Any objection?
+1. **Q1 · Node install method — ADOPTED (tarball).** Official Node 24 tarball
+   (pinned, checksummed), no nodesource apt repo — no objection raised; matches
+   the Go/`tg` pattern, no third-party repo.
 
 2. **Q2 · Production PDS for member logins — ANSWERED (boris).** Users CAN
    bring their own logins; it's up to chat to guide them to account creation or
@@ -54,19 +56,22 @@ review with boris; two items deferred to **hadsie** (Scott Hadfield, @hadsie).
    all redirect URIs under `https://chat.sharedcomputer.network/`. Confirm in
    Phase 1 before the route goes live.
 
-7. **Q7 · Backups — DEFERRED → hadsie.** sqlite lives at `/data` on the
-   scn-chat CT. Add it to the restic path list in `bin/zai-backup`
-   (control-node backup role), or a per-CT snapshot? Boris deferred to
-   **@hadsie** (Scott Hadfield).
+7. **Q7 · Backups — ANSWERED (boris, 2026-10-14).** Deferred **to the SCN-wide
+   backup setup** — no per-service restic path in `bin/zai-backup`, no per-CT
+   snapshot. The sqlite `DATA_DIR` is covered by whatever that setup ends up
+   being; the role just documents the path (`scn_chat_data_dir`). (@hadsie no
+   longer needs to decide this.)
 
 8. **Q8 · Model providers at launch.** Which OpenAI-compatible providers/
    models for the first admin bootstrap, and whose API keys (vault-managed
    vs pasted in admin UI)? Streaming model for the default assistant?
 
-9. **Q9 · Pin policy — DEFERRED → hadsie.** The repo is young and its atproto
-   deps are spaces-alpha. Pin by commit ref (recommended) with a documented
-   bump process — or wait for a release tag before production? Boris deferred
-   to **@hadsie**.
+9. **Q9 · Pin policy — ANSWERED (boris, 2026-10-14).** **HEAD of main, no
+   pinning.** The role fetches `origin/main` every run and rebuilds + restarts
+   only when HEAD moved; the manifest records the exact deployed sha
+   (`scn_chat_deployed_version`), which Corliss reports — that sha is the
+   visibility lever for a bad upstream commit. (@hadsie no longer needs to
+   decide this.)
 
 10. **Q10 · Non-spaces users in prod — ANSWERED (boris).** No gating at this
     stage — users can bring any PDS and the server sqlite fallback covers

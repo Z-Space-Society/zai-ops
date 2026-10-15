@@ -49,4 +49,4 @@ Companion to `0005-spec-scn-chat-runbook.md`. Statuses come from the 2026-10-06 
 
 16. **Q16 · Clusters on a non-standard port.** Ronchamp is reached on :8443, and `PUBLIC_URL` must carry that port. Pass `-e scn_chat_public_url=https://chat.<domain>:8443` there.
 
-Staging (spec 0006, PR #26) is parked in [zai-ops#33](https://github.com/Z-Space-Society/zai-ops/issues/33).
+Staging with webhook auto-deploy (spec 0006, first built in PR #26) is planned and tracked in [zai-ops#33](https://github.com/Z-Space-Society/zai-ops/issues/33).

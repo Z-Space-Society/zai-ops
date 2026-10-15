@@ -95,7 +95,7 @@ scn-chat authenticates atproto-natively, and the Corliss OIDC bridge is not in i
    - a member sign-in;
    - the `/systems/` row.
 
-A per-app staging CT with webhook auto-deploy was proposed as spec 0006 (PR #26) and is parked in [zai-ops#33](https://github.com/Z-Space-Society/zai-ops/issues/33). The pinned tag already makes production a deliberate step.
+A staging CT with webhook auto-deploy is planned for a later round, tracked in [zai-ops#33](https://github.com/Z-Space-Society/zai-ops/issues/33). Spec 0006 and PR #26 are its first version. Until then, the pinned tag makes each production deploy a deliberate step.
 
 ## 8. Risks
 

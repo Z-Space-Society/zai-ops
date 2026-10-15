@@ -134,7 +134,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 | `caddy_backports_suite` | `{{ ansible_distribution_release }}-backports` | Derived from the CT's own release, so the blueprint stays generic. |
 | `caddy_apt_version` | `2.11.2-1~bpo13+1` | Exact apt version pin. **Not** generic: `~bpo13` names Debian 13, so a base-image change means re-pinning here. It fails loudly at apt rather than installing something else. |
 | `caddy_trusted_proxies` | `[]` | Addresses whose `X-Forwarded-*` headers Caddy trusts instead of overwriting. Empty renders no `servers` block at all, so a cluster where this Caddy is the outermost proxy is unaffected. See [Notes](#notes). |
-| `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code, skip_if_cookie }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). `skip_if_cookie` names a cookie whose presence lets the request fall through to the real app instead of redirecting — see [Notes](#notes) below, it's load-bearing for open-webui, not optional. |
+| `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code, skip_if_cookie }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). `skip_if_cookie` names a cookie whose presence lets the request fall through to the real app instead of redirecting — see [Notes](#notes) below, it's load-bearing for open-webui, not optional. An entry without redirects may carry `block_paths: [<path matcher>, …]`, each rendered as `respond <path> 404` ahead of the `reverse_proxy`, for paths the upstream serves but the edge must not publish (the sync relay's `/internal/*`). |
 
 The committed default carries one live route, with the **domain derived from
 `cluster_domain`** (set per cluster with `scn-config`, Cluster Settings) so the route holds no
@@ -249,6 +249,16 @@ If issuance fails, check public `:80` first (see
   the committed defaults before every cluster runs that service. The cost: a
   core service that was never assigned no longer fails the proxy play, so
   check the rendered Caddyfile for `not routed` lines if a hostname is missing.
+- **There is no access log, and the sync route depends on that.** A sync
+  client sends its access token in the query string
+  (`wss://sync.<domain>/?access_token=…`), since a browser or phone websocket
+  cannot send an `Authorization` header. Nothing logs it today because this
+  Caddyfile has no `log` directive. A change that adds one must filter the
+  query out of the logged URI in the same commit.
+- **The sync route does not publish `/internal/*`.** The relay serves its
+  vault endpoints for Corliss there, guarded by the service token alone.
+  `block_paths` answers them with a 404 at the edge; Corliss reaches them over
+  vmbr1.
 - **Empty `caddy_proxy_hosts` is safe** — the `:80` site (health probe + HTTPS
   redirect) keeps the Caddyfile valid before any upstream is assigned, mirroring
   the inventory's placeholder pattern.

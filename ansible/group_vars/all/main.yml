@@ -198,6 +198,24 @@ corliss_oidc_rsa_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secre
 # second name, because only the one role reads it.
 sync_relay_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/sync_relay_db_password chars=digits,abcdef length=48') }}"
 
+# The credential Corliss presents on the relay's /internal/vaults, to list a
+# member's vaults and create one. Here rather than in either role because both
+# render it: Corliss as SYNC_RELAY_SERVICE_TOKEN, the relay as
+# SCN_SYNC_RELAY_SERVICE_TOKEN, and one value resolved on the control node is
+# what keeps them from disagreeing. Not DR-critical: losing it costs a
+# regenerate and a replay of both roles, and no stored data depends on it.
+sync_relay_service_token: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/sync_relay_service_token chars=ascii_letters,digits length=48') }}"
+
+# The relay's two public hostnames: the sync websocket and the MCP service.
+# Defined once and read by three roles. The proxy routes them, Corliss issues
+# access tokens whose `aud` is https://<host> (OIDC_RESOURCES), and the relay
+# refuses any token whose `aud` is not that exact string (SYNC_AUDIENCE,
+# MCP_AUDIENCE). Spelled in three places, the audiences would drift and every
+# token would fail with a bare 401. MCP_AUDIENCE is also the only Host the MCP
+# service answers, so it must be lowercase with no trailing slash.
+sync_relay_sync_host: "sync.{{ cluster_domain }}"
+sync_relay_mcp_host: "mcp.{{ cluster_domain }}"
+
 # pds secrets — the in-house PDS (atproto-pds) that hosts the cluster's atproto
 # accounts. The JWT secret and admin password follow the generate-once-and-persist
 # posture of every pair above; the OAuth JWK set override and the SMTP URL

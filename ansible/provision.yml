@@ -241,8 +241,9 @@
 # required for the delegated DB tasks). First run takes ~15–30 min on a cold CT
 # because cargo build --release compiles the full Rust dependency graph.
 #
-# There is deliberately no proxy route for this service — Phase A enforces no
-# membership, so vmbr1 is the entire access boundary. See
+# Phase B (relay v0.2.0) verifies Corliss's access tokens, so the proxy routes
+# sync.<domain> and mcp.<domain> to it, with /internal/ left unrouted. It runs
+# after corliss, whose JWKS it fetches. See
 # docs/decisions/0007-sync-relay-and-space-membership.md.
 - name: Configure the SCN sync relay
   hosts: sync-relay

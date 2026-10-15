@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+# Runs corliss-reconcile.service shortly after boot and every
+# {{ corliss_reconcile_interval }} after that. The boot run is the one that
+# matters after an outage: pushes sent while Corliss was down are exactly the
+# ones it missed.
+#
+# No Persistent=true. It applies to OnCalendar= only and is ignored here; the
+# boot run is what catches up after downtime.
+[Unit]
+Description=Corliss membership reconcile, every {{ corliss_reconcile_interval }}
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec={{ corliss_reconcile_interval }}
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

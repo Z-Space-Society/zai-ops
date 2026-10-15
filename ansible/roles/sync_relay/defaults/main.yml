@@ -15,10 +15,13 @@
 # identity does not match and messages aimed at another peer, both of which
 # 0.13 only logged, and it is the base Phase B builds on.
 #
-# Phase A: the relay speaks the automerge-repo protocol and persists to Postgres,
-# but enforces no membership. See ADR-0007 and the deliberate
-# sync_relay_require_auth: false below.
-sync_relay_version: "0.1.2"
+# v0.2.0 is Phase B: it verifies Corliss-issued access tokens before the
+# websocket upgrade, lets a member open only the vaults they own, serves
+# /internal/vaults for Corliss's Notes page (its spec, section Z3), and adds the
+# MCP service on a second listener. Needs Corliss v1.4.0, which issues those
+# tokens, and the auth settings below; it refuses to start with auth on and any
+# of them blank.
+sync_relay_version: "0.2.0"
 
 sync_relay_port: 7030
 # Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race
@@ -38,19 +41,33 @@ sync_relay_db_name: scn_sync_relay
 sync_relay_db_user: scn_sync_relay
 sync_relay_database_url: "postgresql://{{ sync_relay_db_user }}:{{ sync_relay_db_password }}@{{ hostvars['postgres'].ansible_host }}:5432/{{ sync_relay_db_name }}"
 
-# PHASE A: no membership gate.
-#
-# The binary defaults this to true and refuses to start when it is true, because
-# it has no DID verifier yet. Setting it false here is the deliberate act ADR-0007
-# calls for — and it is only sound while both of the following hold:
-#
-#   1. There is no entry for this service in the proxy role's caddy_proxy_hosts,
-#      so the relay is reachable on vmbr1 and nowhere else.
-#   2. Nothing anyone cares about has been synced into it.
-#
-# Flip this to true in the same change that lands Phase B's verifier. Do not flip
-# it before, and do not add the Caddy route before.
-sync_relay_require_auth: false
+# Phase B: every connection carries a Corliss access token. True is also the
+# binary's own default, so this line exists to be read, not to be changed. It
+# was false through Phase A, while the relay had no verifier and no proxy route.
+sync_relay_require_auth: true
+
+# The MCP listener. Its own port so the proxy routes it under its own hostname,
+# and so the sync listener's /internal/ paths can never be reached through it.
+sync_relay_mcp_port: 7031
+
+# Who issues the tokens the relay accepts: Corliss's public URL, exactly as
+# Corliss's corliss_url spells it, because it is compared with each token's
+# `iss`. A LOCAL default rather than a reach into the corliss role's vars (a
+# role default is not a host fact from this play), same convention as
+# corliss_sync_relay_port. Keep the two in sync.
+sync_relay_oidc_issuer: "https://{{ cluster_domain }}"
+
+# Where the relay fetches Corliss's signing keys: the internal address, one hop
+# over vmbr1, never the public origin. Corliss already lists its own CT address
+# in ALLOWED_HOSTS for the registry's push, so this Host is accepted. Port kept
+# in sync with corliss_port.
+sync_relay_corliss_port: 8000
+sync_relay_oidc_jwks_url: "http://{{ hostvars['corliss'].ansible_host }}:{{ sync_relay_corliss_port }}/.well-known/jwks.json"
+
+# The audiences: the same group_vars hostnames Corliss builds OIDC_RESOURCES
+# from, so a token Corliss issues names exactly what the relay expects.
+sync_relay_sync_audience: "https://{{ sync_relay_sync_host }}"
+sync_relay_mcp_audience: "https://{{ sync_relay_mcp_host }}"
 
 sync_relay_repo_url: "https://github.com/Z-Space-Society/scn-sync-relay"
 

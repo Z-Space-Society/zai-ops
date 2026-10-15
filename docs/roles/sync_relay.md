@@ -8,7 +8,7 @@ to [`postgres`](postgres.md).
 
 - **Source:** [`ansible/roles/sync_relay/`](../../ansible/roles/sync_relay/)
 - **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure play, `hosts: sync-relay`, **after** the postgres play)
-- **Target:** the `sync-relay` CT (CTID 113 by convention — platform tier, 110–119), over SSH, internal-only on `vmbr1`
+- **Target:** the `sync-relay` CT (CTID 113 by convention — platform tier, 110–119), over SSH. Public through the [`proxy`](proxy.md) at `sync.<domain>` and `mcp.<domain>`
 - **Design:** [ADR-0007](../decisions/0007-sync-relay-and-space-membership.md)
 
 ## Purpose
@@ -19,23 +19,24 @@ why the relay is `samod` rather than the JavaScript reference sync server. Its
 state lives entirely in Postgres, so the CT holds no unreproducible runtime
 state.
 
-> [!danger] Phase A enforces no membership, and has no proxy route by design
-> This role currently deploys the **Phase A** relay: it will sync any document
-> id it holds to any peer that can reach port 7030. That is the same property
-> that disqualified the upstream reference sync server, and it is acceptable
-> only as a bring-up state, under two conditions that are both load-bearing:
+> [!important] Phase B: every connection carries a Corliss access token
+> Since relay v0.2.0 the relay verifies a token issued by [`corliss`](corliss.md)
+> before the websocket upgrade and lets a member open only the vaults they own.
+> That is what made the proxy routes safe to add, and the two landed together
+> with Corliss v1.4.0, which issues the tokens.
 >
-> 1. **No entry in the [`proxy`](proxy.md) role's `caddy_proxy_hosts`.** `vmbr1`
->    is the entire access boundary. This is the one service here that is
->    internal-only *for a security reason* rather than for tidiness.
-> 2. **Nothing real is synced into it.**
+> Through Phase A (v0.1.x) the relay had no verifier, `sync_relay_require_auth`
+> was `false`, and there was deliberately no proxy route. If this role is ever
+> pinned back below v0.2.0, the routes in `caddy_proxy_hosts` must go with it:
+> a v0.1.x relay behind a public route syncs any document to anyone.
 >
-> The binary itself fails closed: `SCN_SYNC_RELAY_REQUIRE_AUTH` defaults to
-> `true` and the Phase A build **refuses to start** when it is true, because it
-> has no DID verifier. The role sets it to `false` explicitly, so running
-> ungated is a written-down decision rather than a default. Flip it back to
-> `true` and add the Caddy route in the same change that lands the Phase B
-> verifier — not before either one.
+> The smoke test fails the play unless `/health` reports `auth=corliss`.
+
+**Two public routes, one unrouted prefix.** The proxy sends `sync.<domain>` to
+port 7030 (the sync websocket and a member's own `/vaults`) and `mcp.<domain>`
+to port 7031 (the MCP service). `/internal/*` on 7030 is answered with a 404 at
+the edge: it is where Corliss lists and creates any member's vaults with the
+shared service token, over `vmbr1` only.
 
 **Build-from-source note.** The relay is our own code and no one publishes a
 Debian package for it, so the role builds from source with the Rust toolchain,
@@ -60,11 +61,13 @@ lighter.
 | Build (`cargo build --release`) | `command` | Runs only when the clone changed or the binary is missing. No `creates:` guard, because the deleted `target/` would otherwise trigger a rebuild on every replay. Notifies restart. |
 | Install binary to `/opt/scn-sync-relay/bin` | `copy` (remote_src) | `target/release/scn-sync-relay` → the stable install path. |
 | Remove the Cargo build tree | `file: state=absent` | `target/` holds GB of intermediates no longer needed. The `src/` tree stays so the `git describe` probe above keeps working. |
-| Render the env file | `template` (`0600 root`, `no_log`) | `SCN_SYNC_RELAY_DATABASE_URL`, `_BIND`, `_REQUIRE_AUTH`, `RUST_LOG`. Notifies restart. |
+| Render the env file | `template` (`0600 root`, `no_log`) | `SCN_SYNC_RELAY_DATABASE_URL`, `_BIND`, `_REQUIRE_AUTH`, the `_OIDC_ISSUER` and `_OIDC_JWKS_URL` it verifies tokens against, the `_SYNC_AUDIENCE` and `_MCP_AUDIENCE` they must carry, `_MCP_BIND` and `_SERVICE_TOKEN`, then `RUST_LOG`. Notifies restart. |
 | Install the systemd unit | `template` → `/etc/systemd/system/scn-sync-relay.service` | Hardened; `Restart=always`. Notifies reload + restart. |
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config before the smoke test. |
 | Wait for port + health endpoint | `wait_for` (`127.0.0.1:7030`) + `uri` (`/health`) | Proves the process booted and bound. `/health` deliberately does **not** touch Postgres, so this checks liveness, not storage — storage is proved by the protocol test below. |
+| Assert `auth=corliss` | `assert` on the `/health` body | With auth on, anything else means the relay is serving unverified connections on a published route. A failed deploy, not a warning. |
+| Wait for the MCP listener | `wait_for` (`127.0.0.1:7031`) | The second listener binds separately and can fail on its own. |
 | Record the manifest | `include_role: manifest` (`sync-relay`, `sync_relay_version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `sync-relay.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
 ### Handlers
@@ -80,8 +83,12 @@ Defined in [`defaults/main.yml`](../../ansible/roles/sync_relay/defaults/main.ym
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `sync_relay_version` | `0.1.2` | Tag checked out and built (the role prefixes `v`). Bump to upgrade; the clone and build tasks re-run when this changes. `0.1.2` is Phase A (protocol and storage, no enforcement) on samod 0.15. |
-| `sync_relay_require_auth` | `false` | **Phase A only.** The binary defaults this to `true` and refuses to start when true. See the danger note above before changing it. |
+| `sync_relay_version` | `0.2.0` | Tag checked out and built (the role prefixes `v`). Bump to upgrade; the clone and build tasks re-run when this changes. `0.2.0` is Phase B: token verification, owner-only vaults, `/internal/vaults` and MCP. |
+| `sync_relay_require_auth` | `true` | The binary's own default. It was `false` through Phase A only. |
+| `sync_relay_mcp_port` | `7031` | The MCP listener, routed as `mcp.<domain>`. |
+| `sync_relay_oidc_issuer` | `https://{{ cluster_domain }}` | The `iss` every token must carry. A local copy of the corliss role's `corliss_url`; keep the two in sync. |
+| `sync_relay_oidc_jwks_url` | composed | Corliss's `/.well-known/jwks.json` at its internal address, derived from its CTID. |
+| `sync_relay_sync_audience` / `_mcp_audience` | `https://` + the group_vars host | The `aud` a sync or MCP token must carry. Built from the same `sync_relay_sync_host` / `sync_relay_mcp_host` Corliss builds `OIDC_RESOURCES` from. |
 | `sync_relay_port` / `sync_relay_host` | `7030` / `0.0.0.0` | Listen socket. The wildcard is mandatory — binding a literal `10.1.1.x` loses a cold-boot race with `systemd-networkd` and comes up silently loopback-only. |
 | `sync_relay_home` / `_bin` / `_src` | `/opt/scn-sync-relay[/bin/scn-sync-relay, /src]` | Install path, binary path, source checkout. |
 | `sync_relay_env_file` | `/etc/scn-sync-relay/scn-sync-relay.env` | The `0600` env read via `EnvironmentFile`. |
@@ -94,17 +101,26 @@ Defined in [`defaults/main.yml`](../../ansible/roles/sync_relay/defaults/main.ym
 generate-once `password` lookup under `/root/.zai-secrets`, hex so it needs no
 percent-encoding inside the connection string.
 
+Also in `group_vars`, because Corliss renders them too:
+`sync_relay_service_token` (generate-once, the credential for `/internal/vaults`,
+not DR-critical: losing it costs a regenerate and a replay of both roles), and
+`sync_relay_sync_host` / `sync_relay_mcp_host`, the two public hostnames.
+
 ## Dependencies
 
 - [`postgres`](postgres.md) — must be provisioned and SSH-reachable, including
   for a `--limit sync-relay` run, because the DB tasks are delegated to it.
-- **Not** [`proxy`](proxy.md), deliberately. See the danger note.
+- [`corliss`](corliss.md) at v1.4.0 or later, provisioned first: the relay
+  fetches its JWKS at that internal address, and only that release issues
+  tokens the relay accepts.
+- [`proxy`](proxy.md) for the two public routes. DNS for `sync.<domain>` and
+  `mcp.<domain>` must reach the edge before Caddy can issue their certs.
 
 ### Who else reaches this
 
 [`corliss`](corliss.md) polls `/health` from its own CT to render the relay's row
-on `/systems/`, as `corliss_sync_relay_url`. Nothing about Phase A changes for
-it: the probe is one unauthenticated hop over `vmbr1` to a read-only liveness
+on `/systems/`, as `corliss_sync_relay_url`, and since v1.4.0 calls
+`/internal/vaults` at the same address for its Notes page. The probe is one unauthenticated hop over `vmbr1` to a read-only liveness
 endpoint, so it neither needs nor gains anything the LAN boundary is holding
 back. What it does mean is that **this role's CTID must be assigned before the
 corliss role can render its env file** — that derivation is unguarded on purpose.
@@ -136,7 +152,7 @@ graph. It belongs in the Tier-2 backup story.
 ```sh
 systemctl status scn-sync-relay
 journalctl -u scn-sync-relay -f
-curl -s http://127.0.0.1:7030/health          # ok auth=allow-all
+curl -s http://127.0.0.1:7030/health          # ok auth=corliss
 
 # The bind must be the wildcard, not 10.1.1.113
 ss -ltnp | grep 7030
@@ -148,10 +164,12 @@ From the control node:
 psql -h 10.1.1.102 -U scn_sync_relay -c 'select count(*) from storage;'
 ```
 
-**The protocol test.** `10.1.1.113` is on `vmbr1`, which has **no uplink** — only
-the Proxmox host and CT 100 can reach it, and no browser on the LAN can. Since the
-relay deliberately has no Caddy route, reach it with an SSH tunnel rather than by
-opening a hole:
+**The protocol test.** This was Phase A's bring-up check, run before the relay
+had a route or a verifier. With Phase B every connection needs a Corliss access
+token, so the everyday check is a member signing in from the SCN Sync plugin and
+creating a vault on Corliss's Notes page. The tunnel below still reaches the
+relay directly when a test needs to bypass the edge, and a client then has to
+present a token:
 
 ```sh
 # on your laptop; leave running
@@ -169,9 +187,9 @@ have. Then:
    Postgres storage rather than memory.
 4. Reboot the CT — same.
 
-Step 1 failing is the finding Phase A exists to produce: it would mean samod's
-classic automerge-repo protocol does not interoperate with the client's
-prerelease, and the design changes downstream of that.
+In Phase A, step 1 failing would have meant samod's classic automerge-repo
+protocol did not interoperate with the client's prerelease. It passed, which is
+what Phase B was built on.
 
 ## Notes
 

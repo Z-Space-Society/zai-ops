@@ -155,6 +155,11 @@ http://{{ h.domain }} {
         reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
     }
 {% else %}
+{% for p in h.block_paths | default([]) %}
+    # Not routed: answered here and never forwarded. `respond` sorts ahead of
+    # reverse_proxy in Caddy's directive order, so it wins for this path.
+    respond {{ p }} 404
+{% endfor %}
     reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
 {% endif %}
 }

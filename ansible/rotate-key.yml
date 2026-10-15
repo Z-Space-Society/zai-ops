@@ -1,0 +1,141 @@
+---
+# Rotate, retire or show a signing key (docs/decisions/0011).
+#
+#   ansible-playbook rotate-key.yml -e key_action=rotate -e key=pds_oauth
+#   ansible-playbook rotate-key.yml -e key_action=retire -e key=pds_oauth
+#   ansible-playbook rotate-key.yml -e key_action=show
+#
+# (`scn-config`, the operator command in bin/, drives this: its Signing Keys
+# menu and `scn-config nonint show-keys | rotate-key | retire-key`.)
+#
+# A key is two files under .zai-secrets: <key>.pem, the current key, and while
+# a rotation is under way <key>.previous.pem, the one going out. Rotating moves
+# current to previous and generates a new current; the service then signs with
+# the new key and still publishes (or, for an atproto client, still refreshes
+# with) the old one. Retiring deletes previous once nothing needs it; what that
+# costs is in signing_key_registry (group_vars/all/main.yml). Either change
+# reaches the service on its next provision, which this playbook does not run.
+#
+# One rotation at a time: rotating again before retiring would drop the
+# previous key without the retire step that says what that costs.
+
+- name: Rotate, retire or show a signing key
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    current_file: "{{ _zai_secrets_dir }}/{{ key }}.pem"
+    previous_file: "{{ _zai_secrets_dir }}/{{ key }}.previous.pem"
+  tasks:
+    - name: Require a known action
+      ansible.builtin.assert:
+        that: key_action | default('') in ['rotate', 'retire', 'show']
+        fail_msg: "Pass -e key_action=rotate, retire or show."
+
+    - name: Require a known key
+      ansible.builtin.assert:
+        that: key | default('') in signing_key_registry
+        fail_msg: "Pass -e key=<name>, one of: {{ signing_key_registry | list | join(', ') }}."
+      when: key_action != 'show'
+
+    - name: Change a key
+      when: key_action != 'show'
+      block:
+        - name: Look at the key's files
+          ansible.builtin.stat:
+            path: "{{ item }}"
+          loop: ["{{ current_file }}", "{{ previous_file }}"]
+          register: key_files
+
+        - name: Refuse to rotate a key that does not exist yet
+          ansible.builtin.assert:
+            that: key_files.results[0].stat.exists
+            fail_msg: >-
+              {{ current_file }} does not exist: {{ signing_key_registry[key].service }}
+              creates its key when it is first provisioned. There is nothing to rotate.
+          when: key_action == 'rotate'
+
+        - name: Refuse a second rotation before the first is retired
+          ansible.builtin.assert:
+            that: not key_files.results[1].stat.exists
+            fail_msg: >-
+              {{ key }} is already being rotated. Retire the previous key first
+              (scn-config nonint retire-key {{ key }}).
+              {{ signing_key_registry[key].retire }}
+          when: key_action == 'rotate'
+
+        - name: Refuse to retire when nothing is being rotated
+          ansible.builtin.assert:
+            that: key_files.results[1].stat.exists
+            fail_msg: "{{ key }} has no previous key to retire."
+          when: key_action == 'retire'
+
+        # mv -n: never overwrites, so a race with another run cannot lose a key.
+        - name: Make the current key the previous one
+          ansible.builtin.command:
+            argv: [mv, -n, "{{ current_file }}", "{{ previous_file }}"]
+            creates: "{{ previous_file }}"
+          when: key_action == 'rotate'
+
+        # mv keeps the file's old mtime; `show` reads the rotation's age off
+        # this file, so stamp it with the moment the rotation began.
+        - name: Record when the rotation began
+          ansible.builtin.file:
+            path: "{{ previous_file }}"
+            state: touch
+          when: key_action == 'rotate'
+
+        - name: Generate the new current key
+          # The lookup writes the file; only the count reaches the output.
+          ansible.builtin.set_fact:
+            rotated_keys: "{{ query('signing_keys', key, type=signing_key_registry[key].type) | length }}"
+          when: key_action == 'rotate'
+
+        - name: Delete the previous key
+          ansible.builtin.file:
+            path: "{{ previous_file }}"
+            state: absent
+          when: key_action == 'retire'
+
+        - name: Report the change
+          ansible.builtin.debug:
+            msg: >-
+              {{ key }} {{ 'rotated' if key_action == 'rotate' else 'retired' }}.
+              It reaches {{ signing_key_registry[key].service }} on its next provision
+              (ansible-playbook provision.yml --limit {{ signing_key_registry[key].service }}).
+              {{ ('When the old key is no longer needed: scn-config nonint retire-key ' ~ key ~ '. '
+                  ~ signing_key_registry[key].retire) if key_action == 'rotate' else '' }}
+
+    # One line per key, fields split by |: name, service, state (`current`, or
+    # `rotating <hours>h` since the rotation began) and what retiring costs.
+    # Written to `out` for scn-config to read (the hand-off set-smtp.yml uses),
+    # or printed.
+    - name: Describe every key
+      when: key_action == 'show'
+      block:
+        - name: Look at the previous keys
+          ansible.builtin.stat:
+            path: "{{ _zai_secrets_dir }}/{{ item }}.previous.pem"
+          loop: "{{ signing_key_registry | list }}"
+          register: previous_files
+
+        - name: Write or print the description
+          vars:
+            now_epoch: "{{ now().timestamp() | int }}"
+            description: |
+              {% for r in previous_files.results %}
+              {{ r.item }}|{{ signing_key_registry[r.item].service }}|{{ 'rotating ' ~ (((now_epoch | int) - (r.stat.mtime | int)) // 3600) ~ 'h' if r.stat.exists else 'current' }}|{{ signing_key_registry[r.item].retire | trim }}
+              {% endfor %}
+          block:
+            - name: Write the description
+              ansible.builtin.copy:
+                dest: "{{ out }}"
+                content: "{{ description }}"
+                mode: "0600"
+              changed_when: false
+              when: out is defined
+
+            - name: Print the description
+              ansible.builtin.debug:
+                msg: "{{ description | trim | split('\n') }}"
+              when: out is not defined

@@ -26,6 +26,9 @@
 #   scn-config nonint show-tls                   # how the proxy gets its certificate
 #   scn-config nonint set-tls acme ops@example.org   # acme (the default, contact
 #                                                #   optional) or none
+#   scn-config nonint show-keys                  # each signing key and its state
+#   scn-config nonint rotate-key pds_oauth       # new key in front, old one kept
+#   scn-config nonint retire-key pds_oauth       # drop the old one
 #
 # Runs on the control node. Lives in the repo's bin/ (on PATH via
 # /etc/profile.d/zai-ops.sh) and runs in place — the script you run is always the
@@ -33,7 +36,7 @@
 #
 # This is the front end only. The playbooks (site.yml, verify-proxmox.yml,
 # set-domain.yml, set-registry.yml, set-node.yml, assign.yml, admins.yml,
-# set-smtp.yml, set-tls.yml) validate and write; the checks here exist to give a readable message before a playbook
+# set-smtp.yml, set-tls.yml, rotate-key.yml) validate and write; the checks here exist to give a readable message before a playbook
 # run, and the playbook stays the authority.
 set -euo pipefail
 
@@ -80,6 +83,9 @@ usage: scn-config
        scn-config nonint clear-smtp
        scn-config nonint show-tls
        scn-config nonint set-tls <acme|none> [email]
+       scn-config nonint show-keys
+       scn-config nonint rotate-key <key>
+       scn-config nonint retire-key <key>
 EOF
   exit 64
 }
@@ -628,6 +634,87 @@ nonint_set_smtp() {
 
 nonint_clear_smtp() {
   ansible-playbook set-smtp.yml -e smtp_action=clear
+}
+
+# --- Signing keys -------------------------------------------------------------
+# What rotate-key.yml reports: one row per key in signing_key_registry. Never
+# the keys themselves.
+KEY_NAME=() KEY_SERVICE=() KEY_STATE=() KEY_RETIRE=()
+
+load_keys() {
+  local out name service state retire
+  KEY_NAME=() KEY_SERVICE=() KEY_STATE=() KEY_RETIRE=()
+  out="$(mktemp)"
+  if ! ANSIBLE_NOCOLOR=1 ansible-playbook rotate-key.yml -e key_action=show \
+      -e "out=$out" >/dev/null 2>&1; then
+    rm -f "$out"
+    die "could not read the signing keys; run: ansible-playbook rotate-key.yml -e key_action=show"
+  fi
+  while IFS='|' read -r name service state retire; do
+    [ -n "$name" ] || continue
+    KEY_NAME+=("$name") KEY_SERVICE+=("$service")
+    KEY_STATE+=("$state") KEY_RETIRE+=("$retire")
+  done <"$out"
+  rm -f "$out"
+}
+
+nonint_show_keys() {
+  local i
+  load_keys
+  for i in "${!KEY_NAME[@]}"; do
+    printf '%-22s %-10s %s\n' "${KEY_NAME[$i]}" "${KEY_SERVICE[$i]}" "${KEY_STATE[$i]}"
+  done
+}
+
+nonint_rotate_key() {
+  [ $# -eq 1 ] || usage
+  ansible-playbook rotate-key.yml -e key_action=rotate -e "key=$1"
+}
+
+nonint_retire_key() {
+  [ $# -eq 1 ] || usage
+  ansible-playbook rotate-key.yml -e key_action=retire -e "key=$1"
+}
+
+do_keys_menu() {
+  local args=() i choice text action out
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Signing Keys" \
+    --infobox "Reading the signing keys…" 8 "$WT_WIDTH"
+  load_keys
+  for i in "${!KEY_NAME[@]}"; do
+    args+=("${KEY_NAME[$i]}" " ${KEY_SERVICE[$i]}, ${KEY_STATE[$i]}")
+  done
+  text="The keys services sign OAuth tokens with. Rotating puts a new key in
+front and keeps the old one working; retiring removes the old one."
+  choice="$(whiptail --backtitle "$BACKTITLE" --title "Signing Keys" \
+    --ok-button Select --cancel-button Back \
+    --menu "$text" "$(box_height "$text" $(( ${#KEY_NAME[@]} + 8 )))" \
+    "$WT_WIDTH" "${#KEY_NAME[@]}" "${args[@]}" 3>&1 1>&2 2>&3)" || return 0
+
+  for i in "${!KEY_NAME[@]}"; do [ "${KEY_NAME[$i]}" = "$choice" ] && break; done
+  if [ "${KEY_STATE[$i]}" = current ]; then
+    action=rotate
+    text="Rotate $choice?
+
+${KEY_SERVICE[$i]} will sign with a new key and keep the old one working
+until you retire it. Retiring later: ${KEY_RETIRE[$i]}"
+  else
+    action=retire
+    text="Retire the previous $choice key (${KEY_STATE[$i]})?
+
+${KEY_RETIRE[$i]}"
+  fi
+  whiptail --backtitle "$BACKTITLE" --title "Signing Keys" \
+    --yes-button "${action^}" --no-button Back \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+  if out="$(ANSIBLE_NOCOLOR=1 "nonint_${action}_key" "$choice" 2>&1)"; then
+    offer_provision "${KEY_SERVICE[$i]}" "Signing Keys" "$choice: ${action}d."
+  else
+    msgbox "Signing Keys" "Could not $action $choice.
+
+$(tail -n 12 <<<"$out")"
+  fi
 }
 
 # --- Interactive mode --------------------------------------------------------
@@ -1609,7 +1696,7 @@ interactive() {
   while true; do
     choice="$(whiptail --backtitle "$BACKTITLE" --title "$TITLE" \
       --ok-button Select --cancel-button Finish \
-      --menu "" 18 "$WT_WIDTH" 9 \
+      --menu "" 19 "$WT_WIDTH" 10 \
       "1 Control Node Setup" " Configure this node, check the API token" \
       "2 Cluster Settings" " Proxmox host, domain, membership registry" \
       "3 Container Assignment" " Set the CTID per service" \
@@ -1617,6 +1704,7 @@ interactive() {
       "5 Cluster Admins" " Who can approve members and run the PDS" \
       "6 Set SMTP" " Outbound mail relay" \
       "7 Set TLS" " How the proxy gets its certificate" \
+      "8 Signing Keys" " Rotate the keys services sign tokens with" \
       3>&1 1>&2 2>&3)" || exit 0
     case "$choice" in
       1\ *) do_setup_menu ;;
@@ -1626,6 +1714,7 @@ interactive() {
       5\ *) do_admins_menu ;;
       6\ *) do_smtp_menu ;;
       7\ *) do_tls_menu ;;
+      8\ *) do_keys_menu ;;
     esac
   done
 }
@@ -1655,6 +1744,9 @@ case "${1:-}" in
       clear-smtp) nonint_clear_smtp ;;
       show-tls) nonint_show_tls ;;
       set-tls) shift; nonint_set_tls "$@" ;;
+      show-keys) nonint_show_keys ;;
+      rotate-key) shift; nonint_rotate_key "$@" ;;
+      retire-key) shift; nonint_retire_key "$@" ;;
       *) usage ;;
     esac
     ;;

@@ -432,3 +432,11 @@ Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
   removed the stdlib `crypt` module Ansible's `password_hash` filter used;
   `chpasswd` on the target uses libc crypt instead, so no `python3-passlib` on
   the control node.
+
+- **The `pipe` lookup strips trailing whitespace from what it returns.** A file
+  written from a `pipe` value has no final newline, even when the file it was
+  read from had one. Corliss's signing keys reached its CT that way, so the
+  `signing_keys` lookup that replaced it strips the same way: returning the
+  newline would have made the copy task report a change and restart Corliss
+  with a key that differed only by one byte. Any new reader of a value a
+  service already has must match how the old one returned it.

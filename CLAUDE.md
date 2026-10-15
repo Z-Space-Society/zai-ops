@@ -73,6 +73,12 @@ out and update the docs.
 - **Secrets:** API token in `ansible/group_vars/all/vault.yml` (Ansible Vault,
   git-ignored). Vault password at `/root/.vault_pass` on CT 100 — host root is
   the trust boundary by design.
+- **Signing keys are PEMs under `/root/.zai-secrets`, read through one
+  lookup.** `query('signing_keys', '<name>')` generates once and returns current
+  then previous; services that take JWKs render it with the `private_jwk`
+  filter (kid = RFC 7638 thumbprint). Keys already in use are adopted, never
+  regenerated. Rotation is `scn-config` → Signing Keys. A new service follows
+  `docs/adding-a-service.md`, "A signing key". See ADR-0011.
 - **Non-secret shared vars** go in `ansible/group_vars/all/main.yml` (e.g.
   `ct_rootfs_storage`) — never hardcode storage in playbooks, and don't put
   non-secrets in the vault. These are generic *blueprint* defaults only; no

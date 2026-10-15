@@ -322,28 +322,53 @@
 
 # --- Secrets: signing keys + env file -----------------------------------------
 
-- name: Render the atproto EC (ES256) signing key
-  # Generated once on the control node (group_vars/all/main.yml, cached under
-  # /root/.zai-secrets) and templated here — DR-critical, covered by the
-  # existing Tier-1 control-node backup. Group-readable: the Django process
-  # (not systemd) reads this path directly via ATPROTO_EC_PRIVATE_KEY_PATH.
+- name: Render the current signing keys
+  # From the control node's signing_keys lookup (group_vars/all/main.yml,
+  # docs/decisions/0011), cached under /root/.zai-secrets and covered by the
+  # Tier-1 control-node backup. DR-critical. Group-readable: the Django process
+  # (not systemd) reads these paths directly via the *_KEY_PATH env vars.
   ansible.builtin.copy:
-    content: "{{ corliss_atproto_ec_key }}"
-    dest: "{{ corliss_atproto_ec_key_path }}"
+    content: "{{ item.pems[0] }}"
+    dest: "{{ item.path }}"
     owner: root
     group: "{{ corliss_group }}"
     mode: "0640"
+  loop:
+    - { pems: "{{ corliss_atproto_ec_keys }}", path: "{{ corliss_atproto_ec_key_path }}" }
+    - { pems: "{{ corliss_oidc_rsa_keys }}", path: "{{ corliss_oidc_rsa_key_path }}" }
+  loop_control:
+    label: "{{ item.path }}"
   no_log: true
   notify: restart corliss
 
-- name: Render the OIDC RSA (RS256) signing key
+- name: Render the keys being rotated out
+  # Present only between `scn-config rotate-key` and `retire-key`. Removed
+  # here once retired, so a stale previous key never lingers on the CT.
   ansible.builtin.copy:
-    content: "{{ corliss_oidc_rsa_key }}"
-    dest: "{{ corliss_oidc_rsa_key_path }}"
+    content: "{{ item.pems[1] }}"
+    dest: "{{ item.path }}"
     owner: root
     group: "{{ corliss_group }}"
     mode: "0640"
+  loop:
+    - { pems: "{{ corliss_atproto_ec_keys }}", path: "{{ corliss_atproto_ec_previous_key_path }}" }
+    - { pems: "{{ corliss_oidc_rsa_keys }}", path: "{{ corliss_oidc_rsa_previous_key_path }}" }
+  loop_control:
+    label: "{{ item.path }}"
+  when: item.pems | length > 1
   no_log: true
+  notify: restart corliss
+
+- name: Remove a retired previous key
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop:
+    - { pems: "{{ corliss_atproto_ec_keys }}", path: "{{ corliss_atproto_ec_previous_key_path }}" }
+    - { pems: "{{ corliss_oidc_rsa_keys }}", path: "{{ corliss_oidc_rsa_previous_key_path }}" }
+  loop_control:
+    label: "{{ item.path }}"
+  when: item.pems | length == 1
   notify: restart corliss
 
 - name: Render the corliss secret environment file

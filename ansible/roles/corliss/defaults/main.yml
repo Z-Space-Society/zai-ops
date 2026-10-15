@@ -385,7 +385,13 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # /internal/vaults. Installs corliss-reconcile.timer with it: public clients
 # hold refresh tokens, so a missed revocation push would otherwise keep a
 # removed member connected until someone pressed Reconcile.
-corliss_version: v1.4.0
+#
+# v1.4.1 accepts a previous signing key beside each current one, so
+# `scn-config` can rotate them (docs/decisions/0011): two optional env keys,
+# ATPROTO_EC_PREVIOUS_KEY_PATH and OIDC_RSA_PREVIOUS_KEY_PATH, rendered only
+# while a rotation is under way, and migration 0008, which records the key each
+# atproto session started on so it keeps refreshing with that key.
+corliss_version: v1.4.1
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -448,6 +454,9 @@ corliss_env_file: "{{ corliss_config_dir }}/corliss.env"
 corliss_keys_dir: "{{ corliss_config_dir }}/keys"
 corliss_atproto_ec_key_path: "{{ corliss_keys_dir }}/atproto_ec.pem"
 corliss_oidc_rsa_key_path: "{{ corliss_keys_dir }}/oidc_rsa.pem"
+# Where the key being rotated out goes, present only during a rotation.
+corliss_atproto_ec_previous_key_path: "{{ corliss_keys_dir }}/atproto_ec.previous.pem"
+corliss_oidc_rsa_previous_key_path: "{{ corliss_keys_dir }}/oidc_rsa.previous.pem"
 
 # Postgres role + database this role provisions on the postgres CT (same
 # delegated idiom as litellm/open-webui/happyview). Password is the

@@ -121,6 +121,43 @@ Back in zai-ops, in the [`corliss`](roles/corliss.md) role:
   [`corliss.env.j2`](../ansible/roles/corliss/templates/corliss.env.j2).
 - Bump `corliss_version` to the release that has the new probe.
 
+## A signing key
+
+Skip this unless the service signs tokens with a key of its own: an atproto
+OAuth confidential client, an OIDC provider, anything that publishes a JWKS.
+The rules are in [ADR-0011](decisions/0011-signing-keys.md); the steps:
+
+1. **Name the key** `<service>_<purpose>`, e.g. `scn_chat_oauth`.
+2. **Read it in `group_vars/all/main.yml`**, beside the other signing keys:
+
+   ```yaml
+   <service>_<purpose>_keys: "{{ query('signing_keys', '<service>_<purpose>') }}"
+   ```
+
+   That is a list, current key first, then the previous key while a rotation
+   is under way. The first run generates a P-256 key. Use `query`, not
+   `lookup`, which would join the two PEMs into one string.
+3. **Register it** in `signing_key_registry` in the same file: the service to
+   provision after a rotation, the type, and one sentence on what retiring the
+   previous key costs. That entry is what puts it in `scn-config`'s Signing
+   Keys menu.
+4. **Hand it to the service in the form it reads:**
+   - a JSON array of private JWKs (scn-chat's `OAUTH_PRIVATE_KEYS`):
+     `{{ <service>_<purpose>_keys | map('private_jwk') | list | to_json }}`
+   - a JWK set (the PDS):
+     `{{ {'keys': <service>_<purpose>_keys | map('private_jwk') | list} | to_json }}`
+   - PEM files (Corliss): write `[0]` to the current path and, only when the
+     list has two entries, `[1]` to a previous path, as the corliss role does.
+
+   The service must sign with the first key and keep the second usable: still
+   published for a verifier, still used to refresh the sessions that started
+   on it for an atproto client. If the app cannot do that, it cannot rotate,
+   and that belongs in its role doc.
+5. **A key the service already generated for itself is adopted, never
+   replaced.** Copy it into `<name>.pem` once, from the role, as the pds role
+   does, and read it with `generate=false` so a failed copy stops the play.
+   Changing an atproto client's key ends every member's session.
+
 ## 7. Docs
 
 In the same change:

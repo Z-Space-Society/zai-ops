@@ -116,10 +116,10 @@ pds_email_from_address: "pds@{{ cluster_domain }}"
 # new authority over the account reached without its password. Default ON
 # (boris 2026-09-23). The server refuses to make it available unless the
 # origin is HTTPS (Caddy edge provides it) AND the OAuth signing key is P-256.
-# From the f74a3e1 pin the server generates a P-256 key on first boot, so a
-# fresh PDS meets both with nothing provisioned. A PDS first booted on an
-# older build may hold a K-256 key in its key store; that one needs
-# `pds_oauth_jwk_set` (see group_vars/all/main.yml).
+# The key is supplied by zai-ops (`pds_oauth_keys`, docs/decisions/0011): P-256
+# on a fresh install, so a new PDS meets both with nothing to do. A PDS first
+# booted on an older build may have a K-256 key, which the role adopts as it
+# is; `scn-config rotate-key pds_oauth` then puts a P-256 key in front of it.
 pds_delegation_enabled: true
 
 # Limits. Keep the Caddy side in sync if changed (a proxy that rejects a body

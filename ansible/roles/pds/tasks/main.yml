@@ -129,6 +129,96 @@
     path: "{{ pds_src }}/target"
     state: absent
 
+# --- OAuth signing key (docs/decisions/0011) ----------------------------------
+# zai-ops supplies the PDS's OAuth key (PDS_OAUTH_KEYS_JWK_SET) so it is held,
+# backed up and rotated like every other signing key. A PDS that has already
+# run generated its own and has been publishing it at /oauth/jwks, so that key
+# is ADOPTED: copied off the server's key store once, byte-for-byte, never
+# replaced. Only a PDS that has never booted gets a newly generated key.
+- name: Check for a pds_oauth_jwk_set override from before signing_keys
+  ansible.builtin.stat:
+    path: "{{ _zai_secrets_dir }}/pds_oauth_jwk_set"
+  delegate_to: localhost
+  register: pds_old_jwk_set
+
+- name: Refuse to drop an operator-supplied key set silently
+  ansible.builtin.assert:
+    that: not pds_old_jwk_set.stat.exists
+    fail_msg: >-
+      {{ _zai_secrets_dir }}/pds_oauth_jwk_set is no longer read. The PDS's key
+      now lives in {{ _zai_secrets_dir }}/pds_oauth.pem. Convert the first key
+      of that set to a PKCS8 PEM there, then remove the old file.
+    quiet: true
+
+- name: Check for the PDS's OAuth key on the control node
+  ansible.builtin.stat:
+    path: "{{ _zai_secrets_dir }}/pds_oauth.pem"
+  delegate_to: localhost
+  register: pds_oauth_pem
+
+- name: Find the key the server generated for itself
+  # The server records its key's store reference in pds_setting
+  # (atproto-pds src/keys.rs, load_or_create_pds_signing_key). Followed by
+  # reference, never by listing keys/: builds before the persist fix left
+  # orphaned keys there. No database or no row means it has never booted.
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import os, sqlite3, sys
+        db = os.path.join(sys.argv[1], "accounts.sqlite")
+        if not os.path.exists(db):
+            sys.exit(0)
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            row = con.execute(
+                "SELECT value FROM pds_setting WHERE key = 'pds_signing_key_ref'"
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+            row = None
+        print(row[0] if row else "")
+      - "{{ pds_data_dir }}"
+  register: pds_own_key_ref
+  changed_when: false
+  when: not pds_oauth_pem.stat.exists
+
+- name: Adopt the server's own key
+  when:
+    - not pds_oauth_pem.stat.exists
+    - pds_own_key_ref.stdout | length > 0
+  block:
+    - name: Refuse a key store this role cannot read
+      ansible.builtin.assert:
+        that: pds_own_key_ref.stdout is match('file:[0-9a-f]+$')
+        fail_msg: "Unexpected key reference {{ pds_own_key_ref.stdout }}; only the file key store is supported."
+        quiet: true
+
+    - name: Copy the key off the PDS
+      ansible.builtin.slurp:
+        src: "{{ pds_data_dir }}/keys/{{ pds_own_key_ref.stdout | regex_replace('^file:', '') }}.key"
+      register: pds_own_key
+      no_log: true
+
+    - name: Store it as the PDS's OAuth key
+      ansible.builtin.copy:
+        content: "{{ pds_own_key.content | b64decode | didkey_to_pem }}"
+        dest: "{{ _zai_secrets_dir }}/pds_oauth.pem"
+        mode: "0600"
+        force: false
+      delegate_to: localhost
+      no_log: true
+
+- name: Generate a key for a PDS that has never booted
+  # The lookup writes the file; only the count reaches the output.
+  ansible.builtin.set_fact:
+    pds_oauth_generated: "{{ query('signing_keys', 'pds_oauth') | length }}"
+  when:
+    - not pds_oauth_pem.stat.exists
+    - pds_own_key_ref.stdout | default('') | length == 0
+
 # --- Secret env + unit --------------------------------------------------------
 - name: Render the pds secret environment file
   ansible.builtin.template:

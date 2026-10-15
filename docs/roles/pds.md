@@ -44,11 +44,18 @@ Build-from-source, same shape as `happyview`:
    clap,smtp,metrics,hickory-dns --bin pds --bin atproto-pds-admin`.
    Rebuild only when the pin moves or the binary is missing. `target/` is
    deleted after install (~6 GB).
-4. Render `/etc/pds/pds.env` (0600 root — secrets via `.zai-secrets`) and the
+4. Make sure the control node holds the PDS's OAuth key,
+   `/root/.zai-secrets/pds_oauth.pem` ([ADR-0011](../decisions/0011-signing-keys.md)).
+   When it does not, a PDS that has already run has a key of its own: the
+   role reads its reference from `pds_setting` in `accounts.sqlite`, copies
+   that file from `/var/lib/pds/keys/` and converts it, so the key the server
+   publishes does not change. A PDS that has never booted gets a new P-256
+   key. It refuses to run while the retired `pds_oauth_jwk_set` file exists.
+5. Render `/etc/pds/pds.env` (0600 root, secrets via `.zai-secrets`) and the
    systemd unit, start + enable `pds`.
-5. Smoke-test: wait on the port, then `/_alive` (liveness) and
+6. Smoke-test: wait on the port, then `/_alive` (liveness) and
    `/xrpc/_health` (readiness — opens the accounts DB).
-6. Record `pds.json` in the Garage manifest bucket via the `manifest` role
+7. Record `pds.json` in the Garage manifest bucket via the `manifest` role
    (ADR-0009), after the smoke tests pass.
 
 ### Handlers
@@ -71,7 +78,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | `pds_crawlers` | `["https://bsky.network", "https://relay.fire.hose.cam", "https://relay1.eurosky.network"]` | who may crawl/announce: the Bluesky relay plus two independent full-network relays — Microcosm Montreal (fig, Canada) and EuroSky (Germany). A direct `requestCrawl` to the indie relays makes pickup immediate; all three are public and permissionless |
 | `pds_admin_dids` | from the roster | DIDs that may mint invite codes, and nothing else. Not stored: `provision.yml`'s pds play reads the cluster's public admin roster and uses its current admins. Empty leaves `PDS_ADMIN_DIDS` out of the env file |
 | `pds_email_from_address` | `pds@{{ cluster_domain }}` | the From address the PDS sends as; mail is off until the cluster relay (`smtp_url`) is also set |
-| `pds_delegation_enabled` | `true` | account delegation (`/account/delegation`), default ON (boris). Needs an HTTPS origin (Caddy) and a P-256 OAuth signing key, which the server generates on first boot |
+| `pds_delegation_enabled` | `true` | account delegation (`/account/delegation`), default ON (boris). Needs an HTTPS origin (Caddy) and a P-256 OAuth signing key, which a fresh install gets. A K-256 key adopted from an older build needs `scn-config nonint rotate-key pds_oauth` |
 | `pds_data_dir` | `/var/lib/pds` | accounts.sqlite + repos + blobs; the unit's only `ReadWritePaths` |
 | `pds_*_limit` | 16 MiB / 1 GiB | blob upload + import limits |
 
@@ -84,60 +91,22 @@ WebSocket upgrades through by default; the PDS trusts exactly one proxy hop
 ### Secrets
 
 `group_vars/all/main.yml`, all under `/root/.zai-secrets` (Tier-1 backed up).
-The first two are generated on first run with no manual step. The other two
-are optional, placed there by an operator, and the SMTP URL below is set with
-`scn-config`: a missing file reads as empty and its env line is left out. The PLC key is not
-wired yet.
+The first three need no manual step. The SMTP URL below is set with
+`scn-config`: a missing file reads as empty and its env line is left out. The
+PLC key is not wired yet.
 
 | Secret | For |
 |---|---|
 | `pds_jwt_secret` | signing JWTs the server issues, access and refresh tokens included |
 | `pds_admin_password` | the admin credential: HTTP basic auth for the `/admin` dashboard, every `com.atproto.admin.*` route and the `atproto-pds-admin` CLI. Not break-glass; it is how the server is administered |
-| `pds_oauth_jwk_set` *(optional override)* | the PDS's service signing key, as `{"keys": [<private jwk>, ...]}`. Unset, the server generates a **P-256** key on first boot and keeps it in its key store under `/var/lib/pds`, so a fresh install needs nothing here. Only a PDS first booted on a build older than the `f74a3e1` pin needs it: those generated K-256, which account delegation refuses |
+| `pds_oauth_keys` | the PDS's OAuth signing key, `pds_oauth.pem` via the `signing_keys` lookup, rendered as `PDS_OAUTH_KEYS_JWK_SET`. Adopted from the server's own key store (task 4) or generated before first boot. Rotated with `scn-config` → Signing Keys |
 | `pds_plc_rotation_key_private` *(required for recovery)* | operator recovery for identities this server issues; **losing it is losing the accounts**. Wire before the SCN DID migration |
 
-The service signing key signs the client assertion the PDS sends during
-delegated sign-in. It does not sign access or refresh tokens, so replacing it
-signs nobody out. Because the generated key lives in the data dir, it is
-covered by the PDS data backup below, not by the Tier-1 secrets backup.
-
-### Outbound email (SMTP)
-
-The PDS sends through the cluster's mail relay: one SMTP URL, credentials
-included, read from `/root/.zai-secrets/smtp_url`. The blueprint names no
-provider; which relay a cluster uses is its own choice. `pds_email_from_address` is the address it
-sends as (default `pds@<domain>`).
-
-Both must be set for delivery. With the relay unset the server logs each
-message's recipient and subject and drops it. Accounts can still be created,
-but nothing that mails a code works: password reset, email confirmation, and
-the token an account needs to sign a PLC operation (changing its identity, or
-migrating away).
-
-Set it with `scn-config`'s **Set SMTP** entry, which asks for the host, port,
-username, password and how the relay does TLS, then offers to provision `pds`
-so the change takes effect. Scripted: `scn-config nonint set-smtp` with the URL
-on stdin, `show-smtp`, `clear-smtp`. The engine is
-[`set-smtp.yml`](../README.md#playbooks).
-
-The server parses the URL with `lettre`, which fixes two things:
-
-- **TLS is in the URL.** `smtps://host:465` is implicit TLS;
-  `smtp://host:587?tls=required` is STARTTLS. A bare `smtp://` with no `tls`
-  parameter is unencrypted, password included, so `set-smtp.yml` refuses it.
-- **Credentials are percent-decoded.** A username that is an email address is
-  stored as `user%40example.com`; the menu encodes both fields for you.
-
-## Dependencies
-
-None beyond the build toolchain — no Postgres, no Redis, no S3; SQLite-only
-and single-instance by design. `provision.yml` runs the `pds` play after
-nothing in particular.
-
-Nothing depends on it either, which is why it is the one optional service: the
-proxy skips its route, and [Corliss](corliss.md) renders a blank `PDS_URL`,
-until `pds` has a CTID. Once it does, replay `corliss` so the PDS row on
-`/systems/` gets an address to check. The row's Version comes from `pds.json`.
+The OAuth signing key signs the client assertion the PDS sends during
+delegated sign-in. It does not sign access or refresh tokens, so rotating it,
+or retiring the previous key at any time, signs nobody out. The server still
+writes a key of its own to its key store at boot; with the JWK set supplied,
+that key is unused.
 
 ## Verify
 
@@ -147,6 +116,9 @@ curl http://127.0.0.1:3000/_alive          # 200 (liveness)
 curl http://127.0.0.1:3000/xrpc/_health    # 200 (readiness — storage OK)
 curl https://pds.<domain>/xrpc/_health     # through the edge
 dig pds.<domain>                           # DNS at the edge
+curl https://pds.<domain>/oauth/jwks       # one kid; two while a rotation is under way
+journalctl -u pds | grep 'signing key selected' | tail -1
+                                           # source="PDS_OAUTH_KEYS_JWK_SET[0]"
 # account smoke: invite → createAccount → handle resolves →
 # DID document at https://plc.directory/did:plc:… resolves to our hostname
 ```

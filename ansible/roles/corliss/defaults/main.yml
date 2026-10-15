@@ -524,6 +524,11 @@ corliss_oidc_backchannel_logout_uri: "http://{{ hostvars['open-webui'].ansible_h
 corliss_openwebui_url: "https://owui.{{ cluster_domain }}"  # Tools menu "Open WebUI" entry
 corliss_api_url: "https://api.{{ cluster_domain }}"       # base URL shown on /api/
 corliss_happyview_url: "https://view.{{ cluster_domain }}"  # Manage menu, admins only
+# The nav's "Chat" entry (CHAT_URL, corliss v1.4.2+), members only. Guarded on
+# the scn-chat CTID like corliss_chat_url, so a cluster without scn-chat shows
+# no Chat entry. The public origin, NOT corliss_chat_url: that one is the
+# internal address /systems/ probes. Same subdomain as the Caddy route.
+corliss_chat_public_url: "{{ ('https://chat.' ~ cluster_domain) if hostvars['scn-chat'].ctid is defined else '' }}"
 
 # Deliberately BLANK, and not derived like the three above. The Manage Console
 # SPA it pointed at was deleted with the manage_console role, so

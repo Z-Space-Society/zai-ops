@@ -108,4 +108,5 @@ ansible-playbook provision.yml --limit scn-chat
 - **A fresh deploy can't chat yet.** Nobody can chat until an admin enables a provider plugin and configures a model, or members add their own keys.
 - **`ALLOW_PRIVATE_NETWORKS=false` stays.** The CT sits on vmbr1 beside postgres, redis and litellm, and the setting keeps the app and its web-fetch and search plugins off 10.1.1.0/24.
 - **Upstream is experimental.** The `@atproto/*` packages are spaces-alpha releases, pinned exactly by the tag. Read the changes between tags before bumping.
+- **Corliss links it in the nav** as **Chat**, between Notes and API, from v1.4.2 (`CHAT_URL`, rendered from `corliss_chat_public_url`). It is members-only there, like its neighbours, even though scn-chat's own sign-in is open.
 - **Staging with webhook auto-deploy** is planned, not in this round. [zai-ops#33](https://github.com/Z-Space-Society/zai-ops/issues/33) holds the work, starting from #26's first version.

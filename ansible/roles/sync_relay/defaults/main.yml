@@ -21,7 +21,7 @@
 # MCP service on a second listener. Needs Corliss v1.4.0, which issues those
 # tokens, and the auth settings below; it refuses to start with auth on and any
 # of them blank.
-sync_relay_version: "0.2.0"
+sync_relay_version: "0.2.1"
 
 sync_relay_port: 7030
 # Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race

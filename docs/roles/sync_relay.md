@@ -83,7 +83,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/sync_relay/defaults/main.ym
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `sync_relay_version` | `0.2.0` | Tag checked out and built (the role prefixes `v`). Bump to upgrade; the clone and build tasks re-run when this changes. `0.2.0` is Phase B: token verification, owner-only vaults, `/internal/vaults` and MCP. |
+| `sync_relay_version` | `0.2.1` | Tag checked out and built (the role prefixes `v`). Bump to upgrade; the clone and build tasks re-run when this changes. `0.2.0` is Phase B: token verification, owner-only vaults, `/internal/vaults` and MCP. |
 | `sync_relay_require_auth` | `true` | The binary's own default. It was `false` through Phase A only. |
 | `sync_relay_mcp_port` | `7031` | The MCP listener, routed as `mcp.<domain>`. |
 | `sync_relay_oidc_issuer` | `https://{{ cluster_domain }}` | The `iss` every token must carry. A local copy of the corliss role's `corliss_url`; keep the two in sync. |

@@ -8,7 +8,7 @@
 # source build, and a smoke test at the end that proves the feature.
 
 # --- Node.js ---------------------------------------------------------------
-# Tarball + checksum, the Garage/uv pattern. /opt/node-<ver> keeps multiple
+# Tarball + checksum, the Garage/uv pattern. /opt/node-<ver>-linux-x64 keeps multiple
 # majors side by side; /usr/local/bin gets symlinks, so `node` is whatever the
 # pinned version is (nothing else on a fresh CT claims those names).
 

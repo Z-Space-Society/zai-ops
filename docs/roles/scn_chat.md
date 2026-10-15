@@ -40,7 +40,7 @@ Where a member's chats live is decided at first sign-in:
 
 | Task | Why |
 | --- | --- |
-| Download + checksum-verify the Node tarball into `/opt/node-<ver>`, symlink `node`/`npm`/`npx`/`corepack` | The Garage/uv tarball pattern; no third-party apt repo |
+| Download + checksum-verify the Node tarball into `/opt/node-<ver>-linux-x64`, symlink `node`/`npm`/`npx`/`corepack` | The Garage/uv tarball pattern; no third-party apt repo |
 | `corepack enable` + prepare `pnpm@<scn_chat_pnpm_version>` | The repo's own `packageManager` pin |
 | apt `build-essential python3 git …` | better-sqlite3 builds from source when no prebuilt binary matches |
 | `git` clone at `scn_chat_version`, `force: true` | The pin; the clone's `changed` flag triggers the rebuild |

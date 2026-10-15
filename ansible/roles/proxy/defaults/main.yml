@@ -84,6 +84,25 @@ caddy_proxy_hosts:
   # Corliss owns the APEX (ADR-0006), not a subdomain: its OIDC issuer is the
   # bare origin, and discovery has to sit at <issuer>/.well-known/... .
   - { domain: "{{ cluster_domain }}", service: corliss, port: 8000 }
+  # The sync relay (Phase B, relay v0.2.0). Two hostnames, two listeners: the
+  # automerge sync websocket on 7030 and the MCP service on 7031. The hostnames
+  # come from group_vars because Corliss and the relay build token audiences
+  # from the same two values.
+  #
+  # `block_paths` is load-bearing on the sync route. /internal/vaults lists and
+  # creates any member's vaults for whoever holds the service token, and is for
+  # Corliss over vmbr1 only. The relay's own README says the proxy must not route
+  # it, and the token is the only other thing guarding it.
+  #
+  # The sync token travels in the query string (`wss://sync.<domain>/?access_token=`),
+  # because a browser or phone websocket cannot send an Authorization header.
+  # It stays out of logs only because this Caddyfile configures no access log.
+  # Adding a `log` directive means adding a filter that drops the query first.
+  - domain: "{{ sync_relay_sync_host }}"
+    service: sync-relay
+    port: 7030
+    block_paths: ["/internal/*"]
+  - { domain: "{{ sync_relay_mcp_host }}", service: sync-relay, port: 7031 }
 
 # --- Caddy package source and version ---------------------------------------
 # Caddy comes from Debian BACKPORTS, not the base suite, and it is version-pinned

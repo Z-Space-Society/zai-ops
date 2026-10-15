@@ -7,8 +7,9 @@
 # place, install the binary, delete the build tree. Runtime memory is light; the
 # 2 GB CT sizing is compilation headroom.
 #
-# ADR-0007 records the design. Note that this role deploys the Phase A relay,
-# which has NO membership enforcement and MUST NOT be given a Caddy route.
+# ADR-0007 records the design. Since 0.2.0 this is the Phase B relay, which
+# verifies Corliss access tokens; the proxy routes it, and the smoke test below
+# fails the play unless /health reports auth=corliss.
 
 # --- Provision the role + database on the postgres CT ------------------------------
 # Same idiom as happyview/litellm/open-webui: the postgres superuser is peer-only,
@@ -246,6 +247,25 @@
   until: sync_relay_health is succeeded
   retries: 10
   delay: 3
+
+- name: Assert the relay is verifying Corliss tokens
+  # The body is `ok auth=<mode>`. A relay up with auth=allow-all would accept any
+  # connection on a route the proxy now publishes, so that is a failed deploy,
+  # not a warning.
+  ansible.builtin.assert:
+    that:
+      - "'auth=corliss' in sync_relay_health.content"
+    fail_msg: >-
+      scn-sync-relay answered "{{ sync_relay_health.content | trim }}", not
+      auth=corliss. Check sync_relay_require_auth and the SCN_SYNC_RELAY_OIDC_*
+      settings in {{ sync_relay_env_file }}.
+  when: sync_relay_require_auth | bool
+
+- name: Wait for the MCP listener to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ sync_relay_mcp_port }}"
+    timeout: 30
 
 # --- Manifest (docs/roles/manifest.md) ----------------------------------------
 # After the smoke test, so a service that failed it never claims a version.

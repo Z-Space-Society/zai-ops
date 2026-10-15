@@ -40,7 +40,7 @@ flowchart TB
             proxy["proxy · 110 · Caddy<br/>LAN-facing edge, dual-homed<br/>:80 / :443"]
             happyview["happyview · 111<br/>ATProto AppView, membership registry<br/>:3000"]
             litellm["litellm · 112<br/>OpenAI-compatible gateway<br/>+ co-located CPU embedder<br/>:4000"]
-            relay["sync-relay · 113<br/>Automerge sync server<br/>:7030 — no proxy route by design"]
+            relay["sync-relay · 113<br/>Automerge sync server + MCP<br/>:7030 sync · :7031 MCP"]
         end
 
         subgraph core["Core infra 100–109 — data foundations"]
@@ -101,10 +101,11 @@ connects to each directly, because neither has a page anyone lands on. See
 
 **Two edges worth noticing:**
 
-- `sync-relay` has **no** `caddy_proxy_hosts` entry on purpose — the Phase A
-  relay enforces no membership, so `vmbr1` is the entire access boundary
-  ([ADR-0007](decisions/0007-sync-relay-and-space-membership.md)). Do not add a
-  route before the Phase B verifier lands.
+- `sync-relay` is routed at `sync.<domain>` and `mcp.<domain>` only since
+  Phase B (relay 0.2.0), which verifies a Corliss access token on every
+  connection. Its `/internal/` prefix is not routed: Corliss reaches it over
+  `vmbr1` with the service token
+  ([ADR-0007](decisions/0007-sync-relay-and-space-membership.md)).
 - The dotted `corliss → happyview` and `corliss → open-webui` service calls go
   **CT-to-CT over `vmbr1`**, not out through Cloudflare and back — they are
   recovery and revocation paths that must not depend on public DNS, the CDN and

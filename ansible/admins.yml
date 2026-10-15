@@ -74,6 +74,10 @@
     # interactive shell would find it. Load that file, then exec manage.py. No
     # secret is in the arguments, so the task is not no_log and a refusal is
     # readable.
+    #
+    # A value wrapped in one pair of matching quotes is unwrapped, as systemd
+    # does. OIDC_RESOURCES is single-quoted JSON, and read with its quotes still
+    # on it fails Corliss's own check, which every manage.py command runs first.
     - name: Run the Corliss admin command
       ansible.builtin.command:
         argv: "{{ [corliss_venv ~ '/bin/python', '-c', env_loader, corliss_env_file] + manage_args }}"
@@ -85,6 +89,8 @@
               line = line.strip()
               if line and not line.startswith("#") and "=" in line:
                   key, value = line.split("=", 1)
+                  if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                      value = value[1:-1]
                   os.environ[key] = value
           os.execv(sys.executable, [sys.executable, "manage.py", *sys.argv[2:]])
       register: admin_cmd

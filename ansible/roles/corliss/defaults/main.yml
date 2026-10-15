@@ -375,7 +375,17 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # once (it mints the provisioner key and creates the tier teams); a pin below
 # v0.7.0 ignores those keys, and a pin at v0.7.0 with them unset leaves /api/
 # saying it is not configured rather than failing.
-corliss_version: v1.3.4
+#
+# v1.4.0 makes Corliss an OAuth provider for public clients (Claude, Claude Code
+# and the SCN Sync plugin) and adds the Notes page, which lists and creates a
+# member's vaults on the sync relay. Needs four env keys rendered below
+# (OIDC_RESOURCES, OIDC_CLIENT_METADATA_ALLOWLIST, SYNC_RELAY_SERVICE_TOKEN,
+# ENABLE_NOTES), migration 0007, which the role applies, and the sync relay at
+# 0.2.0 or later, since nothing before it accepts Corliss's tokens or serves
+# /internal/vaults. Installs corliss-reconcile.timer with it: public clients
+# hold refresh tokens, so a missed revocation push would otherwise keep a
+# removed member connected until someone pressed Reconcile.
+corliss_version: v1.4.0
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -675,6 +685,33 @@ console_client_key: ""
 # play. Keep in sync with sync_relay_port.
 corliss_sync_relay_port: 7030
 corliss_sync_relay_url: "http://{{ hostvars['sync-relay'].ansible_host }}:{{ corliss_sync_relay_port }}"
+
+# --- Public OAuth clients and the Notes page (v1.4.0) --------------------------
+# The resources Corliss may issue access tokens for. Each `url` is the `aud` a
+# token carries, built from the same group_vars hostnames the relay checks
+# against, so the two cannot be spelled differently. `kind` tells the Notes page
+# which URL is which; `label` is what the consent screen names.
+corliss_oidc_resources:
+  - { url: "https://{{ sync_relay_sync_host }}", kind: sync, label: "Notes sync" }
+  - { url: "https://{{ sync_relay_mcp_host }}", kind: mcp, label: "Notes over MCP" }
+
+# Which public clients' metadata documents Corliss will fetch: exact URLs or
+# origins. The claude.ai origin covers the hosted Claude apps, whose exact
+# `client_id` is not published. The SCN Sync plugin's document is Corliss's own and needs no entry. This list
+# is the whole of what an anonymous request can make Corliss fetch, so widen it
+# deliberately.
+corliss_oidc_client_metadata_allowlist:
+  - "https://claude.ai"
+
+# The nav's Notes entry. On, because this release ships with the relay's Phase B
+# in the same change. Off hides the link only; the page still answers.
+corliss_enable_notes: true
+
+# How often corliss-reconcile.timer rebuilds the membership cache from the
+# registry. Hourly bounds a missed revocation push at 75 minutes: one interval
+# plus the 15-minute life of an access token already issued. The registry is
+# read once per run, so a shorter interval costs registry reads, not much else.
+corliss_reconcile_interval: 1h
 
 # The in-house PDS. Probed at /xrpc/_health, its readiness endpoint, so "up"
 # means the process is serving and its storage answered. Needs corliss_version

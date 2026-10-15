@@ -1,0 +1,33 @@
+# {{ ansible_managed }}
+# One reconcile run: rebuild Corliss's membership cache from the registry.
+# Started by corliss-reconcile.timer, never enabled on its own.
+#
+# Why it exists: public clients (Claude, the SCN Sync plugin) hold refresh
+# tokens, and the refresh grant asks the membership cache. The registry's push
+# keeps that cache fresh, and a push missed while Corliss was restarting would
+# otherwise keep a removed member connected until someone pressed Reconcile on
+# /manage/. Hourly bounds that at 75 minutes.
+#
+# reconcile_membership exits non-zero on an incomplete report, so a run that
+# could not read the whole registry shows as failed in `systemctl status`
+# rather than as a success over a half-empty cache.
+[Unit]
+Description=Corliss membership reconcile
+After=network-online.target corliss.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ corliss_user }}
+Group={{ corliss_group }}
+EnvironmentFile={{ corliss_env_file }}
+Environment=HOME={{ corliss_home }}
+WorkingDirectory={{ corliss_src }}
+ExecStart={{ corliss_venv }}/bin/python manage.py reconcile_membership
+
+# The same hardening as corliss.service, for the same reasons.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths={{ corliss_home }}

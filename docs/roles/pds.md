@@ -68,7 +68,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | `pds_hostname` | `pds.{{ cluster_domain }}` | public hostname (SCN: `pds.sharedcomputer.network`) |
 | `pds_service_did` | `did:web:pds.{{ cluster_domain }}` | the PDS's own service identity |
 | `pds_handle_domains` | `[".{{ cluster_domain }}"]` | handle namespace accounts get (SCN: `*.sharedcomputer.network`) |
-| `pds_crawlers` | `["https://bsky.network"]` | who may crawl/announce (TODO(decision): own relay?) |
+| `pds_crawlers` | `["https://bsky.network", "https://relay.fire.hose.cam", "https://relay1.eurosky.network"]` | who may crawl/announce: the Bluesky relay plus two independent full-network relays — Microcosm Montreal (fig, Canada) and EuroSky (Germany). A direct `requestCrawl` to the indie relays makes pickup immediate; all three are public and permissionless |
 | `pds_admin_dids` | from the roster | DIDs that may mint invite codes, and nothing else. Not stored: `provision.yml`'s pds play reads the cluster's public admin roster and uses its current admins. Empty leaves `PDS_ADMIN_DIDS` out of the env file |
 | `pds_email_from_address` | `pds@{{ cluster_domain }}` | the From address the PDS sends as; mail is off until the cluster relay (`smtp_url`) is also set |
 | `pds_delegation_enabled` | `true` | account delegation (`/account/delegation`), default ON (boris). Needs an HTTPS origin (Caddy) and a P-256 OAuth signing key, which the server generates on first boot |

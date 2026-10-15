@@ -74,10 +74,19 @@ pds_hostname: "pds.{{ cluster_domain }}"
 pds_service_did: "did:web:pds.{{ cluster_domain }}"
 pds_handle_domains: [".{{ cluster_domain }}"]
 
-# Federation. TODO(decision): announce to bsky.network, or stand up our own
-# crawler/relay? Unset, nothing else on the network ever discovers this
-# server's accounts. The app view is Bluesky's open appview.
-pds_crawlers: ["https://bsky.network"]
+# Federation — who this PDS announces itself to with requestCrawl (the
+# network has no discovery protocol; without an announce nothing else ever
+# sees its accounts). Decision 2026-10-14: the Bluesky relay plus two
+# independent full-network relays — fig's Microcosm Montreal (Canada) and
+# EuroSky (Germany) — so account pickup doesn't depend on a single operator.
+# Indie relays re-pull host lists from bsky.network on a cadence, but a direct
+# requestCrawl makes pickup immediate; fig's own guidance for self-hosters is
+# to add indie relays to PDS_CRAWLERS. All three are public and
+# permissionless. The app view stays Bluesky's open appview.
+pds_crawlers:
+  - "https://bsky.network"
+  - "https://relay.fire.hose.cam"     # Microcosm Montreal (fig) — full network, Canada
+  - "https://relay1.eurosky.network"  # EuroSky — full network, Germany (Hetzner)
 pds_bsky_app_view_did: "did:web:api.bsky.app"
 pds_bsky_app_view_url: "https://api.bsky.app"
 pds_did_plc_url: "plc.directory"

@@ -193,6 +193,12 @@ corliss_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir 
 corliss_atproto_ec_keys: "{{ query('signing_keys', 'corliss_atproto_ec') }}"
 corliss_oidc_rsa_keys: "{{ query('signing_keys', 'corliss_oidc_rsa', type='rsa') }}"
 
+# scn-chat's atproto OAuth client key, rendered into OAUTH_PRIVATE_KEYS as a
+# JSON array of private JWKs. @atproto/oauth-client starts each session on the
+# first key and refreshes it with the kid it recorded, so a rotation keeps
+# existing sessions working until the previous key is retired.
+scn_chat_oauth_keys: "{{ query('signing_keys', 'scn_chat_oauth') }}"
+
 # Every signing key `scn-config rotate-key` can rotate: the service that uses
 # it (provisioned after a rotate or a retire), its type, and what retiring the
 # previous key costs. A new service that takes a key adds its entry here.
@@ -213,6 +219,18 @@ signing_key_registry:
     service: pds
     type: ec
     retire: Safe at any time; it signs only short-lived delegated sign-in assertions.
+  scn_chat_oauth:
+    service: scn-chat
+    type: ec
+    retire: >-
+      Ends every member's scn-chat session still on the old key; those members
+      sign in again.
+
+# scn-chat's SECRET_KEY, the app's symmetric secret (it encrypts stored API
+# keys). Generate-once and persisted like HappyView's; it rides the Tier-1
+# backup of /root/.zai-secrets. Not a signing key: its OAuth key is
+# scn_chat_oauth_keys above (ADR-0011).
+scn_chat_secret_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir ~ '/scn_chat_secret_key && cat ' ~ _zai_secrets_dir ~ '/scn_chat_secret_key || (openssl rand -base64 32 | tr -d \"\\n\" | tee ' ~ _zai_secrets_dir ~ '/scn_chat_secret_key)') }}"
 
 # The sync relay's Postgres password, same generate-once-and-persist posture as
 # the pairs above. Hex, so it needs no percent-encoding inside the

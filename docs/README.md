@@ -110,7 +110,7 @@ ansible-playbook provision.yml --limit proxy    # or provision one by hand
   one public hostname should point at a given proxy at a time (controlled in
   DNS).
 - **Every other CT** (postgres, redis, happyview, litellm, sync-relay, corliss,
-  open-webui) lives only on the internal network and is reached through the
+  open-webui, scn-chat) lives only on the internal network and is reached through the
   proxy. [`sync-relay`](roles/sync_relay.md) has two routes, `sync.<domain>`
   and `mcp.<domain>`, since Phase B made it verify Corliss's tokens; its
   `/internal/` prefix is left unrouted.
@@ -151,7 +151,7 @@ and the gaps leave room to grow a tier without renumbering:
 | ----------- | ------------ | ------------------------------------------ |
 | `100`–`109` | Core infra   | control (100), object-store (101), postgres (102), [`redis`](roles/redis.md) (103) |
 | `110`–`119` | Platform     | proxy/edge (110), registry (111, the [`happyview`](roles/happyview.md) role), gateway (112), sync relay (113, the [`sync_relay`](roles/sync_relay.md) role), PDS (114, the [`pds`](roles/pds.md) role) |
-| `120`–`129` | Applications | [`corliss`](roles/corliss.md) (120), open-webui (121), … other user-facing apps |
+| `120`–`129` | Applications | [`corliss`](roles/corliss.md) (120), open-webui (121), [`scn-chat`](roles/scn_chat.md) (122), … other user-facing apps |
 
 What separates the last two tiers is **who talks to it**: platform CTs are
 consumed by other services, application CTs are consumed by members. `corliss`
@@ -444,6 +444,7 @@ the API token and has no SSH path to the host, so anything needing host accounts
 | [`happyview`](roles/happyview.md)          | `happyview` | HappyView AT Protocol AppView platform (Rust binary, built from source) — Postgres-backed, fronted by Caddy |
 | [`sync_relay`](roles/sync_relay.md) | `sync-relay` | Automerge sync server (Rust binary, built from source) — the server end of the automerge-repo WebSocket protocol behind shared notes, Postgres-backed. Phase B (`0.2.0`): verifies Corliss-issued access tokens and serves the MCP service, routed at `sync.<domain>` and `mcp.<domain>`. See [ADR-0007](decisions/0007-sync-relay-and-space-membership.md) |
 | [`pds`](roles/pds.md)                      | `pds`      | In-house AT Protocol PDS (atproto-pds, Rust binary, built from source at a pinned revision): hosts the cluster's atproto accounts. SQLite on disk, no Postgres. Fronted by Caddy at `pds.<domain>` |
+| [`scn_chat`](roles/scn_chat.md)            | `scn-chat` | SCN AI-assistant chat app (Node 24, built from source at a pinned tag): atproto OAuth sign-in against each member's own PDS. SQLite on disk, **not backed up**. Fronted by Caddy at `chat.<domain>` |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
 | [`manifest`](roles/manifest.md)            | every service play (last task) | Writes `<service>.json` to Garage: installed version, zai-ops revision, timestamp. Read by Corliss's `/systems/`. See [ADR-0009](decisions/0009-service-manifests-in-garage.md) |
 

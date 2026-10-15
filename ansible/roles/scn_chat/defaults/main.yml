@@ -1,0 +1,55 @@
+---
+# Deploy scn-chat, the SCN AI-assistant chat app, natively under systemd.
+#
+# scn-chat is a pnpm TypeScript monorepo (apps/server Hono API + apps/web
+# TanStack Start UI, served by the same process) that upstream ships as a
+# single node:24-slim compose container holding a sqlite data dir. We reproduce
+# that one container as a plain CT (spec 0005; native LXC, no Docker): pinned
+# Node 24 tarball + corepack, source clone at a pinned tag, pnpm install
+# --frozen-lockfile + build, sqlite in DATA_DIR on the rootfs, systemd unit.
+# No postgres, redis or object-store dependency.
+#
+# Version policy (spec 0005 Q9): pin a scn-chat release tag. Upgrading is a
+# one-line commit bumping this, then a play run; rolling back is reverting that
+# commit. The play rebuilds and restarts only when the checkout moved, and the
+# manifest records `git describe` of what was deployed.
+scn_chat_version: "v0.1.0"
+scn_chat_repo_url: "https://github.com/Z-Space-Society/scn-chat"
+
+# Node.js: pinned LTS tarball with its SHA-256, the tarball + checksum
+# pattern Garage and uv use. v24 is the upstream image's major.
+scn_chat_node_version: "v24.21.0"
+scn_chat_node_sha256: "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"
+scn_chat_node_dir: "/opt/node-{{ scn_chat_node_version }}"
+
+scn_chat_port: 3000
+
+scn_chat_user: scn-chat
+scn_chat_group: scn-chat
+scn_chat_home: /opt/scn-chat
+scn_chat_src: /opt/scn-chat/src
+scn_chat_data_dir: /opt/scn-chat/data
+scn_chat_config_dir: /etc/scn-chat
+scn_chat_env_file: /etc/scn-chat/scn-chat.env
+
+scn_chat_database_url: "sqlite:{{ scn_chat_data_dir }}/scn-chat.sqlite"
+
+# Public URL. The atproto OAuth client_id is <this>/oauth-client-metadata.json
+# and the app's did:web derives from the same origin, so it is decided once
+# (spec 0005 Q3). On SCN that is chat.sharedcomputer.network. It must be the
+# origin members actually reach: a cluster served on a non-standard port passes
+# it with the port, e.g. -e scn_chat_public_url=https://chat.<domain>:8443.
+scn_chat_public_url: "https://chat.{{ cluster_domain }}"
+
+# Secrets come from group_vars/all/main.yml: scn_chat_secret_key (SECRET_KEY,
+# generate-once under /root/.zai-secrets) and scn_chat_oauth_keys (the atproto
+# OAuth client key, the `signing_keys` lookup, ADR-0011). ADMIN_DIDS comes from
+# the cluster admin roster (play pre_task, tasks/roster.yml), the same
+# authority Corliss and the PDS use; no DIDs live here or in any secret store.
+scn_chat_log_level: info
+scn_chat_plc_url: "https://plc.directory"
+
+# pnpm, from the repo's `packageManager` field at the pinned tag. Corepack
+# prepares this exact version into the cache at provision time; check it when
+# bumping scn_chat_version.
+scn_chat_pnpm_version: "10.33.0"

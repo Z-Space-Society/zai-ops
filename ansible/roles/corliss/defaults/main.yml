@@ -391,7 +391,13 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # ATPROTO_EC_PREVIOUS_KEY_PATH and OIDC_RSA_PREVIOUS_KEY_PATH, rendered only
 # while a rotation is under way, and migration 0008, which records the key each
 # atproto session started on so it keeps refreshing with that key.
-corliss_version: v1.4.1
+#
+# v1.4.2 shows scn-chat on /systems/ and links it in the nav as Chat, members
+# only, between Notes and API. Two env keys rendered below, both blank until
+# scn-chat has a CTID: SCN_CHAT_URL (corliss_chat_url, the internal probe
+# address) and CHAT_URL (corliss_chat_public_url, the public origin). No
+# migration.
+corliss_version: v1.4.2
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not
@@ -524,6 +530,11 @@ corliss_oidc_backchannel_logout_uri: "http://{{ hostvars['open-webui'].ansible_h
 corliss_openwebui_url: "https://owui.{{ cluster_domain }}"  # Tools menu "Open WebUI" entry
 corliss_api_url: "https://api.{{ cluster_domain }}"       # base URL shown on /api/
 corliss_happyview_url: "https://view.{{ cluster_domain }}"  # Manage menu, admins only
+# The nav's "Chat" entry (CHAT_URL, corliss v1.4.2+), members only. Guarded on
+# the scn-chat CTID like corliss_chat_url, so a cluster without scn-chat shows
+# no Chat entry. The public origin, NOT corliss_chat_url: that one is the
+# internal address /systems/ probes. Same subdomain as the Caddy route.
+corliss_chat_public_url: "{{ ('https://chat.' ~ cluster_domain) if hostvars['scn-chat'].ctid is defined else '' }}"
 
 # Deliberately BLANK, and not derived like the three above. The Manage Console
 # SPA it pointed at was deleted with the manage_console role, so
@@ -721,6 +732,20 @@ corliss_enable_notes: true
 # plus the 15-minute life of an access token already issued. The registry is
 # read once per run, so a shorter interval costs registry reads, not much else.
 corliss_reconcile_interval: 1h
+
+# scn-chat, the SCN AI-assistant chat app. Probed at /api/health, which runs a
+# `select 1` against its database and 503s on failure, so "up" means the
+# process is serving and its storage answered. Needs corliss_version v1.4.2 or
+# later; an older pin ignores the key and shows no row.
+#
+# GUARDED like corliss_pds_url below, for the same reason: until scn-chat has a
+# CTID on a cluster, an unguarded reach into hostvars would fail every Corliss
+# deploy there. Blank shows the row as "unknown".
+#
+# The port is a local default, the corliss_sync_relay_port convention. Keep in
+# sync with scn_chat_port.
+corliss_chat_port: 3000
+corliss_chat_url: "{{ ('http://' ~ hostvars['scn-chat'].ansible_host ~ ':' ~ corliss_chat_port) if hostvars['scn-chat'].ctid is defined else '' }}"
 
 # The in-house PDS. Probed at /xrpc/_health, its readiness endpoint, so "up"
 # means the process is serving and its storage answered. Needs corliss_version

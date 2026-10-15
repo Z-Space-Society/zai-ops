@@ -69,7 +69,8 @@ out and update the docs.
   `scn_service_did` account's repo and only Corliss writes it. zai-ops stores
   no admin list: `admins.yml` runs Corliss's commands, and the PDS's
   `PDS_ADMIN_DIDS` is read from the roster by `tasks/roster.yml` each time the
-  pds play runs. Don't add a second list for a new service; derive it.
+  pds play runs, as scn-chat's `ADMIN_DIDS` is each time its play runs.
+  Don't add a second list for a new service; derive it.
 - **Secrets:** API token in `ansible/group_vars/all/vault.yml` (Ansible Vault,
   git-ignored). Vault password at `/root/.vault_pass` on CT 100 — host root is
   the trust boundary by design.

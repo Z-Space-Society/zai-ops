@@ -57,7 +57,7 @@ Where a member's chats live is decided at first sign-in:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `scn_chat_version` | `v0.1.0` | Release tag. Bump to upgrade; revert the commit to roll back |
+| `scn_chat_version` | `v0.1.1` | Release tag. Bump to upgrade; revert the commit to roll back |
 | `scn_chat_repo_url` | `https://github.com/Z-Space-Society/scn-chat` | |
 | `scn_chat_node_version` / `scn_chat_node_sha256` | `v24.21.0` / pinned | Change together |
 | `scn_chat_pnpm_version` | `10.33.0` | Must match `packageManager` at the pinned tag |

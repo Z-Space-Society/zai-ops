@@ -1,5 +1,6 @@
+# {{ ansible_managed }}
 [Unit]
-Description=scn-chat — SCN AI-assistant chat app
+Description=scn-chat, the SCN AI-assistant chat app
 After=network-online.target
 Wants=network-online.target
 
@@ -10,13 +11,23 @@ Group={{ scn_chat_group }}
 WorkingDirectory={{ scn_chat_src }}
 Environment=HOME={{ scn_chat_home }}
 EnvironmentFile={{ scn_chat_env_file }}
-# Migrations before start, on every boot: drizzle migrate is idempotent, so an
-# upgrade is just "check out new origin/main HEAD + restart" — the ExecStartPre
-# keeps the schema current with the code.
+# Migrations before every start. They are idempotent, so an upgrade is "check
+# out the new tag and restart" and the schema always matches the code.
 ExecStartPre=/usr/local/bin/node apps/server/src/migrate-cli.ts
 ExecStart=/usr/local/bin/node apps/server/src/index.ts
+
+# Restart=always, not on-failure: a clean exit while members are chatting is
+# still an outage, and a restart only re-opens sqlite.
 Restart=always
 RestartSec=3
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# sqlite and the local blob store both live in DATA_DIR; the checkout under
+# {{ scn_chat_src }} is root-owned and read-only to the service.
+ReadWritePaths={{ scn_chat_data_dir }}
 
 [Install]
 WantedBy=multi-user.target

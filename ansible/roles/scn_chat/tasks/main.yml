@@ -3,9 +3,9 @@
 #
 # scn-chat is a pnpm TS monorepo built for a single node:24-slim container; we
 # reproduce that one container as a plain CT: pinned Node 24 tarball + corepack,
-# source clone tracking origin/main HEAD (no pins, Q9), pnpm install + build,
-# sqlite on the rootfs, systemd. Same shape as the sync_relay role —
-# source-build, and a smoke test at the end that proves the feature.
+# source clone at the pinned release tag (Q9), pnpm install + build,
+# sqlite on the rootfs, systemd. Same shape as the sync_relay role: a
+# source build, and a smoke test at the end that proves the feature.
 
 # --- Node.js ---------------------------------------------------------------
 # Tarball + checksum, the Garage/uv pattern. /opt/node-<ver> keeps multiple
@@ -60,7 +60,7 @@
 # --- Build dependencies ----------------------------------------------------
 
 - name: Install system build dependencies
-  # python3 + make + g++ are the node:24-slim Dockerfile's apt additions —
+  # python3 + make + g++ are the node:24-slim Dockerfile's apt additions,
   # what better-sqlite3 needs when no prebuilt binary matches this platform.
   ansible.builtin.apt:
     name:
@@ -75,51 +75,23 @@
 
 # --- Clone + build ----------------------------------------------------------
 
-- name: Check whether a scn-chat checkout exists
-  ansible.builtin.stat:
-    path: "{{ scn_chat_src }}"
-  register: scn_chat_src_stat
-
-- name: Read the deployed scn-chat revision
-  ansible.builtin.command: git -C "{{ scn_chat_src }}" rev-parse HEAD
-  register: scn_chat_deployed_rev
-  changed_when: false
-  failed_when: false
-  when: scn_chat_src_stat.stat.exists
-
-- name: Fetch the latest {{ scn_chat_branch }}
-  # HEAD-of-main policy (Q9): every run compares against upstream and moves the
-  # checkout only when main moved. depth 1 keeps the clone lean.
-  ansible.builtin.command: git -C "{{ scn_chat_src }}" fetch --depth 1 origin "{{ scn_chat_branch }}"
-  changed_when: false
-  when: scn_chat_src_stat.stat.exists
-
-- name: Read upstream {{ scn_chat_branch }}'s revision
-  ansible.builtin.command: git -C "{{ scn_chat_src }}" rev-parse FETCH_HEAD
-  register: scn_chat_upstream_rev
-  changed_when: false
-  when: scn_chat_src_stat.stat.exists
-
-- name: Check out the latest {{ scn_chat_branch }}
+- name: Clone scn-chat at the pinned release
+  # Bump scn_chat_version (defaults/main.yml) to upgrade: the clone's `changed`
+  # flag is the rebuild trigger below (the pds/happyview idiom). Full clone, no
+  # `depth:`, so moving to a new tag is a plain fetch.
   ansible.builtin.git:
     repo: "{{ scn_chat_repo_url }}"
     dest: "{{ scn_chat_src }}"
-    version: "{{ scn_chat_branch }}"
-    depth: 1
+    version: "{{ scn_chat_version }}"
     force: true
-  register: scn_chat_update
-  when: >-
-    (not scn_chat_src_stat.stat.exists)
-    or (scn_chat_deployed_rev.stdout | default('') | trim != scn_chat_upstream_rev.stdout | default('') | trim)
+  register: scn_chat_clone
 
-- name: Record the now-deployed revision
-  ansible.builtin.command: git -C "{{ scn_chat_src }}" rev-parse HEAD
-  register: scn_chat_deployed_rev_final
+- name: Read the deployed scn-chat version
+  # `git describe` of the checkout, so the manifest says v0.1.0 rather than a
+  # bare sha, and says so truthfully if the pin is ever a commit between tags.
+  ansible.builtin.command: git -C "{{ scn_chat_src }}" describe --tags --always
+  register: scn_chat_describe
   changed_when: false
-
-- name: Set the deployed scn-chat version fact
-  ansible.builtin.set_fact:
-    scn_chat_deployed_version: "{{ scn_chat_deployed_rev_final.stdout | trim }}"
 
 - name: Check whether node_modules is present
   ansible.builtin.stat:
@@ -133,7 +105,7 @@
   environment:
     PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
     HOME: /root
-  when: (scn_chat_update is changed) or (not scn_chat_node_modules.stat.exists)
+  when: (scn_chat_clone is changed) or (not scn_chat_node_modules.stat.exists)
   notify: restart scn-chat
 
 - name: Build the web app (pnpm build)
@@ -143,7 +115,7 @@
   environment:
     PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
     HOME: /root
-  when: (scn_chat_update is changed) or (not scn_chat_node_modules.stat.exists)
+  when: (scn_chat_clone is changed) or (not scn_chat_node_modules.stat.exists)
   notify: restart scn-chat
 
 # --- Service account + directories ------------------------------------------
@@ -171,7 +143,7 @@
     mode: "{{ item.mode }}"
   loop:
     # home: the service user's HOME (node caches).
-    # data: the sqlite store — the whole backup unit (spec 0005 Q7).
+    # data: sqlite and the local blob store. NOT backed up (spec 0005 Q7).
     # config: root-owned, holds the 0600 env the daemon reads via EnvironmentFile.
     - { path: "{{ scn_chat_home }}", owner: "{{ scn_chat_user }}", mode: "0755" }
     - { path: "{{ scn_chat_data_dir }}", owner: "{{ scn_chat_user }}", mode: "0750" }
@@ -179,17 +151,30 @@
 
 # --- Secret env + unit -------------------------------------------------------
 
-- name: Require the vault secrets before rendering the env
+- name: Require the secrets before rendering the env
   ansible.builtin.assert:
     that:
       - scn_chat_secret_key is defined and scn_chat_secret_key | length > 0
-      - scn_chat_oauth_private_keys is defined and scn_chat_oauth_private_keys | length > 0
+      - scn_chat_oauth_keys is defined and scn_chat_oauth_keys | length > 0
     quiet: true
     fail_msg: >-
-      scn-chat needs SECRET_KEY and OAUTH_PRIVATE_KEYS
-      (scn_chat_secret_key / scn_chat_oauth_private_keys). They resolve as
-      generate-once lookups in group_vars/all/main.yml — the first provision
-      creates them under /root/.zai-secrets. docs/roles/scn_chat.md.
+      scn-chat needs SECRET_KEY (scn_chat_secret_key, a generate-once lookup)
+      and its OAuth key (scn_chat_oauth_keys, the `signing_keys` lookup,
+      ADR-0011), both from group_vars/all/main.yml under /root/.zai-secrets.
+      docs/roles/scn_chat.md.
+
+- name: Require at least one admin from the roster
+  # scn-chat refuses to start with an empty ADMIN_DIDS. The roster reads empty
+  # only when the cluster has no registry identity yet (tasks/roster.yml), so
+  # say that here rather than as a failed health check.
+  ansible.builtin.assert:
+    that:
+      - scn_chat_admin_dids | default([]) | length > 0
+    quiet: true
+    fail_msg: >-
+      The cluster admin roster is empty, and scn-chat needs at least one admin
+      in ADMIN_DIDS. Record the registry identity first (scn-config, Cluster
+      Settings), then provision scn-chat.
 
 - name: Render the scn-chat environment file
   ansible.builtin.template:
@@ -230,9 +215,8 @@
 
 - name: Verify the scn-chat health endpoint responds
   # /api/health runs a `select 1` against sqlite and 503s on a failure, so a
-  # 200 proves the process is serving AND its storage answered — the unit, the
-  # ExecStartPre migration and the sqlite path in one shot (the strongest
-  # probe in the cluster).
+  # 200 proves the process is serving AND its storage answered: the unit, the
+  # ExecStartPre migration and the sqlite path in one shot.
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ scn_chat_port }}/api/health"
     return_content: true
@@ -248,4 +232,4 @@
     name: manifest
   vars:
     manifest_service: scn-chat
-    manifest_version: "{{ scn_chat_deployed_version }}"
+    manifest_version: "{{ scn_chat_describe.stdout | trim }}"

@@ -224,8 +224,10 @@
   roles:
     - open-webui
 
-# scn-chat reads its admins from the cluster admin roster in a pre_task (same
-# idiom as the pds play) — the role itself only renders ADMIN_DIDS from it.
+# scn-chat reads its admins from the cluster admin roster in a pre_task (the
+# pds play's idiom); the role only renders ADMIN_DIDS from it. The app reads
+# ADMIN_DIDS at startup, so an admin change reaches it on the next run of this
+# play (scn-chat#11 tracks following the roster at runtime).
 - name: Configure scn-chat
   hosts: scn-chat
   gather_facts: true

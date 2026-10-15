@@ -8,3 +8,6 @@ ansible/group_vars/all/vault.yml
 # THIS cluster, written by enroll-inference-node.yml. The repo stays generic;
 # these specifics are control-node state, backed up like the vault, never committed.
 ansible/inventory/local.yml
+
+# Python bytecode, e.g. from importing a plugin to check it.
+__pycache__/

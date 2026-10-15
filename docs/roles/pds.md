@@ -46,11 +46,14 @@ Build-from-source, same shape as `happyview`:
    deleted after install (~6 GB).
 4. Make sure the control node holds the PDS's OAuth key,
    `/root/.zai-secrets/pds_oauth.pem` ([ADR-0011](../decisions/0011-signing-keys.md)).
-   When it does not, a PDS that has already run has a key of its own: the
-   role reads its reference from `pds_setting` in `accounts.sqlite`, copies
-   that file from `/var/lib/pds/keys/` and converts it, so the key the server
-   publishes does not change. A PDS that has never booted gets a new P-256
-   key. It refuses to run while the retired `pds_oauth_jwk_set` file exists.
+   When it does not, the role adopts the key the server signs with now, so
+   the key it publishes does not change. Where an operator supplied the
+   retired `pds_oauth_jwk_set`, that is its keys (the first becomes current,
+   a second previous; more than two is refused), and the file is renamed
+   `pds_oauth_jwk_set.adopted`. Otherwise it is the server's own key: the role
+   reads its reference from `pds_setting` in `accounts.sqlite`, copies that
+   file from `/var/lib/pds/keys/` and converts it. A PDS that has never booted
+   gets a new P-256 key.
 5. Render `/etc/pds/pds.env` (0600 root, secrets via `.zai-secrets`) and the
    systemd unit, start + enable `pds`.
 6. Smoke-test: wait on the port, then `/_alive` (liveness) and
@@ -99,7 +102,7 @@ PLC key is not wired yet.
 |---|---|
 | `pds_jwt_secret` | signing JWTs the server issues, access and refresh tokens included |
 | `pds_admin_password` | the admin credential: HTTP basic auth for the `/admin` dashboard, every `com.atproto.admin.*` route and the `atproto-pds-admin` CLI. Not break-glass; it is how the server is administered |
-| `pds_oauth_keys` | the PDS's OAuth signing key, `pds_oauth.pem` via the `signing_keys` lookup, rendered as `PDS_OAUTH_KEYS_JWK_SET`. Adopted from the server's own key store (task 4) or generated before first boot. Rotated with `scn-config` → Signing Keys |
+| `pds_oauth_keys` | the PDS's OAuth signing key, `pds_oauth.pem` via the `signing_keys` lookup, rendered as `PDS_OAUTH_KEYS_JWK_SET`. Adopted from the old `pds_oauth_jwk_set` or the server's own key store (task 4), or generated before first boot. Rotated with `scn-config` → Signing Keys |
 | `pds_plc_rotation_key_private` *(required for recovery)* | operator recovery for identities this server issues; **losing it is losing the accounts**. Wire before the SCN DID migration |
 
 The OAuth signing key signs the client assertion the PDS sends during

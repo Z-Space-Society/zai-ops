@@ -259,9 +259,9 @@ sync_relay_mcp_host: "mcp.{{ cluster_domain }}"
 #     generated once and persisted under /root/.zai-secrets.
 #   * PDS_OAUTH_KEYS_JWK_SET: the PDS's OAuth signing key, `pds_oauth_keys`
 #     below, always supplied by us. On a PDS that already ran, the pds role
-#     adopts the key the server generated for itself (copied from its key
-#     store, so the published key does not change); on a fresh one it is
-#     generated here before first boot. Format `{"keys": [<private jwk>, ...]}`;
+#     adopts the key it signs with now (from the retired pds_oauth_jwk_set
+#     file where one exists, else from its key store), so the published key
+#     does not change; on a fresh one it is generated here before first boot. Format `{"keys": [<private jwk>, ...]}`;
 #     the first entry signs, the rest are published for verification only.
 #   * PDS_PLC_ROTATION_KEY_PRIVATE: the operator's recovery key for every
 #     identity this server issues — "the private did:key a key generator

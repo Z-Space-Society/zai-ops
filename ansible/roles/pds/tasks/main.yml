@@ -133,28 +133,72 @@
 # zai-ops supplies the PDS's OAuth key (PDS_OAUTH_KEYS_JWK_SET) so it is held,
 # backed up and rotated like every other signing key. A PDS that has already
 # run generated its own and has been publishing it at /oauth/jwks, so that key
-# is ADOPTED: copied off the server's key store once, byte-for-byte, never
-# replaced. Only a PDS that has never booted gets a newly generated key.
-- name: Check for a pds_oauth_jwk_set override from before signing_keys
+# is ADOPTED once, byte-for-byte, never replaced: from the retired
+# pds_oauth_jwk_set file where an operator supplied one (the server signs with
+# that), else from the server's key store. Only a PDS that has never booted
+# gets a newly generated key.
+- name: Check for a key set an operator supplied before signing_keys
+  # The retired pds_oauth_jwk_set override. Where it exists the server signs
+  # with ITS first key (the set overrides the key store), so that is the key
+  # to adopt.
   ansible.builtin.stat:
     path: "{{ _zai_secrets_dir }}/pds_oauth_jwk_set"
   delegate_to: localhost
   register: pds_old_jwk_set
-
-- name: Refuse to drop an operator-supplied key set silently
-  ansible.builtin.assert:
-    that: not pds_old_jwk_set.stat.exists
-    fail_msg: >-
-      {{ _zai_secrets_dir }}/pds_oauth_jwk_set is no longer read. The PDS's key
-      now lives in {{ _zai_secrets_dir }}/pds_oauth.pem. Convert the first key
-      of that set to a PKCS8 PEM there, then remove the old file.
-    quiet: true
 
 - name: Check for the PDS's OAuth key on the control node
   ansible.builtin.stat:
     path: "{{ _zai_secrets_dir }}/pds_oauth.pem"
   delegate_to: localhost
   register: pds_oauth_pem
+
+- name: Adopt the operator-supplied key set
+  when:
+    - not pds_oauth_pem.stat.exists
+    - pds_old_jwk_set.stat.exists
+  vars:
+    pds_old_keys: "{{ (lookup('ansible.builtin.file', _zai_secrets_dir ~ '/pds_oauth_jwk_set') | from_json)['keys'] }}"
+  block:
+    - name: Refuse a set this layout cannot hold
+      # Current and previous: two keys at most. A third would be published
+      # history with nowhere to go, so an operator decides what to keep.
+      ansible.builtin.assert:
+        that: pds_old_keys | length in [1, 2]
+        fail_msg: >-
+          {{ _zai_secrets_dir }}/pds_oauth_jwk_set holds {{ pds_old_keys | length }}
+          keys; adoption takes one or two (current, then previous).
+        quiet: true
+
+    - name: Store its first key as the current key
+      ansible.builtin.copy:
+        content: "{{ pds_old_keys[0] | jwk_to_pem }}"
+        dest: "{{ _zai_secrets_dir }}/pds_oauth.pem"
+        mode: "0600"
+        force: false
+      delegate_to: localhost
+      no_log: true
+
+    - name: Store its second key as the previous key
+      ansible.builtin.copy:
+        content: "{{ pds_old_keys[1] | jwk_to_pem }}"
+        dest: "{{ _zai_secrets_dir }}/pds_oauth.previous.pem"
+        mode: "0600"
+        force: false
+      delegate_to: localhost
+      no_log: true
+      when: pds_old_keys | length == 2
+
+- name: Set the adopted key set aside
+  # Renamed, not deleted: it is a secret, and nothing reads it any more.
+  # mv -n never overwrites an earlier one.
+  ansible.builtin.command:
+    argv:
+      - mv
+      - -n
+      - "{{ _zai_secrets_dir }}/pds_oauth_jwk_set"
+      - "{{ _zai_secrets_dir }}/pds_oauth_jwk_set.adopted"
+  delegate_to: localhost
+  when: pds_old_jwk_set.stat.exists
 
 - name: Find the key the server generated for itself
   # The server records its key's store reference in pds_setting
@@ -183,11 +227,14 @@
       - "{{ pds_data_dir }}"
   register: pds_own_key_ref
   changed_when: false
-  when: not pds_oauth_pem.stat.exists
+  when:
+    - not pds_oauth_pem.stat.exists
+    - not pds_old_jwk_set.stat.exists
 
 - name: Adopt the server's own key
   when:
     - not pds_oauth_pem.stat.exists
+    - not pds_old_jwk_set.stat.exists
     - pds_own_key_ref.stdout | length > 0
   block:
     - name: Refuse a key store this role cannot read
@@ -217,6 +264,7 @@
     pds_oauth_generated: "{{ query('signing_keys', 'pds_oauth') | length }}"
   when:
     - not pds_oauth_pem.stat.exists
+    - not pds_old_jwk_set.stat.exists
     - pds_own_key_ref.stdout | default('') | length == 0
 
 # --- Secret env + unit --------------------------------------------------------

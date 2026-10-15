@@ -104,7 +104,7 @@ class LookupModule(LookupBase):
                 raise AnsibleError(
                     f"{current} does not exist, and this key is never generated "
                     "here. Its role creates it (for the PDS: adopted from the "
-                    "running server, or generated on a fresh one)."
+                    "key it signs with now, or generated on a fresh one)."
                 )
             _generate(current, key_type)
 

@@ -2,6 +2,7 @@
 #
 #   pem | private_jwk      -> a private JWK dict with alg, use and kid
 #   didkey | didkey_to_pem -> a PDS key-store did:key as a PKCS8 PEM
+#   jwk | jwk_to_pem       -> a private EC JWK as a PKCS8 PEM
 #
 # The kid is the RFC 7638 thumbprint of the public key: what Corliss and the
 # PDS already publish, so the same key has the same kid in every JWKS that
@@ -105,6 +106,40 @@ def didkey_to_pem(didkey):
     ).decode()
 
 
+def _b64url_int(value):
+    raw = base64.urlsafe_b64decode(str(value) + "=" * (-len(str(value)) % 4))
+    return int.from_bytes(raw, "big")
+
+
+def jwk_to_pem(jwk):
+    """A private EC JWK (an entry of an old PDS_OAUTH_KEYS_JWK_SET) as PEM.
+
+    The public point is checked against the private scalar, as the PDS does at
+    load: a mismatched entry is refused here rather than adopted.
+    """
+    if not isinstance(jwk, dict) or jwk.get("kty") != "EC" or "d" not in jwk:
+        raise AnsibleFilterError("jwk_to_pem: expected a private EC JWK")
+    curves = {"P-256": ec.SECP256R1, "secp256k1": ec.SECP256K1}
+    curve = curves.get(jwk.get("crv"))
+    if curve is None:
+        raise AnsibleFilterError(f"jwk_to_pem: unsupported curve {jwk.get('crv')}")
+    key = ec.derive_private_key(_b64url_int(jwk["d"]), curve())
+    pub = key.public_key().public_numbers()
+    if "x" in jwk and "y" in jwk and (
+        pub.x != _b64url_int(jwk["x"]) or pub.y != _b64url_int(jwk["y"])
+    ):
+        raise AnsibleFilterError("jwk_to_pem: the public point does not match d")
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+
+
 class FilterModule:
     def filters(self):
-        return {"private_jwk": private_jwk, "didkey_to_pem": didkey_to_pem}
+        return {
+            "private_jwk": private_jwk,
+            "didkey_to_pem": didkey_to_pem,
+            "jwk_to_pem": jwk_to_pem,
+        }

@@ -32,6 +32,29 @@ source build, [`litellm`](roles/litellm.md) for a pip install, or
   pin it in a `<service>_version` default. For a Debian package, don't pin:
   accept what apt ships, and read it back with `dpkg-query` in step 3. A pinned
   apt version fails a replay the day Debian ships a point release.
+- **Build only when something moved.** For a source build, rebuild when the
+  pinned checkout changes or the installed binary is missing, and remove the
+  build tree after installing (copy `sync_relay`'s clone, `stat` and `when`).
+  A replay should cost seconds, not a compile.
+- **Run on generated secrets alone.** Secrets the play can mint are
+  `lookup('ansible.builtin.password', ...)` recipes in
+  `group_vars/all/main.yml`. Secrets only an operator can supply are read with
+  `errors='ignore'` and `| default('', true)` (copy `smtp_url` there), so a
+  missing file reads as empty and the feature it enables stays off. A new
+  cluster must provision every service before anyone has supplied anything.
+- **Write the EnvironmentFile one value per line.** systemd cannot read a value
+  that spans lines, so render structured values with `to_json` (see the JWK set
+  in `pds.env.j2`). Guard an optional value with `| default('', true)`, not
+  `is defined`: a defined-but-empty variable still emits `KEY=`, which many
+  services read as a bad value rather than an absent one. Bad operator input
+  should fail when the template renders, not when the service starts. Write the
+  file mode `0600`; it holds secrets.
+- **Harden the unit.** Run as a system user and group, with
+  `NoNewPrivileges=true`, `ProtectSystem=strict`, `ProtectHome=true` and
+  `PrivateTmp=true`. The daemon's own data directory is its only
+  `ReadWritePaths`, and a service that keeps its state elsewhere gets none (see
+  `scn-sync-relay.service.j2`). Set `Restart=` with a comment on why that
+  value, since the right one depends on how the daemon exits.
 - **End with a smoke test** that proves the feature, not just the unit: a
   `wait_for` on the port, then a `uri` against a real endpoint (see the end of
   `sync_relay`'s tasks). systemd reporting "active" is not proof.

@@ -13,7 +13,7 @@
 # one-line commit bumping this, then a play run; rolling back is reverting that
 # commit. The play rebuilds and restarts only when the checkout moved, and the
 # manifest records `git describe` of what was deployed.
-scn_chat_version: "v0.1.0"
+scn_chat_version: "v0.1.1"
 scn_chat_repo_url: "https://github.com/Z-Space-Society/scn-chat"
 
 # Node.js: pinned LTS tarball with its SHA-256, the tarball + checksum

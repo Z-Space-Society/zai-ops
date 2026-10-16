@@ -278,7 +278,7 @@ scn-config nonint set-registry client_key hvc_…
 | Domains: cluster domain | `cluster_domain` | `set-domain.yml` | every service's public URLs and the proxy's routes (e.g. `api.{{ cluster_domain }}`) |
 | Domains: handle domain | `pds_handle_domain`, `pds_handle_allow_cluster_domain` | `set-handle-domain.yml` | the [pds](roles/pds.md), for the handle domains it issues. Unset follows the cluster domain |
 | Registry service DID | `scn_service_did` | `set-registry.yml` | [corliss](roles/corliss.md) and the [pds](roles/pds.md) play, to find the admin roster |
-| Registry client key | `console_client_key` | `set-registry.yml` | corliss's registry reads. Optional |
+| Registry client key | `registry_client_key` | `set-registry.yml` | corliss's admin writes on `/manage/`. Reads work without it |
 
 Each playbook validates its value and writes only its own key, so everything
 else in `local.yml` survives. Re-recording the current value is a no-op, and an
@@ -371,7 +371,7 @@ later; the repo bakes in neither.
 | `set-handle-domain.yml` | CT 100 (local) | Record where the PDS issues member handles (`pds_handle_domain`) in runtime inventory, or clear it (the engine behind `scn-config`'s Cluster Settings, Domains row) |
 | `set-tls.yml`         | CT 100 (local) | Record the proxy's TLS mode, and the acme contact email, in runtime inventory (the engine behind `scn-config`'s Set TLS) |
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox host's name (`proxmox_node_name`) in runtime inventory (the engine behind `scn-config`'s Cluster Settings, Proxmox host name row; `bootstrap.sh` calls it automatically) |
-| `set-registry.yml`    | CT 100 (local) | Record the membership registry's per-cluster identity in runtime inventory (the engine behind `scn-config`'s Cluster Settings, the two Registry rows) |
+| `set-registry.yml`    | CT 100 (local) | Record the membership registry's per-cluster identity in runtime inventory (the engine behind `scn-config`'s Cluster Settings, the two Registry rows). `-e key=migrate` moves a client key still recorded as `console_client_key` to `registry_client_key`, which every other run also does first |
 | `set-smtp.yml`        | CT 100 (local) | Set, clear or show the cluster's outbound mail relay in `/root/.zai-secrets/smtp_url` (the engine behind `scn-config`'s Set SMTP). The URL is taken from the environment, never an argument |
 | `rotate-key.yml`      | CT 100 (local) | Rotate, retire or show a signing key under `/root/.zai-secrets` (the engine behind `scn-config`'s Signing Keys; [ADR-0011](decisions/0011-signing-keys.md)). The change reaches the service on its next provision |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |

@@ -62,7 +62,9 @@ itself from this repo.
        is the one to check when admin links don't appear. Scripted:
        `scn-config nonint set-registry service_did did:plc:…`.
      - **Registry client key**: the registry's public HappyView client key.
-       Optional. Scripted: `scn-config nonint set-registry client_key hvc_…`.
+       Reads work without it, but admins can't approve, change tiers or
+       revoke on `/manage/` until it is set. Scripted:
+       `scn-config nonint set-registry client_key hvc_…`.
        [corliss](docs/roles/corliss.md) reads both registry values.
 
    All four are stored in git-ignored runtime state

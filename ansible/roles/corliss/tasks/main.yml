@@ -43,6 +43,20 @@
       known gap rather than a misconfiguration.
     success_msg: "litellm provisioner key is present."
 
+# --- Refuse the registry client key's old name -------------------------------
+# It was console_client_key until it became registry_client_key. A cluster that
+# still records the old name would render a blank key and silently lose admin
+# writes on /manage/, so stop here and say how to move it.
+- name: Refuse a client key recorded under its old name
+  ansible.builtin.assert:
+    that:
+      - console_client_key is not defined
+    quiet: true
+    fail_msg: >-
+      The runtime inventory still records console_client_key, the registry
+      client key's old name. Move it to registry_client_key, then retry:
+      ansible-playbook set-registry.yml -e key=migrate
+
 # --- Provision the corliss role + database on the postgres CT ---------------
 # Identical delegated `su - postgres -c psql` idiom to litellm/open-webui/
 # happyview — the postgres CT's superuser is reachable only via local peer auth

@@ -136,7 +136,7 @@ load_state() {
           caddy_tls_mode) TLS_MODE="$ctid" ;;
           caddy_acme_email) TLS_EMAIL="$ctid" ;;
           scn_service_did) REGISTRY_SERVICE_DID="$ctid" ;;
-          console_client_key) REGISTRY_CLIENT_KEY="$ctid" ;;
+          registry_client_key) REGISTRY_CLIENT_KEY="$ctid" ;;
           proxmox_node_name) PROXMOX_HOST="$ctid" ;;
         esac
         ;;
@@ -160,7 +160,7 @@ for r in reserved:
     print("reserved", r)
 # all.vars reaches every host, so any host that carries the key has the value.
 for key in ("cluster_domain", "caddy_tls_mode", "caddy_acme_email",
-            "scn_service_did", "console_client_key", "proxmox_node_name",
+            "scn_service_did", "registry_client_key", "proxmox_node_name",
             "pds_handle_domain"):
     value = next((hv[key] for hv in hostvars.values() if hv.get(key)), None)
     if value:
@@ -277,8 +277,8 @@ handle_domain_summary() {
 }
 
 # set_registry <client_key|service_did> <value> — an empty value records none.
-# The inventory variables keep their older names (console_client_key,
-# scn_service_did): live clusters already hold them.
+# The playbook writes registry_client_key and scn_service_did, and first moves
+# a client key still recorded under its old name, console_client_key.
 set_registry() { ansible-playbook set-registry.yml -e "key=$1" -e "value=$2"; }
 
 # The operator sees "Proxmox host name"; the playbook and the variable it

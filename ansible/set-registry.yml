@@ -2,13 +2,16 @@
 # Record the membership registry's per-cluster identity.
 #
 #   ansible-playbook set-registry.yml -e "key=client_key" -e "value=hvc_xxxxx"
+#   ansible-playbook set-registry.yml -e key=migrate
 #
 # (`scn-config`'s Cluster Settings entry, and `scn-config nonint set-registry
 # <key> <value>`, are the front end; this playbook stays the authority.)
 #
-# The variable names it writes (console_client_key, scn_service_did) are older
-# than the playbook's own name and stay as they are: live clusters already hold
-# them, so renaming is a migration. See docs/roles/corliss.md, Notes.
+# The client key was recorded as console_client_key until it was renamed
+# registry_client_key. Every run first moves a value recorded under the old
+# name to the new one, and `key=migrate` does only that. The corliss role
+# refuses to provision while the old name is recorded, so a cluster that has
+# not run this fails loudly instead of rendering a blank key.
 #
 # Why a setter and not group_vars: both are this-cluster IDENTITY (which
 # HappyView client, which registry DID), the same category as cluster_domain and
@@ -45,26 +48,75 @@
     # console's service-identity panel only, and the registry's own Lua carries
     # its copy in the HappyView script env, so nothing in this repo reads it.
     registry_keys:
-      client_key: console_client_key
+      client_key: registry_client_key
       service_did: scn_service_did
     # The same shape scn-config checks before it gets here.
     did_regex: '^did:(plc:[a-z2-7]{24}|web:[A-Za-z0-9.%:-]+)$'
   tasks:
-    - name: Require key and value
+    - name: Require a key
       ansible.builtin.assert:
-        that:
-          - key is defined and (key | string | length) > 0
-          - value is defined
+        that: key is defined and (key | string | length) > 0
         fail_msg: >-
           Pass a key and a value, e.g.
-          -e "key=client_key" -e "value=hvc_xxxxx"
+          -e "key=client_key" -e "value=hvc_xxxxx", or -e key=migrate
 
     - name: Validate the key against the allowlist
       ansible.builtin.assert:
-        that: key in registry_keys
+        that: key == 'migrate' or key in registry_keys
         fail_msg: >-
-          '{{ key }}' is not a registry setting — expected one of:
-          {{ registry_keys.keys() | join(', ') }}
+          '{{ key }}' is not a registry setting. Expected one of:
+          {{ registry_keys.keys() | join(', ') }}, or migrate
+
+    - name: Require a value
+      ansible.builtin.assert:
+        that: value is defined
+        fail_msg: Pass a value, e.g. -e "value=hvc_xxxxx", or an empty one to record none.
+      when: key != 'migrate'
+
+    # errors='ignore' → empty string when the file doesn't exist yet; 'or {}'
+    # turns that (and an empty/whitespace file) into an empty mapping to merge into.
+    - name: Load the existing runtime inventory (empty if absent)
+      ansible.builtin.set_fact:
+        runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
+
+    - name: Check for the client key's old name
+      ansible.builtin.set_fact:
+        has_old_name: "{{ 'console_client_key' in runtime_data.get('all', {}).get('vars', {}) }}"
+
+    # The rename, on every run. A value already under the new name wins: it can
+    # only be there because someone recorded it after the rename.
+    - name: Move a client key recorded under its old name
+      when: has_old_name | bool
+      vars:
+        old_vars: "{{ runtime_data.all.vars }}"
+        new_vars: >-
+          {{ old_vars | dict2items | rejectattr('key', 'eq', 'console_client_key') | items2dict
+             | combine({'registry_client_key': old_vars.get('registry_client_key', old_vars.console_client_key)}) }}
+      block:
+        - name: Rewrite the runtime inventory without the old name
+          ansible.builtin.copy:
+            dest: "{{ runtime_inventory }}"
+            # Only all.vars is replaced: the CTID assignments and the
+            # inference-node roster beside it are carried over untouched.
+            content: "{{ runtime_data | combine({'all': runtime_data.all | combine({'vars': new_vars})}) | to_nice_yaml(indent=2) }}"
+            mode: "0644"
+
+        - name: Reload the runtime inventory
+          ansible.builtin.set_fact:
+            runtime_data: "{{ lookup('file', runtime_inventory) | from_yaml }}"
+
+        - name: Report the move
+          ansible.builtin.debug:
+            msg: console_client_key moved to registry_client_key in {{ runtime_inventory }}.
+
+    - name: Report that there was nothing to move
+      ansible.builtin.debug:
+        msg: Nothing is recorded under console_client_key, so there is nothing to move.
+      when: key == 'migrate' and not (has_old_name | bool)
+
+    - name: Finish a migrate-only run
+      ansible.builtin.meta: end_play
+      when: key == 'migrate'
 
     # A mistyped DID would be recorded and then read as an empty roster, with
     # nothing anywhere saying why. Empty is allowed: it records "none". The
@@ -80,12 +132,6 @@
     - name: Resolve the inventory variable name
       ansible.builtin.set_fact:
         registry_var: "{{ registry_keys[key] }}"
-
-    # errors='ignore' → empty string when the file doesn't exist yet; 'or {}'
-    # turns that (and an empty/whitespace file) into an empty mapping to merge into.
-    - name: Load the existing runtime inventory (empty if absent)
-      ansible.builtin.set_fact:
-        runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
 
     # Idempotent no-op: setting the value that's already recorded exits 0 cleanly.
     - name: Detect an unchanged (no-op) value

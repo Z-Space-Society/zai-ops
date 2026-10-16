@@ -77,7 +77,9 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | `pds_version` | `0.15.0-rc.6` | informational; verified against the checkout |
 | `pds_hostname` | `pds.{{ cluster_domain }}` | public hostname (SCN: `pds.sharedcomputer.network`) |
 | `pds_service_did` | `did:web:pds.{{ cluster_domain }}` | the PDS's own service identity |
-| `pds_handle_domains` | `[".{{ cluster_domain }}"]` | handle namespace accounts get (SCN: `*.sharedcomputer.network`) |
+| `pds_handle_domain` | `{{ cluster_domain }}` | where member handles are issued. Recorded per cluster with `scn-config` (Cluster Settings, Domains), never by hand (SCN: `sharedcomputer.net`) |
+| `pds_handle_allow_cluster_domain` | `true` | when the handle domain is separate, also accept handles under the cluster domain |
+| `pds_handle_domains` | derived | `PDS_SERVICE_HANDLE_DOMAINS`: the handle domain, then the cluster domain unless turned off. Set the two above, not this (SCN: `.sharedcomputer.net, .sharedcomputer.network`) |
 | `pds_crawlers` | `["https://bsky.network", "https://relay.fire.hose.cam", "https://relay1.eurosky.network"]` | who may crawl/announce: the Bluesky relay plus two independent full-network relays — Microcosm Montreal (fig, Canada) and EuroSky (Germany). A direct `requestCrawl` to the indie relays makes pickup immediate; all three are public and permissionless |
 | `pds_admin_dids` | from the roster | DIDs that may mint invite codes, and nothing else. Not stored: `provision.yml`'s pds play reads the cluster's public admin roster and uses its current admins. Empty leaves `PDS_ADMIN_DIDS` out of the env file |
 | `pds_email_from_address` | `pds@{{ cluster_domain }}` | the From address the PDS sends as; mail is off until the cluster relay (`smtp_url`) is also set |
@@ -87,7 +89,19 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 
 Network: `pds` is vmbr1-only, `10.1.1.<ctid>` derived from its assigned CTID
 (platform tier), DNS + TLS at the proxy (`pds.{{ domain }}` route already wired
-into `caddy_proxy_hosts`, and skipped until `pds` has a CTID). Caddy passes `subscribeRepos`
+into `caddy_proxy_hosts`, and skipped until `pds` has a CTID). Handles resolve
+over HTTPS through the proxy's catch-all site (`caddy_catch_all`), with per-handle
+certs issued on demand after Caddy asks the PDS's `/_tls-check`; see the
+[proxy notes](proxy.md#notes).
+
+A separate handle domain keeps a member called `chat` from competing with
+`chat.<cluster_domain>`. Clients offer the first handle domain at signup, so
+that is where new handles land. The proxy needs no change for it, since the
+catch-all answers any name with no route; the domain needs only a wildcard A
+record pointing at the edge. `/_tls-check` refuses names outside the handle
+domains, so turning the cluster domain off stops handles already issued there
+from getting certificates. After that they resolve only through a DNS TXT
+record. Caddy passes `subscribeRepos`
 WebSocket upgrades through by default; the PDS trusts exactly one proxy hop
 (`PDS_TRUSTED_PROXY_HOPS=1`).
 
@@ -120,6 +134,7 @@ curl http://127.0.0.1:3000/xrpc/_health    # 200 (readiness — storage OK)
 curl https://pds.<domain>/xrpc/_health     # through the edge
 dig pds.<domain>                           # DNS at the edge
 curl https://pds.<domain>/oauth/jwks       # one kid; two while a rotation is under way
+curl https://<handle>.<domain>/.well-known/atproto-did   # the account's DID, via the proxy's catch-all
 journalctl -u pds | grep 'signing key selected' | tail -1
                                            # source="PDS_OAUTH_KEYS_JWK_SET[0]"
 # account smoke: invite → createAccount → handle resolves →

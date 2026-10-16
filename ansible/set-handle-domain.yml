@@ -1,0 +1,91 @@
+---
+# Record where the PDS issues member handles: the pds_handle_domain setter.
+#
+#   ansible-playbook set-handle-domain.yml -e "handle_domain=example.net"
+#   ansible-playbook set-handle-domain.yml -e "handle_domain=example.net" -e "allow_cluster_domain=false"
+#   ansible-playbook set-handle-domain.yml -e "handle_domain="     # back to the cluster domain
+#
+# (`scn-config`'s Cluster Settings, Domains row, and `scn-config nonint
+# set-handle-domain | clear-handle-domain`, are the front end; this playbook
+# stays the authority.)
+#
+# Unset is the normal case: handles go under cluster_domain, beside the service
+# hostnames. A separate handle domain keeps a member called `chat` from
+# competing with chat.<cluster_domain>. The pds role turns these two values into
+# pds_handle_domains, handle domain first (the signup default), then the cluster
+# domain unless allow_cluster_domain is false. See docs/roles/pds.md.
+#
+# Runtime data in inventory/local.yml like cluster_domain (ADR-0001), written
+# read-modify-write so every CTID assignment and the node roster survive.
+# Clearing removes both keys rather than writing the cluster domain in, so a
+# later set-domain moves the handles with it.
+
+- name: Record the PDS handle domain
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    runtime_inventory: "{{ playbook_dir }}/inventory/local.yml"
+    fqdn_regex: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+    handle_keys: ["pds_handle_domain", "pds_handle_allow_cluster_domain"]
+    wanted_domain: "{{ handle_domain | default('') | string | trim }}"
+    wanted_allow: "{{ allow_cluster_domain | default(true) | bool }}"
+  tasks:
+    - name: Require handle_domain, empty to clear
+      ansible.builtin.assert:
+        that: handle_domain is defined
+        fail_msg: >-
+          Pass a handle domain, e.g. -e "handle_domain=example.net", or
+          -e "handle_domain=" to use the cluster domain again.
+
+    - name: Validate the handle domain is a plausible FQDN
+      ansible.builtin.assert:
+        that: wanted_domain is match(fqdn_regex)
+        fail_msg: >-
+          '{{ wanted_domain }}' is not a plausible domain. Enter it bare and
+          lowercase, like 'example.net': no leading dot, scheme or spaces.
+      when: wanted_domain | length > 0
+
+    - name: Load the existing runtime inventory (empty if absent)
+      ansible.builtin.set_fact:
+        runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
+
+    - name: Build the new all.vars
+      vars:
+        current_vars: "{{ runtime_data.get('all', {}).get('vars', {}) or {} }}"
+        others: "{{ current_vars | dict2items | rejectattr('key', 'in', handle_keys) | items2dict }}"
+        handle_vars: >-
+          {{ {'pds_handle_domain': wanted_domain,
+              'pds_handle_allow_cluster_domain': wanted_allow}
+             if wanted_domain | length > 0 else {} }}
+      ansible.builtin.set_fact:
+        old_vars: "{{ current_vars }}"
+        new_vars: "{{ others | combine(handle_vars) }}"
+
+    - name: Report the no-op and finish
+      ansible.builtin.debug:
+        msg: "The handle domain is already recorded that way. Nothing to do."
+      when: new_vars == old_vars
+
+    - name: Write the runtime inventory
+      ansible.builtin.copy:
+        dest: "{{ runtime_inventory }}"
+        # Replace all.vars whole (a recursive combine cannot drop keys), and
+        # keep everything else under all, the CTID host entries included.
+        content: >-
+          {{ runtime_data
+             | combine({'all': (runtime_data.get('all') or {}) | combine({'vars': new_vars})})
+             | to_nice_yaml(indent=2) }}
+        mode: "0644"
+      when: new_vars != old_vars
+
+    - name: Report
+      ansible.builtin.debug:
+        msg: >-
+          {{ ('Handles go under ' ~ wanted_domain
+              ~ ('' if wanted_allow else ' only, not the cluster domain'))
+             if wanted_domain | length > 0
+             else 'Handles go under the cluster domain' }}, recorded in
+          {{ runtime_inventory }}. The PDS picks it up on its next provision
+          (ansible-playbook provision.yml --limit pds).
+      when: new_vars != old_vars

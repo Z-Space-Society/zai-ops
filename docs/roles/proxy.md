@@ -135,6 +135,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 | `caddy_apt_version` | `2.11.2-1~bpo13+1` | Exact apt version pin. **Not** generic: `~bpo13` names Debian 13, so a base-image change means re-pinning here. It fails loudly at apt rather than installing something else. |
 | `caddy_trusted_proxies` | `[]` | Addresses whose `X-Forwarded-*` headers Caddy trusts instead of overwriting. Empty renders no `servers` block at all, so a cluster where this Caddy is the outermost proxy is unaffected. See [Notes](#notes). |
 | `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code, skip_if_cookie }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). `skip_if_cookie` names a cookie whose presence lets the request fall through to the real app instead of redirecting — see [Notes](#notes) below, it's load-bearing for open-webui, not optional. An entry without redirects may carry `block_paths: [<path matcher>, …]`, each rendered as `respond <path> 404` ahead of the `reverse_proxy`, for paths the upstream serves but the edge must not publish (the sync relay's `/internal/*`). |
+| `caddy_catch_all` | `{ service: pds, port: 3000, ask: /_tls-check }` | Where a hostname with no route goes: member handles, to the PDS, on the cluster domain or a separate handle domain (`pds_handle_domain`) alike. In `acme` mode it renders a hostless `https://` site with `tls { on_demand }` and the global `on_demand_tls { ask http://<upstream>:<port><ask> }`; in `none` mode, the `:80` site's fallback. Skipped until the service has a CTID; `{}` disables it. Hostless on purpose, never `*.<domain>`: see [Notes](#notes). |
 
 The committed default carries one live route, with the **domain derived from
 `cluster_domain`** (set per cluster with `scn-config`, Cluster Settings) so the route holds no
@@ -240,6 +241,38 @@ If issuance fails, check public `:80` first (see
   not carry. That means an `xcaddy` build, which breaks the "Debian-built,
   Debian-signed, version-pinned apt package" property above, plus a Cloudflare
   API token scoped to DNS edits on the zone, in the vault.
+
+- **Every hostname without a route goes to the PDS, because member handles
+  are hostnames.** An app resolving `jacob.<domain>` with no `_atproto` TXT
+  record fetches `https://jacob.<domain>/.well-known/atproto-did`, and wildcard
+  DNS sends it to this edge. Without a site for the name there is no cert and no
+  route, and the app reports that the account does not exist; signing in by DID
+  still works, which hides the cause. `caddy_catch_all` closes it with a
+  hostless `https://` site. It is **not** `*.<domain>`: since Caddy 2.10 a
+  wildcard site claims the certificates of the subdomains it covers, which took
+  `chat.` and `pds.` down in v0.9.5 (see [Known gotchas](../gotchas.md)). A
+  hostless site covers no name, so every named route keeps its own cert.
+
+  It is an on-demand site: Caddy issues a cert for a name on its first
+  handshake (that request is a few seconds slower), after asking the PDS's
+  `/_tls-check`, which answers 200 only for its own hostname and held handles
+  and 400 for any name outside its handle domains. Anything else, whether a
+  made-up subdomain, a scanner's SNI or another domain pointed at this IP, gets
+  no cert and fails its handshake as it would with no catch-all, so it cannot
+  spend the Let's Encrypt quota. What is new is that each such handshake makes
+  one local ask to the PDS, and Caddy logs each refusal. Each handle costs one
+  cert against the per-registered-domain weekly limit (50 new certs), well
+  above member signup rates. A handle that matches a named route (`chat`,
+  `api`, `pds`, …) gets that route, so it can resolve only by DNS TXT. A
+  separate handle domain (`pds_handle_domain`, see the [pds role](pds.md))
+  needs nothing here: its wildcard A record brings the names to this edge, the
+  catch-all takes them, and the PDS's own handle-domain list gates the certs.
+  Verify from outside the LAN:
+
+  ```bash
+  curl -s https://<handle>.<domain>/.well-known/atproto-did   # -> did:plc:…
+  curl -sI https://nobody-xyz.<domain>/ | head -1              # TLS error: no cert issued
+  ```
 
 - **A route to an unassigned service is skipped, not an error.** The upstream
   address is derived from the service's CTID, so a route whose service has no

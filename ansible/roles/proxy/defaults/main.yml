@@ -107,6 +107,23 @@ caddy_proxy_hosts:
     block_paths: ["/internal/*"]
   - { domain: "{{ sync_relay_mcp_host }}", service: sync-relay, port: 7031 }
 
+# Where a request for a hostname with no route of its own goes: member handles.
+# A handle (jacob.<domain>) is a hostname, and an app resolving one without a
+# DNS TXT record fetches https://<handle>/.well-known/atproto-did, which
+# wildcard DNS sends here. Rendered as a hostless site, so it can never take a
+# name from the routes above.
+#
+# Hostless, not `*.<domain>`: since Caddy 2.10 a wildcard site claims the
+# certificates of every subdomain it covers, so chat., pds. and the rest lost
+# their own certs and every handshake for them failed. See docs/gotchas.md.
+#
+# In acme mode it is an on-demand TLS site: before issuing for a name Caddy
+# asks `ask` on the upstream, and the PDS's /_tls-check says yes only for its
+# own hostname and held handles, so no other name gets a cert. In none mode
+# it is the :80 fallback. Skipped, like a route, until the service has a CTID;
+# set it to {} to have no catch-all at all.
+caddy_catch_all: { service: pds, port: 3000, ask: /_tls-check }
+
 # --- Caddy package source and version ---------------------------------------
 # Caddy comes from Debian BACKPORTS, not the base suite, and it is version-pinned
 # like every other third-party binary here (Garage by URL + SHA-256, uv by

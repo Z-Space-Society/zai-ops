@@ -61,6 +61,22 @@ on the remaining service CTs:
   [`Caddyfile.j2`](../ansible/roles/proxy/templates/Caddyfile.j2) survives it,
   so the next `root:` route inherits the same trap.
 
+- **A `*.<domain>` site takes the certificates of every named subdomain
+  (Caddy 2.10 and later).** Since 2.10, a wildcard site address makes Caddy
+  serve its subdomains from the wildcard rather than get their own certs. v0.9.5
+  added `*.sharedcomputer.network` with `tls { on_demand }` for member handles.
+  That wildcard has no actual cert, only per-name on-demand issuance gated by
+  the PDS, so `chat.` and `pds.` were left with nothing to serve. Every
+  handshake for them failed with `tlsv1 alert internal error` (alert 80), and
+  scn-chat sign-in hung for every account while the browser kept showing the
+  login page. The proxy was rolled back to v0.9.4. Handles now go to a hostless
+  `https://` site (`caddy_catch_all`), which covers no name, so each named site
+  keeps its own certificate. `tls force_automate` on each named site would also
+  work, at the cost of touching every route to work around one. Before
+  deploying a change that adds or alters a TLS site, run `caddy adapt` on the
+  rendered file and check that each named host still has a policy without
+  `on_demand`.
+
 - **Renumbering a CT breaks CT 100's `known_hosts`, and the error accuses you of
   a MITM.** Addresses derive from the CTID, so reassigning numbers recycles IPs
   between services — `10.1.1.120` can be Open WebUI in the morning and Corliss

@@ -25,7 +25,7 @@
 # that commit. It replaced 68222af18add (0.15.0-rc.4, 670 commits earlier).
 # What the bump is for: GET /_tls-check (e57a6f0), the endpoint Caddy's
 # on-demand TLS asks before issuing a certificate for a handle hostname. The
-# proxy role does not use it yet.
+# proxy role's catch-all site asks it (caddy_catch_all).
 #
 # Checked against f74a3e1 before bumping: the four build features below and
 # every PDS_* name pds.env.j2 writes still exist. Two changes in the range can
@@ -72,7 +72,23 @@ pds_data_dir: /var/lib/pds
 # cluster the same derivation lands on that cluster's domain.
 pds_hostname: "pds.{{ cluster_domain }}"
 pds_service_did: "did:web:pds.{{ cluster_domain }}"
-pds_handle_domains: [".{{ cluster_domain }}"]
+
+# Handle domains. By default handles sit under cluster_domain, beside the
+# service hostnames, so a member named `chat` competes with chat.<domain>. A
+# cluster can move them to a domain of their own with `scn-config` (Cluster
+# Settings, Domains), which records these two in inventory/local.yml (SCN:
+# sharedcomputer.net). The list goes to PDS_SERVICE_HANDLE_DOMAINS in order:
+# clients offer the first one at signup, and /_tls-check, which gates the
+# proxy's on-demand certificates, refuses names outside it. So the cluster
+# domain stays second unless turned off, and handles already issued there keep
+# resolving. The proxy needs nothing: its hostless catch-all sends any name
+# with no route to the PDS, so the new domain needs only a wildcard A record.
+pds_handle_domain: "{{ cluster_domain }}"
+pds_handle_allow_cluster_domain: true
+pds_handle_domains: >-
+  {{ (['.' ~ pds_handle_domain]
+      + (['.' ~ cluster_domain] if pds_handle_allow_cluster_domain | bool else []))
+     | unique | list }}
 
 # Federation — who this PDS announces itself to with requestCrawl (the
 # network has no discovery protocol; without an announce nothing else ever

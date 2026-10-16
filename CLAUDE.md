@@ -108,7 +108,8 @@ out and update the docs.
   subcommands) is the only front end; its menu runs in the order a new cluster
   needs it: control node setup (`site.yml`, then `verify-proxmox.yml`) and
   Cluster Settings come before assignment. Cluster Settings is one screen for
-  the plain per-cluster values: the domain (`set-domain.yml`), the membership
+  the plain per-cluster values: the domains (`set-domain.yml`, and
+  `set-handle-domain.yml` for where member handles go), the membership
   registry's identity (`set-registry.yml`) and the Proxmox host name
   (`set-node.yml`). It also runs `provision.yml` per
   service, ordered by `default_ctid` because tier order is dependency order,

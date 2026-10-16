@@ -87,6 +87,28 @@ caddy_proxy_hosts:
   # Corliss owns the APEX (ADR-0006), not a subdomain: its OIDC issuer is the
   # bare origin, and discovery has to sit at <issuer>/.well-known/... .
   - { domain: "{{ cluster_domain }}", service: corliss, port: 8000 }
+
+# Handle-domain wildcard sites, served with on-demand TLS and reverse-proxied
+# to the PDS (same upstream as the `pds` route above). This is the edge half of
+# "the PDS issues handles on this domain": a handle like alice.example.org
+# resolves over HTTPS at https://alice.example.org/.well-known/atproto-did (in
+# addition to the per-handle _atproto.<handle> TXT path), so the edge has to
+# answer every name under the domain with the PDS.
+#
+# Per-cluster data like the handle domains themselves: record it in the runtime
+# inventory (inventory/local.yml) next to pds_handle_domains, not in this
+# committed list. Empty by default — no cluster has these until it names them.
+#
+# Why on-demand TLS rather than a wildcard ACME certificate: a `*.domain` site
+# address makes Caddy's automatic HTTPS ask for a wildcard cert, which needs a
+# DNS-01 solver, and the stock Debian caddy build ships none. on_demand issues
+# a per-name cert the first time a name is visited, with the PDS's own
+# /_tls-check endpoint gating which names may have one (200 = a held handle or
+# the PDS hostname itself) — so the rate-limit budget is spent only on real
+# handles, and a name nobody has claimed gets no certificate. The wildcard A
+# record the cluster points at this edge is what makes those names reach it.
+caddy_pds_wildcard_domains: []
+
   # The sync relay (Phase B, relay v0.2.0). Two hostnames, two listeners: the
   # automerge sync websocket on 7030 and the MCP service on 7031. The hostnames
   # come from group_vars because Corliss and the relay build token audiences

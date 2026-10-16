@@ -292,5 +292,17 @@ If issuance fails, check public `:80` first (see
   implemented as a `header_regexp` check against the raw `Cookie` header,
   anchored on a header boundary (`(^|;\s*)<name>=`) so it can't false-match a
   differently-named cookie that merely contains the same substring.
+- **Handle-domain wildcards are served to the PDS with on-demand TLS.** The
+  PDS answers `https://<any-name>.<handle-domain>/.well-known/atproto-did` for
+  handles it holds — the HTTPS half of AT Proto handle resolution, alongside
+  the per-handle `_atproto.<handle>` TXT path. To make that reachable, a
+  cluster records `caddy_pds_wildcard_domains` (e.g. `["*.sharedcomputer.net"]`)
+  in its runtime inventory next to `pds_handle_domains`, and the edge renders
+  one site per entry, reverse-proxied to the `pds` service. Certificates are
+  on-demand and gated by the PDS's own `/_tls-check` endpoint (200 only for a
+  held handle or the PDS hostname), so an unclaimed name gets no certificate
+  and no routing. A normal wildcard ACME cert was rejected on purpose: it needs
+  a DNS-01 solver, which the stock Debian Caddy build does not include. The
+  `*.domain` A record pointing at the edge is the DNS side of the same feature.
 - For how the CT is assigned a CTID, created and reached, see the
   [main docs](../README.md#networking) and [`provision.yml`](../../ansible/provision.yml).

@@ -1,5 +1,8 @@
 # {{ ansible_managed }}
 # Caddy reverse proxy — routes are git-tracked (caddy_proxy_hosts), not UI state.
+{# The pds route entry — its upstream and port are reused by the handle-domain
+   wildcard sites and by on_demand_tls' ask target, so it is resolved once. #}
+{% set pds_route = caddy_proxy_hosts | selectattr('service', 'equalto', 'pds') | list %}
 
 {
 {% if caddy_tls_mode == 'acme' %}
@@ -38,6 +41,20 @@
         trusted_proxies static {{ caddy_trusted_proxies | join(' ') }}
     }
 {% endif %}
+{% if caddy_tls_mode == 'acme' and caddy_pds_wildcard_domains | length > 0 and pds_route and hostvars['pds'].ctid is defined %}
+
+    # On-demand TLS for the handle-domain wildcard sites at the bottom of this
+    # file. A wildcard site address would make Caddy's automatic HTTPS ask ACME
+    # for a `*.domain` certificate, which needs a DNS-01 solver the stock build
+    # ships none of; on-demand issues a per-name certificate instead, and only
+    # when the ask endpoint says the name may have one. The ask is the PDS's own
+    # /_tls-check: 200 for a held handle (or the PDS hostname itself), 400 for a
+    # domain outside PDS_SERVICE_HANDLE_DOMAINS, 404 for an unheld handle — so
+    # the ACME rate-limit budget is spent only on handles that actually exist.
+    on_demand_tls {
+        ask http://{{ hostvars['pds'].ansible_host }}:{{ pds_route[0].port }}/_tls-check
+    }
+{% endif %}
 }
 
 # Plain HTTP catch-all: health probe, plus (when TLS is on) redirect everything
@@ -66,6 +83,11 @@
 # Each site below is a bare hostname with no `tls` directive, and that absence is
 # the mechanism: it is what puts the name under Caddy's own certificate
 # management. A `tls` file pair here would take the name back out of it.
+#
+# The handle-domain wildcard sites at the bottom are the deliberate exception:
+# their `tls { on_demand }` opts them out of automatic management (a wildcard
+# cert needs a DNS-01 solver this build does not ship) and into the on_demand
+# gate above.
 {% endif %}
 {% for h in caddy_proxy_hosts %}
 {# A route to a service with no CTID has no upstream address to render
@@ -165,3 +187,23 @@ http://{{ h.domain }} {
 }
 {% endif %}
 {% endfor %}
+
+{# Handle-domain wildcard sites — the HTTPS half of PDS handle issuance. Each
+   member of caddy_pds_wildcard_domains (per-cluster, in the runtime inventory)
+   is fronted to the PDS: https://<any-name>.<handle-domain>/.well-known/
+   atproto-did answers with the DID, exactly the path atproto handle resolution
+   probes. Every name inside a wildcard has TLS via on_demand and is gated by
+   /_tls-check, so unheld names are refused a certificate and never proxied
+   anywhere meaningful. Skipped on a cluster whose pds has no CTID (same guard
+   as the routes above) or with TLS off (on-demand makes no sense in none mode). #}
+{% if caddy_tls_enabled | bool and caddy_pds_wildcard_domains | length > 0 and pds_route and hostvars['pds'].ctid is defined %}
+{% for wd in caddy_pds_wildcard_domains %}
+{{ wd }} {
+    # On-demand: cert per visited name, gated by the PDS above.
+    tls {
+        on_demand
+    }
+    reverse_proxy {{ hostvars['pds'].ansible_host }}:{{ pds_route[0].port }}
+}
+{% endfor %}
+{% endif %}

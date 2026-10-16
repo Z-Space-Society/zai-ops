@@ -279,6 +279,7 @@ scn-config nonint set-registry client_key hvc_…
 | Domains: handle domain | `pds_handle_domain`, `pds_handle_allow_cluster_domain` | `set-handle-domain.yml` | the [pds](roles/pds.md), for the handle domains it issues. Unset follows the cluster domain |
 | Registry service DID | `scn_service_did` | `set-registry.yml` | [corliss](roles/corliss.md) and the [pds](roles/pds.md) play, to find the admin roster |
 | Registry client key | `registry_client_key` | `set-registry.yml` | corliss's admin writes on `/manage/`. Reads work without it |
+| scn-chat admin key | `scn_chat_admin_key` | `set-scn-chat-key.yml` | the [scn-chat](roles/scn_chat.md#cron) cron timer. A secret, so it lives in `/root/.zai-secrets`, not `local.yml`. Unset leaves cron off |
 
 Each playbook validates its value and writes only its own key, so everything
 else in `local.yml` survives. Re-recording the current value is a no-op, and an
@@ -296,6 +297,8 @@ Changing one changes nothing that is running:
   to run that. Clearing it puts handles back under the cluster domain.
 - **Registry.** Corliss reads both values when it is provisioned, and the menu
   offers to run that. The PDS reads the roster on its own next provision.
+- **scn-chat admin key.** Read by scn-chat when it is provisioned, and the menu
+  offers to run that. Setting it starts the cron timer; clearing it stops it.
 
 ### Cluster TLS mode
 
@@ -373,6 +376,7 @@ later; the repo bakes in neither.
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox host's name (`proxmox_node_name`) in runtime inventory (the engine behind `scn-config`'s Cluster Settings, Proxmox host name row; `bootstrap.sh` calls it automatically) |
 | `set-registry.yml`    | CT 100 (local) | Record the membership registry's per-cluster identity in runtime inventory (the engine behind `scn-config`'s Cluster Settings, the two Registry rows). `-e key=migrate` moves a client key still recorded as `console_client_key` to `registry_client_key`, which every other run also does first |
 | `set-smtp.yml`        | CT 100 (local) | Set, clear or show the cluster's outbound mail relay in `/root/.zai-secrets/smtp_url` (the engine behind `scn-config`'s Set SMTP). The URL is taken from the environment, never an argument |
+| `set-scn-chat-key.yml` | CT 100 (local) | Set, clear or show scn-chat's admin API key in `/root/.zai-secrets/scn_chat_admin_key` (the engine behind `scn-config`'s Cluster Settings row). The key is taken from the environment, never an argument. See [`scn_chat`](roles/scn_chat.md#cron) |
 | `rotate-key.yml`      | CT 100 (local) | Rotate, retire or show a signing key under `/root/.zai-secrets` (the engine behind `scn-config`'s Signing Keys; [ADR-0011](decisions/0011-signing-keys.md)). The change reaches the service on its next provision |
 | `provision.yml`       | CT 100 → API/SSH | Create service CTs over the API, then configure them |
 | `ct-status.yml`       | CT 100 (local) | Read-only: list the containers on the node, so `scn-config` can mark each service as new or existing |
@@ -402,8 +406,8 @@ PATH when the control node is configured. The convention:
 
 | Command | Does | Backed by |
 | ------- | ---- | --------- |
-| `scn-config` | Menu-driven cluster configuration, in the order a new cluster needs it: configure the control node and check the API token, record the [cluster settings](#cluster-settings) (Proxmox host name, domain, membership registry), assign each service its CTID ([Service CTID assignment](#service-ctid-assignment)), provision the assigned services in dependency order, manage the cluster's admins, set the outbound mail relay, set the [TLS mode](#cluster-tls-mode), and rotate signing keys | [`assign.yml`](#playbooks), [`provision.yml`](#playbooks), [`admins.yml`](#playbooks), [`set-smtp.yml`](#playbooks), [`rotate-key.yml`](#playbooks), and `site.yml`, `verify-proxmox.yml`, `set-domain.yml`, `set-handle-domain.yml`, `set-registry.yml`, `set-node.yml`, `set-tls.yml` |
-| `scn-config nonint <command>` | The same, scripted: `setup`; `show-proxmox-host`, `set-proxmox-host <name>`; `show-domain`, `set-domain <domain>`, `set-handle-domain <domain> [--no-cluster-domain]`, `clear-handle-domain`; `show-registry`, `set-registry <client_key\|service_did> <value>`; `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults`; `show-admins`, `add-admin <handle-or-did> [--admit] [--tier T]`, `remove-admin <handle-or-did>`, `apply-admins [corliss] [pds]` (gives the roster as it stands to everything that keeps a copy; all of them when none is named); `show-smtp`, `set-smtp` (URL on stdin), `clear-smtp`; `show-tls`, `set-tls <acme\|none> [email]` | the same playbooks |
+| `scn-config` | Menu-driven cluster configuration, in the order a new cluster needs it: configure the control node and check the API token, record the [cluster settings](#cluster-settings) (Proxmox host name, domain, membership registry, scn-chat admin key), assign each service its CTID ([Service CTID assignment](#service-ctid-assignment)), provision the assigned services in dependency order, manage the cluster's admins, set the outbound mail relay, set the [TLS mode](#cluster-tls-mode), and rotate signing keys | [`assign.yml`](#playbooks), [`provision.yml`](#playbooks), [`admins.yml`](#playbooks), [`set-smtp.yml`](#playbooks), [`set-scn-chat-key.yml`](#playbooks), [`rotate-key.yml`](#playbooks), and `site.yml`, `verify-proxmox.yml`, `set-domain.yml`, `set-handle-domain.yml`, `set-registry.yml`, `set-node.yml`, `set-tls.yml` |
+| `scn-config nonint <command>` | The same, scripted: `setup`; `show-proxmox-host`, `set-proxmox-host <name>`; `show-domain`, `set-domain <domain>`, `set-handle-domain <domain> [--no-cluster-domain]`, `clear-handle-domain`; `show-registry`, `set-registry <client_key\|service_did> <value>`; `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults`; `show-admins`, `add-admin <handle-or-did> [--admit] [--tier T]`, `remove-admin <handle-or-did>`, `apply-admins [corliss] [pds]` (gives the roster as it stands to everything that keeps a copy; all of them when none is named); `show-smtp`, `set-smtp` (URL on stdin), `clear-smtp`; `show-scn-chat-key`, `set-scn-chat-key` (key on stdin), `clear-scn-chat-key`; `show-tls`, `set-tls <acme\|none> [email]` | the same playbooks |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
 | `zai-litellm-key create <name>` | Mint a per-person raw-API LiteLLM virtual key, printed once | litellm `/key/generate` |
@@ -509,6 +513,13 @@ decision record.
   revocation instead of a proxy-wide rotation. What makes that defensible is on
   the Corliss side: no request ever chooses whose keys it acts on. See
   [`roles/corliss.md`](roles/corliss.md#secrets).
+- scn-chat's admin API key (`scn_chat_admin_key`) is at
+  `/root/.zai-secrets/scn_chat_admin_key`, written by `set-scn-chat-key.yml`.
+  Like the registry client key it can only be minted in the app's own admin
+  (scn-chat's Admin > API keys), so nothing generates it. Unlike that key it
+  holds admin over scn-chat, which is why it is a secret here rather than
+  runtime inventory. It reaches only the scn-chat CT's `/etc/scn-chat/cron.env`
+  (`0600`), which the cron timer reads. See [`roles/scn_chat.md`](roles/scn_chat.md#cron).
 - CT 100 also holds `/etc/zai-litellm/admin.env` (`0600`, rendered by the
   `litellm` role) — the LiteLLM master key + API base that
   [`zai-litellm-key`](#operator-commands) uses to mint/list/revoke per-person

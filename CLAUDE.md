@@ -110,8 +110,9 @@ out and update the docs.
   Cluster Settings come before assignment. Cluster Settings is one screen for
   the plain per-cluster values: the domains (`set-domain.yml`, and
   `set-handle-domain.yml` for where member handles go), the membership
-  registry's identity (`set-registry.yml`) and the Proxmox host name
-  (`set-node.yml`). It also runs `provision.yml` per
+  registry's identity (`set-registry.yml`), the Proxmox host name
+  (`set-node.yml`) and scn-chat's admin key (`set-scn-chat-key.yml`, a secret
+  in `/root/.zai-secrets` because it is minted in the app, not generated). It also runs `provision.yml` per
   service, ordered by `default_ctid` because tier order is dependency order,
   manages cluster admins (`admins.yml`), sets the mail relay
   (`set-smtp.yml`) and, last because the default needs no choice, the proxy's

@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+# Runs scn-chat-cron.service shortly after boot and every
+# {{ scn_chat_cron_interval }} after that. Enabled only when the cluster has a
+# scn-chat admin key recorded (scn-config, Cluster Settings).
+#
+# No Persistent=true. It applies to OnCalendar= only and is ignored here; the
+# boot run is what catches up after downtime.
+[Unit]
+Description=scn-chat cron, every {{ scn_chat_cron_interval }}
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ scn_chat_cron_interval }}
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

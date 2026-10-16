@@ -1,0 +1,32 @@
+# {{ ansible_managed }}
+# One cron run: POST /api/cron, which runs every scn-chat plugin's cron hook.
+# Started by scn-chat-cron.timer, never enabled on its own.
+#
+# Why it exists: scn-chat has no scheduler of its own (its specs/cron.md), and
+# scn-member-registry removes the scn-member role only on a cron run. Without
+# this, a member revoked on SCN keeps their scn-chat role and the shared-key
+# models.
+#
+# Over loopback, so the admin key never leaves this CT. The route answers when
+# the run finishes and caps a run at 10 minutes, hence --max-time 660. A oneshot
+# is still active while curl waits, so the timer never starts a second run on
+# top of a slow one. -f makes a refused key (401/403) a failed run in
+# `systemctl status scn-chat-cron`; a run where a plugin failed is still a 200,
+# and the plugins that failed are on scn-chat's /admin/cron page.
+[Unit]
+Description=scn-chat cron run
+After=network-online.target scn-chat.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{ scn_chat_user }}
+Group={{ scn_chat_group }}
+EnvironmentFile={{ scn_chat_cron_env_file }}
+ExecStart=/usr/bin/curl -fsS --max-time 660 -o /dev/null -X POST -H "Authorization: Bearer ${SCN_CHAT_ADMIN_KEY}" http://127.0.0.1:{{ scn_chat_port }}/api/cron
+
+# The same hardening as scn-chat.service; curl writes nothing.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

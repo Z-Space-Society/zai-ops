@@ -310,3 +310,11 @@ pds_oauth_keys: "{{ query('signing_keys', 'pds_oauth', generate=false) }}"
 # enables delivery when both this and pds_email_from_address are set.
 smtp_url: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/smtp_url', errors='ignore') | default('', true) }}"
 pds_email_smtp_url: "{{ smtp_url }}"
+
+# scn-chat's admin API key, for its cron timer (roles/scn_chat, docs/roles/
+# scn_chat.md). It can't be generated here: scn-chat mints it in its own Admin >
+# API keys after first sign-in, and `scn-config` (Cluster Settings, or `nonint
+# set-scn-chat-key`) writes it to /root/.zai-secrets/scn_chat_admin_key through
+# set-scn-chat-key.yml. It holds admin over scn-chat, so it is a secret and not
+# runtime inventory. A missing file reads as empty and the timer stays off.
+scn_chat_admin_key: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/scn_chat_admin_key', errors='ignore') | default('', true) }}"

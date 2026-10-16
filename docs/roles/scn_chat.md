@@ -52,6 +52,7 @@ Where a member's chats live is decided at first sign-in:
 | Render `/etc/scn-chat/scn-chat.env` (0600, `no_log`) | One value per line; `OAUTH_PRIVATE_KEYS` is one JSON line |
 | Install the hardened unit, start, flush handlers | `ExecStartPre` runs the idempotent migrations on every start |
 | `wait_for` :3000, then `GET /api/health` = 200 | The endpoint runs `select 1` against sqlite, so a 200 proves unit, migration and storage |
+| Install `scn-chat-cron.service` + `.timer`; with an admin key recorded, render `/etc/scn-chat/cron.env` (0600, `no_log`) and enable the timer, otherwise remove the file and stop the timer | scn-chat has no scheduler; see [Cron](#cron) |
 | Manifest `scn-chat.json` | After the smoke test, so a failed deploy never claims a version |
 
 ## Variables
@@ -67,6 +68,8 @@ Where a member's chats live is decided at first sign-in:
 | `scn_chat_data_dir` | `/opt/scn-chat/data` | sqlite + blobs; not backed up |
 | `scn_chat_database_url` | `sqlite:<data_dir>/scn-chat.sqlite` | |
 | `scn_chat_plc_url` | `https://plc.directory` | |
+| `scn_chat_cron_interval` | `5min` | How often the timer POSTs `/api/cron`. Also how long a revoked member keeps the `scn-member` role |
+| `scn_chat_cron_env_file` | `/etc/scn-chat/cron.env` | Holds the admin key for the cron unit only, apart from the app's env |
 
 `scn_chat_admin_dids` is set by the play from the cluster admin roster
 (`tasks/roster.yml`). It is never committed.
@@ -82,6 +85,22 @@ Both come from [`group_vars/all/main.yml`](../../ansible/group_vars/all/main.yml
 - `rotate-key scn_chat_oauth` adds a new current key. `@atproto/oauth-client` starts new sessions on it and refreshes existing sessions with the kid they recorded.
 - `retire-key scn_chat_oauth` drops the old key and ends every session still on it. Those members sign in again.
 
+A third secret, the admin API key the cron timer sends, is minted in the app rather than generated; see [Cron](#cron).
+
+## Cron
+
+`POST /api/cron` runs every scn-chat plugin's `cron` hook, and scn-chat has no scheduler of its own (its `specs/cron.md`). `scn-member-registry` adds members at sign-in but removes the `scn-member` role only on a cron run, so without cron a member revoked on SCN keeps their account, their role, and the admin models on the shared LiteLLM key.
+
+The role installs `scn-chat-cron.timer` on the CT, the same per-CT shape as `corliss-reconcile.timer`. It starts `scn-chat-cron.service`, a oneshot that POSTs `http://127.0.0.1:3000/api/cron` every `scn_chat_cron_interval`. Over loopback, the admin key never leaves the CT.
+
+The key holds `admin`, and only scn-chat can mint it, so it is set by hand once per cluster:
+
+1. In scn-chat, Admin > API keys, issue a key holding `admin`. Use it for nothing else, so revoking it stops only cron.
+2. `scn-config` → Cluster Settings → **scn-chat admin key**, or `scn-config nonint set-scn-chat-key` with the key on stdin. It is stored at `/root/.zai-secrets/scn_chat_admin_key`, in the Tier-1 backup.
+3. Provision scn-chat; the menu offers to. The timer starts, and its first run is immediate.
+
+With no key recorded the timer stays off and the play still succeeds. scn-chat's own `/admin/cron` page shows when cron last ran and warns when it hasn't run in a day.
+
 ## Dependencies
 
 - **[`proxy`](proxy.md):** the `chat.<domain>` route. The app must be publicly reachable, because members' PDSes fetch its client metadata and JWKS during sign-in and call `notifyWrite` on it.
@@ -96,6 +115,7 @@ ansible-playbook provision.yml --limit scn-chat
 ```
 
 - The role's smoke test: `GET /api/health` returns 200.
+- With an admin key recorded, `systemctl list-timers scn-chat-cron.timer` on the CT shows the next run, and scn-chat's `/admin/cron` shows the last one.
 - `curl -s https://chat.<domain>/oauth/jwks.json` lists one ES256 kid. During a rotation it lists two.
 - `scn-config nonint show-keys` lists `scn_chat_oauth` as `current`.
 - A member sign-in completes.
@@ -104,7 +124,7 @@ ansible-playbook provision.yml --limit scn-chat
 ## Notes
 
 - **Admin changes need a replay.** `ADMIN_DIDS` is read at startup. A roster add or remove reaches scn-chat only on the next `provision.yml --limit scn-chat`, which restarts it. `scn-config apply-admins` does not cover scn-chat. [scn-chat#11](https://github.com/Z-Space-Society/scn-chat/issues/11) tracks the app following the roster itself.
-- **Cron is not wired, so revocations don't take effect.** scn-chat expects `POST /api/cron` every few minutes. `scn-member-registry` adds members at sign-in but removes the `scn-member` role only on a cron run, so until cron runs, a member revoked on SCN keeps their account, their role, and the admin models on the shared LiteLLM key. [zai-ops#32](https://github.com/Z-Space-Society/zai-ops/issues/32) tracks it. Until then, suspend a revoked member by hand in Admin > Users.
+- **Revocation needs cron.** A member revoked on SCN loses the `scn-member` role on the next cron run, so within `scn_chat_cron_interval` once the admin key is set. See [Cron](#cron).
 - **Runtime settings are app state, not ansible.** Providers, models, plugins, roles and the registration mode are all set in scn-chat's `/admin` after first sign-in.
 - **Only SCN members can create an account.** The `scn-member-registry` plugin (Admin > Plugins, holding a registry members token) gives SCN members the `scn-member` role, and registration is `invite` with `scn-member` as the invite role. Setup steps are in scn-chat's `plugins/scn-member-registry/README.md`. A fresh deploy starts `open` until an admin does this.
 - **A fresh deploy can't chat yet.** Nobody can chat until an admin enables a provider plugin and configures a model, or members add their own keys.

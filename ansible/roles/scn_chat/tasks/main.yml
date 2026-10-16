@@ -225,6 +225,49 @@
   retries: 10
   delay: 3
 
+# --- Scheduled cron ----------------------------------------------------------
+# A oneshot service and its timer (templates/scn-chat-cron.*.j2 say why). Both
+# units are always installed; the timer runs only while an admin key is
+# recorded. The key is minted in scn-chat's Admin > API keys, so a fresh deploy
+# has none and provisions with the timer off until scn-config records one.
+- name: Install the scn-chat cron service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - scn-chat-cron.service
+    - scn-chat-cron.timer
+  notify: reload systemd
+
+- name: Render the scn-chat cron environment file
+  ansible.builtin.copy:
+    dest: "{{ scn_chat_cron_env_file }}"
+    content: "SCN_CHAT_ADMIN_KEY={{ scn_chat_admin_key }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: scn_chat_admin_key | length > 0
+
+- name: Remove the scn-chat cron environment file
+  ansible.builtin.file:
+    path: "{{ scn_chat_cron_env_file }}"
+    state: absent
+  when: scn_chat_admin_key | length == 0
+
+# Started as well as enabled: on a CT that booted more than two minutes ago
+# OnBootSec has passed, so this fires a first run at once. That run is
+# asynchronous, and a failed one shows in `systemctl status scn-chat-cron`.
+- name: Enable the scn-chat cron timer when an admin key is recorded
+  ansible.builtin.systemd:
+    name: scn-chat-cron.timer
+    state: "{{ 'started' if scn_chat_admin_key | length > 0 else 'stopped' }}"
+    enabled: "{{ scn_chat_admin_key | length > 0 }}"
+    daemon_reload: true
+
 # --- Manifest (docs/roles/manifest.md) --------------------------------------
 # After the smoke test, so a service that failed it never claims a version.
 - name: Record scn-chat's manifest

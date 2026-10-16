@@ -154,7 +154,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | `corliss_manifest_bucket` | `{{ manifest_bucket }}` | The Garage bucket `/systems/` reads service manifests from (`zai-manifests`). See [`manifest`](manifest.md). |
 | `corliss_manifest_access_key` / `corliss_manifest_secret_key` | `{{ manifest_reader_access_key }}` / `{{ manifest_reader_secret_key }}` | The **read-only** manifest key. No grant on `zai-backups` and no write anywhere, so what Corliss holds cannot read the backups or change a manifest. Rendered in its own env block because the probe block promises no credentials. |
 | `corliss_caddy_health_url` | `http://{{ hostvars['proxy'].ansible_host }}/healthz` | What `/systems/` dials to check [Caddy](proxy.md) — the `:80` health site the Caddyfile serves whether or not TLS is on, sharing that listener with the HTTPS redirect. A full URL rather than an origin, since unlike the three above it names an endpoint Caddy publishes rather than a service root. |
-| `console_client_key` | `""` | The registry's public, origin-bound HappyView client key, passed through for corliss's registry reads. Recorded with `scn-config` (Cluster Settings), or `scn-config nonint set-registry client_key <hvc_…>`. **Optional**: verified 2026-08-18 that HappyView dispatches to a Lua script with no session and no client key, so blank does **not** block reconciliation. It must not, or a cluster rebuilt before the key was recorded could not recover its membership. The `console_` prefix outlives the console — renaming it is a runtime-inventory migration, not an edit, so it is deliberately deferred; see [Notes](#notes). |
+| `registry_client_key` | `""` | The registry's public, origin-bound HappyView client key, passed through as `MEMBERSHIP_REGISTRY_CLIENT_KEY`. Recorded with `scn-config` (Cluster Settings), or `scn-config nonint set-registry client_key <hvc_…>`. **Reads work without it**: verified 2026-08-18 that HappyView dispatches to a Lua script with no session and no client key, so blank does not block reconciliation. It must not, or a cluster rebuilt before the key was recorded could not recover its membership. **Admin writes need it**: an admin's login uses it to get a registry session, and approve, tier change and revoke on `/manage/` refuse without one. Blank is a read-only console. Formerly `console_client_key`; see [Notes](#notes). |
 
 ### Secrets
 
@@ -344,19 +344,16 @@ curl -s https://<domain>/clients/scn-obsidian.json | grep -o '"redirect_uris": \
   `systemctl status corliss-reconcile` rather than as a success over a
   half-empty cache.
 
-- **Two variable names outlive the console they were named for, deliberately.**
-  `console_client_key` and `SCN_SERVICE_DID` were shared with the
-  `manage_console` role until it was deleted; corliss is the only consumer now,
-  and both were rehomed into this role's defaults rather than renamed. The
-  rename is a *runtime-inventory migration*, not an edit: the live cluster's
-  git-ignored `inventory/local.yml` already holds `console_client_key`, so
-  changing the name here without a migration silently falls back to the blank
-  default — which for the client key means reconciliation quietly loses its
-  origin-bound key rather than failing loudly. `console_client_key` →
-  `registry_client_key` and `SCN_SERVICE_DID` → `ADMIN_ROSTER_DID` are worth
-  doing together, with a read-old-write-new step in
-  [`set-registry.yml`](../../ansible/set-registry.yml). Neither is urgent and
-  neither is behaviour.
+- **The client key was renamed; the service DID kept its name.** Both were
+  shared with the `manage_console` role until it was deleted, and both still
+  carried names from it. The client key was `console_client_key` and is now
+  `registry_client_key`. The live clusters' git-ignored `inventory/local.yml`
+  held the old name, so the rename is a runtime-inventory migration:
+  `ansible-playbook set-registry.yml -e key=migrate` moves the value, and every
+  other `set-registry.yml` run does the same first. The role refuses to
+  provision while the old name is recorded, because rendering a blank key would
+  quietly stop admin writes on `/manage/`. `scn_service_did` keeps its name,
+  which matches the `SCN_SERVICE_DID` env key Corliss reads it as.
 
 - **The venv is a `uv sync` of the app's own lockfile, and two env vars hold it
   together.** Corliss is a uv project: `pyproject.toml` pins every direct

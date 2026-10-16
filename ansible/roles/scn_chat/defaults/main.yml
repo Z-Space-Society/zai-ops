@@ -31,6 +31,15 @@ scn_chat_src: /opt/scn-chat/src
 scn_chat_data_dir: /opt/scn-chat/data
 scn_chat_config_dir: /etc/scn-chat
 scn_chat_env_file: /etc/scn-chat/scn-chat.env
+# Holds SCN_CHAT_ADMIN_KEY for scn-chat-cron.service only, apart from the app's
+# env so the app process never sees a key that holds admin over it.
+scn_chat_cron_env_file: /etc/scn-chat/cron.env
+
+# How often scn-chat-cron.timer POSTs /api/cron. scn-chat's own setup line is
+# every 5 minutes; it is also how long a member revoked on SCN keeps their
+# scn-member role. The key comes from group_vars/all/main.yml
+# (scn_chat_admin_key); with none recorded the timer stays off.
+scn_chat_cron_interval: 5min
 
 scn_chat_database_url: "sqlite:{{ scn_chat_data_dir }}/scn-chat.sqlite"
 

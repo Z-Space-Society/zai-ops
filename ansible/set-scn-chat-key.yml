@@ -1,0 +1,107 @@
+---
+# Set, clear or show scn-chat's admin API key, the one its cron timer sends, in
+# {{ _zai_secrets_dir }}/scn_chat_admin_key.
+#
+#   SCN_CHAT_ADMIN_KEY='…' ansible-playbook set-scn-chat-key.yml -e key_action=set
+#   ansible-playbook set-scn-chat-key.yml -e key_action=clear
+#   ansible-playbook set-scn-chat-key.yml -e key_action=show
+#
+# (`scn-config`, the operator command in bin/, drives this: its Cluster Settings
+# row and `scn-config nonint show-scn-chat-key | set-scn-chat-key |
+# clear-scn-chat-key`. This playbook validates and persists.)
+#
+# Why a setter at all: the key can't be generated here. scn-chat mints it in its
+# own Admin > API keys (a key holding `admin`) after the first admin signs in,
+# the same way the registry client key comes from HappyView's admin.
+#
+# Why a file under .zai-secrets and not the runtime inventory: unlike the
+# registry client key, this one holds admin over scn-chat. group_vars/all/
+# main.yml reads the file as `scn_chat_admin_key`; a missing file reads as
+# empty and the scn_chat role leaves the cron timer off. It is in the Tier-1
+# control-node backup with the rest of that directory.
+#
+# The key arrives in the ENVIRONMENT, never as -e: an extra-var is on the
+# process list for as long as the play runs. Every task whose arguments or
+# result could carry it is no_log.
+
+- name: Set, clear or show scn-chat's admin API key
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    key_file: "{{ _zai_secrets_dir }}/scn_chat_admin_key"
+    new_key: "{{ lookup('ansible.builtin.env', 'SCN_CHAT_ADMIN_KEY') }}"
+    stored_key: "{{ lookup('ansible.builtin.file', key_file, errors='ignore') | default('', true) }}"
+  tasks:
+    - name: Require a known action
+      ansible.builtin.assert:
+        that: key_action | default('') in ['set', 'clear', 'show']
+        fail_msg: "Pass -e key_action=set, clear or show."
+
+    - name: Require the key in the environment
+      ansible.builtin.assert:
+        that:
+          - new_key | length > 0
+          - new_key is not search('\s')
+        fail_msg: >-
+          No usable key: export it as SCN_CHAT_ADMIN_KEY (one line, no spaces).
+          Mint it in scn-chat's Admin > API keys, holding admin.
+      when: key_action == 'set'
+
+    - name: Ensure the secrets directory exists, root-only
+      ansible.builtin.file:
+        path: "{{ _zai_secrets_dir }}"
+        state: directory
+        mode: "0700"
+      when: key_action == 'set'
+
+    # copy, not a shell redirect: writing the value already stored is a no-op.
+    # `content` adds no trailing newline.
+    - name: Write the key
+      ansible.builtin.copy:
+        dest: "{{ key_file }}"
+        content: "{{ new_key }}"
+        owner: root
+        group: root
+        mode: "0600"
+      diff: false
+      no_log: true
+      register: key_write
+      when: key_action == 'set'
+
+    - name: Remove the key
+      ansible.builtin.file:
+        path: "{{ key_file }}"
+        state: absent
+      register: key_clear
+      when: key_action == 'clear'
+
+    - name: Report the change
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'scn-chat admin key ' ~ ('saved' if key_action == 'set' else 'cleared')
+             if (key_write is changed or key_clear is changed)
+             else 'scn-chat admin key unchanged, nothing to do' }}.
+          scn-chat's cron timer picks it up on its next provision
+          (ansible-playbook provision.yml --limit scn-chat).
+      when: key_action in ['set', 'clear']
+
+    # Whether a key is stored, never the key. Written to `out` for scn-config to
+    # read (the same hand-off set-smtp.yml uses), or printed.
+    - name: Describe the stored key
+      when: key_action == 'show'
+      vars:
+        description: "state {{ 'set' if stored_key | length > 0 else 'unset' }}\n"
+      block:
+        - name: Write the description
+          ansible.builtin.copy:
+            dest: "{{ out }}"
+            content: "{{ description }}"
+            mode: "0600"
+          changed_when: false
+          when: out is defined
+
+        - name: Print the description
+          ansible.builtin.debug:
+            msg: "{{ description | trim }}"
+          when: out is not defined

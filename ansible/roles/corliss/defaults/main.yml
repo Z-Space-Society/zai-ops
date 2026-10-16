@@ -659,15 +659,19 @@ corliss_membership_registry_host: "view.{{ cluster_domain }}"
 scn_service_did: ""
 
 # The registry's public, origin-bound HappyView client key, passed through as
-# MEMBERSHIP_REGISTRY_CLIENT_KEY for reconciliation reads. OPTIONAL, and blank
-# is fully working — verified against production 2026-08-18 that HappyView
-# dispatches to a Lua script with no session and no client key at all. It must
-# stay optional, or a cluster rebuilt before the key was recorded could not
-# reconcile its own membership, tying recovery to a setting rather than to the
-# registry. The `console_` prefix now outlives the console; renaming it is a
-# separate change, because the name is also what the runtime inventory already
-# holds on the live cluster.
-console_client_key: ""
+# MEMBERSHIP_REGISTRY_CLIENT_KEY. Reads and reconcile work without it (verified
+# against production 2026-08-18: HappyView dispatches to a Lua script with no
+# session and no client key), and they must keep working without it, or a
+# cluster rebuilt before the key was recorded could not recover its membership.
+# Every admin write needs it: an admin's login uses it to get a registry
+# session, and approve, tier change and revoke on /manage/ refuse without one.
+# Blank is a read-only membership console, not a broken one.
+#
+# Recorded as console_client_key before zai-ops renamed it. set-registry.yml
+# moves the old name over, and tasks/main.yml refuses to provision while the
+# old name is still recorded, so a missed move fails loudly instead of
+# rendering a blank key.
+registry_client_key: ""
 
 # --- Health probes: what /systems/ dials -------------------------------------
 #

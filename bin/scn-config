@@ -26,6 +26,9 @@
 #   scn-config nonint show-smtp                  # the mail relay, minus credentials
 #   scn-config nonint set-smtp < url-file        # the relay URL, read from stdin
 #   scn-config nonint clear-smtp                 # remove it; mail off
+#   scn-config nonint show-scn-chat-key          # whether scn-chat's admin key is set
+#   scn-config nonint set-scn-chat-key < key-file    # the key, read from stdin
+#   scn-config nonint clear-scn-chat-key         # remove it; scn-chat cron off
 #   scn-config nonint show-tls                   # how the proxy gets its certificate
 #   scn-config nonint set-tls acme ops@example.org   # acme (the default, contact
 #                                                #   optional) or none
@@ -39,7 +42,7 @@
 #
 # This is the front end only. The playbooks (site.yml, verify-proxmox.yml,
 # set-domain.yml, set-handle-domain.yml, set-registry.yml, set-node.yml, assign.yml, admins.yml,
-# set-smtp.yml, set-tls.yml, rotate-key.yml) validate and write; the checks here exist to give a readable message before a playbook
+# set-smtp.yml, set-scn-chat-key.yml, set-tls.yml, rotate-key.yml) validate and write; the checks here exist to give a readable message before a playbook
 # run, and the playbook stays the authority.
 set -euo pipefail
 
@@ -86,6 +89,9 @@ usage: scn-config
        scn-config nonint show-smtp
        scn-config nonint set-smtp        (URL on stdin)
        scn-config nonint clear-smtp
+       scn-config nonint show-scn-chat-key
+       scn-config nonint set-scn-chat-key        (key on stdin)
+       scn-config nonint clear-scn-chat-key
        scn-config nonint show-tls
        scn-config nonint set-tls <acme|none> [email]
        scn-config nonint show-keys
@@ -136,7 +142,7 @@ load_state() {
           caddy_tls_mode) TLS_MODE="$ctid" ;;
           caddy_acme_email) TLS_EMAIL="$ctid" ;;
           scn_service_did) REGISTRY_SERVICE_DID="$ctid" ;;
-          console_client_key) REGISTRY_CLIENT_KEY="$ctid" ;;
+          registry_client_key) REGISTRY_CLIENT_KEY="$ctid" ;;
           proxmox_node_name) PROXMOX_HOST="$ctid" ;;
         esac
         ;;
@@ -160,7 +166,7 @@ for r in reserved:
     print("reserved", r)
 # all.vars reaches every host, so any host that carries the key has the value.
 for key in ("cluster_domain", "caddy_tls_mode", "caddy_acme_email",
-            "scn_service_did", "console_client_key", "proxmox_node_name",
+            "scn_service_did", "registry_client_key", "proxmox_node_name",
             "pds_handle_domain"):
     value = next((hv[key] for hv in hostvars.values() if hv.get(key)), None)
     if value:
@@ -277,8 +283,8 @@ handle_domain_summary() {
 }
 
 # set_registry <client_key|service_did> <value> — an empty value records none.
-# The inventory variables keep their older names (console_client_key,
-# scn_service_did): live clusters already hold them.
+# The playbook writes registry_client_key and scn_service_did, and first moves
+# a client key still recorded under its old name, console_client_key.
 set_registry() { ansible-playbook set-registry.yml -e "key=$1" -e "value=$2"; }
 
 # The operator sees "Proxmox host name"; the playbook and the variable it
@@ -682,6 +688,61 @@ nonint_set_smtp() {
 
 nonint_clear_smtp() {
   ansible-playbook set-smtp.yml -e smtp_action=clear
+}
+
+# --- scn-chat admin key -------------------------------------------------------
+# What set-scn-chat-key.yml reports: set or unset, never the key.
+SCN_CHAT_KEY_STATE=unset
+
+load_scn_chat_key() {
+  local out key value
+  SCN_CHAT_KEY_STATE=unset
+  out="$(mktemp)"
+  if ! ANSIBLE_NOCOLOR=1 ansible-playbook set-scn-chat-key.yml -e key_action=show \
+      -e "out=$out" >/dev/null 2>&1; then
+    rm -f "$out"
+    die "could not read the scn-chat admin key. Run: ansible-playbook set-scn-chat-key.yml -e key_action=show"
+  fi
+  while read -r key value; do
+    [ "$key" = state ] && SCN_CHAT_KEY_STATE="$value"
+  done <"$out"
+  rm -f "$out"
+}
+
+scn_chat_key_summary() {
+  if [ "$SCN_CHAT_KEY_STATE" = set ]; then
+    echo "set, cron runs every 5 minutes"
+  else
+    echo "not set, cron is off"
+  fi
+}
+
+# set_scn_chat_key <key>: the key goes in the environment, never an argument, like set_smtp.
+set_scn_chat_key() {
+  SCN_CHAT_ADMIN_KEY="$1" ansible-playbook set-scn-chat-key.yml -e key_action=set
+}
+
+nonint_show_scn_chat_key() {
+  load_scn_chat_key
+  echo "scn-chat admin key: $(scn_chat_key_summary)"
+}
+
+# The key comes from stdin so it stays out of shell history and the process
+# list. Typed at a terminal, it is not echoed.
+nonint_set_scn_chat_key() {
+  local key=""
+  if [ -t 0 ]; then
+    read -r -s -p "scn-chat admin key (input hidden): " key || true
+    echo
+  else
+    read -r key || true
+  fi
+  [ -n "$key" ] || die "no key on stdin. Mint one in scn-chat's Admin > API keys, holding admin"
+  set_scn_chat_key "$key"
+}
+
+nonint_clear_scn_chat_key() {
+  ansible-playbook set-scn-chat-key.yml -e key_action=clear
 }
 
 # --- Signing keys -------------------------------------------------------------
@@ -1119,24 +1180,89 @@ $(playbook_problem "$out")"
 # recorded the host name and it rarely needs touching.
 do_settings_menu() {
   local choice text
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+    --infobox "Reading the cluster settings…" 8 "$WT_WIDTH"
+  load_scn_chat_key
   while true; do
     load_state
     text="What identifies this cluster. Select one to change it."
     choice="$(whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
       --ok-button Select --cancel-button Back \
-      --menu "$text" "$(box_height "$text" 12)" "$WT_WIDTH" 4 \
+      --menu "$text" "$(box_height "$text" 13)" "$WT_WIDTH" 5 \
       "Proxmox host name" " ${PROXMOX_HOST:-not set}" \
       "Domains" " ${CLUSTER_DOMAIN:-not set}${HANDLE_DOMAIN:+, handles at $HANDLE_DOMAIN}" \
       "Registry service DID" " ${REGISTRY_SERVICE_DID:-not set}" \
       "Registry client key" " ${REGISTRY_CLIENT_KEY:-not set}" \
+      "scn-chat admin key" " $(scn_chat_key_summary)" \
       3>&1 1>&2 2>&3)" || return 0
     case "$choice" in
       "Proxmox host name") settings_proxmox_host ;;
       Domains) settings_domains ;;
       "Registry service DID") settings_registry service_did ;;
       "Registry client key") settings_registry client_key ;;
+      "scn-chat admin key") settings_scn_chat_key; load_scn_chat_key ;;
     esac
   done
+}
+
+# The key scn-chat's cron timer sends. Never pre-filled or shown: the stored
+# one is not read back.
+settings_scn_chat_key() {
+  local choice key text out
+  text="scn-chat admin key: $(scn_chat_key_summary)
+
+scn-chat runs its plugins' scheduled work, such as removing revoked
+members' scn-member role, only when something calls its cron route.
+A timer on the scn-chat container does that with this key."
+  choice="$(whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+    --ok-button Select --cancel-button Back \
+    --menu "$text" "$(box_height "$text" 10)" "$WT_WIDTH" 2 \
+    "Set" " Enter a key minted in scn-chat" \
+    "Clear" " Remove the key and turn cron off" \
+    3>&1 1>&2 2>&3)" || return 0
+
+  if [ "$choice" = Clear ]; then
+    [ "$SCN_CHAT_KEY_STATE" = set ] || { msgbox "Cluster Settings" "No scn-chat admin key is set."; return 0; }
+    whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+      --yes-button Clear --no-button Back \
+      --yesno "Remove the scn-chat admin key? scn-chat's cron stops." \
+      8 "$WT_WIDTH" || return 0
+    if out="$(ANSIBLE_NOCOLOR=1 nonint_clear_scn_chat_key 2>&1)"; then
+      offer_provision scn-chat "Cluster Settings" "The scn-chat admin key is cleared."
+    else
+      msgbox "Cluster Settings" "Could not clear the key.
+
+$(playbook_problem "$out")"
+    fi
+    return 0
+  fi
+
+  while true; do
+    key="$(whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+      --passwordbox "Mint the key in scn-chat: Admin > API keys, a key holding admin.
+Use it only for this, so revoking it stops nothing else.
+
+Paste the key:" 12 "$WT_WIDTH" 3>&1 1>&2 2>&3)" || return 0
+    if [ -z "$key" ]; then
+      msgbox "Cluster Settings" "No key entered. Choose Clear to remove the key."
+    elif [[ "$key" =~ [[:space:]] ]]; then
+      msgbox "Cluster Settings" "The key cannot contain spaces."
+    else
+      break
+    fi
+  done
+
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+    --infobox "Recording the scn-chat admin key…" 8 "$WT_WIDTH"
+  if out="$(ANSIBLE_NOCOLOR=1 set_scn_chat_key "$key" 2>&1)"; then
+    offer_provision scn-chat "Cluster Settings" "The scn-chat admin key is saved."
+  else
+    msgbox "Cluster Settings" "The key was refused. Nothing was written.
+
+$(playbook_problem "$out")"
+  fi
 }
 
 do_tls_menu() {
@@ -1466,6 +1592,7 @@ offer_provision() {
   case "$service" in
     pds) name="The PDS" ;;
     corliss) name="Corliss" ;;
+    scn-chat) name="scn-chat" ;;
     *) name="The $service" ;;
   esac
   load_state
@@ -1863,6 +1990,9 @@ case "${1:-}" in
       show-smtp) nonint_show_smtp ;;
       set-smtp) nonint_set_smtp ;;
       clear-smtp) nonint_clear_smtp ;;
+      show-scn-chat-key) nonint_show_scn_chat_key ;;
+      set-scn-chat-key) nonint_set_scn_chat_key ;;
+      clear-scn-chat-key) nonint_clear_scn_chat_key ;;
       show-tls) nonint_show_tls ;;
       set-tls) shift; nonint_set_tls "$@" ;;
       show-keys) nonint_show_keys ;;

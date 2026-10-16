@@ -62,12 +62,19 @@ itself from this repo.
        is the one to check when admin links don't appear. Scripted:
        `scn-config nonint set-registry service_did did:plc:…`.
      - **Registry client key**: the registry's public HappyView client key.
-       Optional. Scripted: `scn-config nonint set-registry client_key hvc_…`.
+       Reads work without it, but admins can't approve, change tiers or
+       revoke on `/manage/` until it is set. Scripted:
+       `scn-config nonint set-registry client_key hvc_…`.
        [corliss](docs/roles/corliss.md) reads both registry values.
+     - **scn-chat admin key**: set after scn-chat is up and an admin has
+       minted a key holding `admin` in its Admin > API keys. It runs scn-chat's
+       cron, which is how revoked members lose access. Scripted:
+       `scn-config nonint set-scn-chat-key` (key on stdin).
 
-   All four are stored in git-ignored runtime state
+   The first four are stored in git-ignored runtime state
    ([`inventory/local.yml`](docs/README.md#cluster-settings)), which is what
-   keeps the committed tree free of this cluster's identity.
+   keeps the committed tree free of this cluster's identity. The scn-chat key
+   holds admin, so it goes in `/root/.zai-secrets` instead.
 
    Two settings further down the menu matter before you provision:
 

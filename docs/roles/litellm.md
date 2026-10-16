@@ -141,10 +141,10 @@ on every successful call). Losing either file is not destructive but is not free
 the next run mints a replacement and leaves the old key live and unused in
 LiteLLM until it is deleted by hand.
 
-### Three key-management paths, kept deliberately separate
+### Four key-management paths, kept deliberately separate
 
 The master key above should only ever be used by CT 100 (Ansible + the
-`zai-litellm-key` CLI) and the admin UI. Everything else gets one of three
+`zai-litellm-key` CLI) and the admin UI. Everything else gets one of four
 narrower things, matching how each consumer actually authenticates:
 
 - **Open WebUI (chat)** gets one scoped, non-admin **virtual key**
@@ -194,6 +194,18 @@ must guard reuse itself (as the Ansible task above does for
   gateway integration; a registry that provisions nothing needs no credential
   that can act on anyone's behalf. It now lives in the one place that does
   provision.
+
+- **scn-chat** gets one shared, non-admin **virtual key**, the same shape as
+  Open WebUI's, aliased `SCN-Chat Global`, with no budget or rate limit.
+  Unlike every other key here, **it was created by hand in the
+  LiteLLM admin UI**, not by Ansible: scn-chat reads its providers from its own
+  `/admin`, not from an env file, so there is nothing to render it into. It is
+  held only in scn-chat's provider settings, encrypted in its sqlite database,
+  which is not backed up (see [`scn_chat`](scn_chat.md)). A rebuilt scn-chat
+  CT needs it entered again, and a rebuilt LiteLLM database means minting a new
+  one in the UI. scn-chat sends no per-member identity, so all chat spend lands
+  on this one key. Who may use it is decided in scn-chat: its admin models are
+  limited to the `scn-member` role.
 
 ### Membership tiers are LiteLLM teams
 

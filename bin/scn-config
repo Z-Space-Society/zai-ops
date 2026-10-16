@@ -6,8 +6,11 @@
 #                                                #   the Proxmox API token
 #   scn-config nonint show-proxmox-host          # the Proxmox host's own name
 #   scn-config nonint set-proxmox-host asusnuc   # a correction: bootstrap sets it
-#   scn-config nonint show-domain                # the cluster's public base domain
+#   scn-config nonint show-domain                # the cluster's public base domain,
+#                                                #   and where handles go
 #   scn-config nonint set-domain example.com
+#   scn-config nonint set-handle-domain example.net [--no-cluster-domain]
+#   scn-config nonint clear-handle-domain        # handles back under the cluster domain
 #   scn-config nonint show-registry              # the membership registry's identity
 #   scn-config nonint set-registry service_did did:plc:…   # or client_key hvc_…;
 #                                                #   an empty value records none
@@ -35,7 +38,7 @@
 # one in git, no installed copy to drift.
 #
 # This is the front end only. The playbooks (site.yml, verify-proxmox.yml,
-# set-domain.yml, set-registry.yml, set-node.yml, assign.yml, admins.yml,
+# set-domain.yml, set-handle-domain.yml, set-registry.yml, set-node.yml, assign.yml, admins.yml,
 # set-smtp.yml, set-tls.yml, rotate-key.yml) validate and write; the checks here exist to give a readable message before a playbook
 # run, and the playbook stays the authority.
 set -euo pipefail
@@ -69,6 +72,8 @@ usage: scn-config
        scn-config nonint set-proxmox-host <name>
        scn-config nonint show-domain
        scn-config nonint set-domain <domain>
+       scn-config nonint set-handle-domain <domain> [--no-cluster-domain]
+       scn-config nonint clear-handle-domain
        scn-config nonint show-registry
        scn-config nonint set-registry <client_key|service_did> <value>
        scn-config nonint show-ctid
@@ -99,6 +104,8 @@ RESERVED=" "   # space-delimited, space-padded for `case` membership tests
 # TLS_MODE is not "no TLS": the proxy role's default (acme) applies, and a role
 # default is not in the inventory to be read.
 CLUSTER_DOMAIN="" TLS_MODE="" TLS_EMAIL=""
+# Empty HANDLE_DOMAIN: handles go under the cluster domain (the pds default).
+HANDLE_DOMAIN="" HANDLE_ALLOW_CLUSTER=true
 REGISTRY_SERVICE_DID="" REGISTRY_CLIENT_KEY="" PROXMOX_HOST=""
 
 # Read the merged inventory (blueprint + runtime local.yml) in one call. python3
@@ -116,6 +123,7 @@ load_state() {
   rm -f "$err"
   SVC_NAME=() SVC_CTID=() SVC_DEFAULT=() RESERVED=" "
   CLUSTER_DOMAIN="" TLS_MODE="" TLS_EMAIL=""
+  HANDLE_DOMAIN="" HANDLE_ALLOW_CLUSTER=true
   REGISTRY_SERVICE_DID="" REGISTRY_CLIENT_KEY="" PROXMOX_HOST=""
   while read -r kind name ctid default; do
     case "$kind" in
@@ -123,6 +131,8 @@ load_state() {
       var)
         case "$name" in
           cluster_domain) CLUSTER_DOMAIN="$ctid" ;;
+          pds_handle_domain) HANDLE_DOMAIN="$ctid" ;;
+          pds_handle_allow_cluster_domain) HANDLE_ALLOW_CLUSTER="$ctid" ;;
           caddy_tls_mode) TLS_MODE="$ctid" ;;
           caddy_acme_email) TLS_EMAIL="$ctid" ;;
           scn_service_did) REGISTRY_SERVICE_DID="$ctid" ;;
@@ -150,10 +160,16 @@ for r in reserved:
     print("reserved", r)
 # all.vars reaches every host, so any host that carries the key has the value.
 for key in ("cluster_domain", "caddy_tls_mode", "caddy_acme_email",
-            "scn_service_did", "console_client_key", "proxmox_node_name"):
+            "scn_service_did", "console_client_key", "proxmox_node_name",
+            "pds_handle_domain"):
     value = next((hv[key] for hv in hostvars.values() if hv.get(key)), None)
     if value:
         print("var", key, value)
+# A boolean, so present-and-false matters: print it whenever it is recorded.
+key = "pds_handle_allow_cluster_domain"
+value = next((hv[key] for hv in hostvars.values() if key in hv), None)
+if value is not None:
+    print("var", key, "true" if value in (True, "true", "True", "yes") else "false")
 for name, ctid, default in rows:
     print("svc", name, ctid or "-", default or "-")
 ' <<<"$json")
@@ -242,6 +258,24 @@ run_setup() {
 # --- Cluster settings and TLS -------------------------------------------------
 set_domain() { ansible-playbook set-domain.yml -e "domain=$1"; }
 
+# set_handle_domain <domain> [allow_cluster_domain] — an empty domain clears it,
+# and handles go back under the cluster domain.
+set_handle_domain() {
+  ansible-playbook set-handle-domain.yml -e "handle_domain=$1" \
+    -e "allow_cluster_domain=${2:-true}"
+}
+
+# handle_domain_summary — where handles go, said for a menu row or show-domain.
+handle_domain_summary() {
+  if [ -z "$HANDLE_DOMAIN" ]; then
+    echo "${CLUSTER_DOMAIN:-the cluster domain} (same as the cluster domain)"
+  elif [ "$HANDLE_ALLOW_CLUSTER" = false ]; then
+    echo "$HANDLE_DOMAIN only"
+  else
+    echo "$HANDLE_DOMAIN, then ${CLUSTER_DOMAIN:-the cluster domain}"
+  fi
+}
+
 # set_registry <client_key|service_did> <value> — an empty value records none.
 # The inventory variables keep their older names (console_client_key,
 # scn_service_did): live clusters already hold them.
@@ -288,11 +322,25 @@ playbook_problem() {
 nonint_show_domain() {
   load_state
   echo "cluster domain: ${CLUSTER_DOMAIN:-not set}"
+  echo "handle domains: $(handle_domain_summary)"
 }
 
 nonint_set_domain() {
   [ $# -eq 1 ] || usage
   set_domain "$1"
+}
+
+nonint_set_handle_domain() {
+  case "$#:${2:-}" in
+    1:) set_handle_domain "$1" true ;;
+    2:--no-cluster-domain) set_handle_domain "$1" false ;;
+    *) usage ;;
+  esac
+}
+
+nonint_clear_handle_domain() {
+  [ $# -eq 0 ] || usage
+  set_handle_domain ""
 }
 
 nonint_show_registry() {
@@ -887,6 +935,77 @@ $(playbook_problem "$out")"
   fi
 }
 
+# Where member handles go. Blank means the cluster domain, the usual case; a
+# domain of their own keeps a handle from competing with a service hostname.
+settings_handle_domain() {
+  local domain="$HANDLE_DOMAIN" allow=true picked text saved out
+  while true; do
+    domain="$(ask "Cluster Settings" "The domain member handles are issued under, e.g. example.net.
+
+Leave empty to use the cluster domain, ${CLUSTER_DOMAIN:-once it is set}." "$domain")" || return 0
+    domain="$(tr '[:upper:]' '[:lower:]' <<<"$domain")"
+    [ -z "$domain" ] || [[ "$domain" =~ $HANDLE_RE ]] && break
+    msgbox "Cluster Settings" "That is not a domain. Enter it bare, like example.net: no
+https://, no path, no spaces."
+  done
+  [ "$domain" = "$CLUSTER_DOMAIN" ] && domain=""
+
+  if [ -n "$domain" ]; then
+    picked="$(whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+      --ok-button Next --cancel-button Back \
+      --checklist "Handles at $domain. (space toggles)" 9 "$WT_WIDTH" 1 \
+      allow " Allow handles at the cluster domain too" \
+      "$([ "$HANDLE_ALLOW_CLUSTER" = false ] && echo OFF || echo ON)" \
+      3>&1 1>&2 2>&3)" || return 0
+    [[ "$picked" == *allow* ]] || allow=false
+  fi
+  if [ "$domain" = "$HANDLE_DOMAIN" ] && { [ -z "$domain" ] || [ "$allow" = "$HANDLE_ALLOW_CLUSTER" ]; }; then
+    msgbox "Cluster Settings" "That is already what is recorded."
+    return 0
+  fi
+
+  if [ -n "$domain" ]; then
+    text="Issue member handles under $domain?" saved="Handles now go under $domain."
+  else
+    text="Issue member handles under the cluster domain again?"
+    saved="Handles now go under the cluster domain."
+  fi
+  whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+    --yes-button Save --no-button Back \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+    --infobox "Recording the handle domain…" 8 "$WT_WIDTH"
+  if out="$(ANSIBLE_NOCOLOR=1 set_handle_domain "$domain" "$allow" 2>&1)"; then
+    offer_provision pds "Cluster Settings" "$saved"
+  else
+    msgbox "Cluster Settings" "The handle domain was refused. Nothing was written.
+
+$(playbook_problem "$out")"
+  fi
+}
+
+# The Domains row: the cluster domain, and where handles go, which follows it
+# unless split off.
+settings_domains() {
+  local choice text
+  while true; do
+    load_state
+    text="The cluster's domains. Select one to change it."
+    choice="$(whiptail --backtitle "$BACKTITLE" --title "Cluster Settings" \
+      --ok-button Select --cancel-button Back \
+      --menu "$text" "$(box_height "$text" 10)" "$WT_WIDTH" 2 \
+      "Cluster domain" " ${CLUSTER_DOMAIN:-not set}" \
+      "Handle domain" " $(handle_domain_summary)" \
+      3>&1 1>&2 2>&3)" || return 0
+    case "$choice" in
+      "Cluster domain") settings_domain ;;
+      "Handle domain") settings_handle_domain ;;
+    esac
+  done
+}
+
 # settings_registry <client_key|service_did> — one of the two values that say
 # which membership registry this cluster belongs to.
 settings_registry() {
@@ -1007,13 +1126,13 @@ do_settings_menu() {
       --ok-button Select --cancel-button Back \
       --menu "$text" "$(box_height "$text" 12)" "$WT_WIDTH" 4 \
       "Proxmox host name" " ${PROXMOX_HOST:-not set}" \
-      "Domain" " ${CLUSTER_DOMAIN:-not set}" \
+      "Domains" " ${CLUSTER_DOMAIN:-not set}${HANDLE_DOMAIN:+, handles at $HANDLE_DOMAIN}" \
       "Registry service DID" " ${REGISTRY_SERVICE_DID:-not set}" \
       "Registry client key" " ${REGISTRY_CLIENT_KEY:-not set}" \
       3>&1 1>&2 2>&3)" || return 0
     case "$choice" in
       "Proxmox host name") settings_proxmox_host ;;
-      Domain) settings_domain ;;
+      Domains) settings_domains ;;
       "Registry service DID") settings_registry service_did ;;
       "Registry client key") settings_registry client_key ;;
     esac
@@ -1728,6 +1847,8 @@ case "${1:-}" in
       setup) run_setup ;;
       show-domain) nonint_show_domain ;;
       set-domain) shift; nonint_set_domain "$@" ;;
+      set-handle-domain) shift; nonint_set_handle_domain "$@" ;;
+      clear-handle-domain) shift; nonint_clear_handle_domain "$@" ;;
       show-registry) nonint_show_registry ;;
       set-registry) shift; nonint_set_registry "$@" ;;
       show-proxmox-host) nonint_show_proxmox_host ;;

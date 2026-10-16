@@ -392,12 +392,19 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # while a rotation is under way, and migration 0008, which records the key each
 # atproto session started on so it keeps refreshing with that key.
 #
+# v1.4.3 makes the open lock on /manage/ a button that locks: it discards the
+# stored service-account session so Authenticate can run again, which resolves
+# the DID afresh. Needed when the service account moves PDS, since the stored
+# session keeps pointing at the old one and every roster write fails with
+# AccountDeactivated while the lock still reads open. No new env keys, no
+# migration.
+#
 # v1.4.2 shows scn-chat on /systems/ and links it in the nav as Chat, members
 # only, between Notes and API. Two env keys rendered below, both blank until
 # scn-chat has a CTID: SCN_CHAT_URL (corliss_chat_url, the internal probe
 # address) and CHAT_URL (corliss_chat_public_url, the public origin). No
 # migration.
-corliss_version: v1.4.2
+corliss_version: v1.4.3
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

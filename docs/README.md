@@ -257,7 +257,7 @@ anything, so no run can stomp a container the cluster didn't create.
 
 ### Cluster settings
 
-Four more values are per-cluster data in the same file. `scn-config`'s
+Five more values are per-cluster data in the same file. `scn-config`'s
 **Cluster Settings** entry lists each with what is recorded; scripted:
 
 ```bash
@@ -265,6 +265,8 @@ scn-config nonint show-proxmox-host
 scn-config nonint set-proxmox-host asusnuc
 scn-config nonint show-domain
 scn-config nonint set-domain zai.cascadia.design
+scn-config nonint set-handle-domain example.net     # --no-cluster-domain: only there
+scn-config nonint clear-handle-domain               # handles back under the domain
 scn-config nonint show-registry
 scn-config nonint set-registry service_did did:plc:…
 scn-config nonint set-registry client_key hvc_…
@@ -273,7 +275,8 @@ scn-config nonint set-registry client_key hvc_…
 | Setting | Variable | Playbook | Read by |
 | ------- | -------- | -------- | ------- |
 | Proxmox host name | `proxmox_node_name` | `set-node.yml` | `provision.yml`, as the `node:` of every API call |
-| Domain | `cluster_domain` | `set-domain.yml` | every service's public URLs and the proxy's routes (e.g. `api.{{ cluster_domain }}`) |
+| Domains: cluster domain | `cluster_domain` | `set-domain.yml` | every service's public URLs and the proxy's routes (e.g. `api.{{ cluster_domain }}`) |
+| Domains: handle domain | `pds_handle_domain`, `pds_handle_allow_cluster_domain` | `set-handle-domain.yml` | the [pds](roles/pds.md), for the handle domains it issues. Unset follows the cluster domain |
 | Registry service DID | `scn_service_did` | `set-registry.yml` | [corliss](roles/corliss.md) and the [pds](roles/pds.md) play, to find the admin roster |
 | Registry client key | `console_client_key` | `set-registry.yml` | corliss's registry reads. Optional |
 
@@ -289,6 +292,8 @@ Changing one changes nothing that is running:
 - **Domain.** Each service renders its public URLs when it is provisioned, so
   every provisioned service keeps the old addresses until it is provisioned
   again. The menu says so before it saves.
+- **Handle domain.** Read by the PDS when it is provisioned, and the menu offers
+  to run that. Clearing it puts handles back under the cluster domain.
 - **Registry.** Corliss reads both values when it is provisioned, and the menu
   offers to run that. The PDS reads the roster on its own next provision.
 
@@ -362,7 +367,8 @@ later; the repo bakes in neither.
 | `site.yml`            | CT 100 (local) | Configure the control node (applies `control_node`). Run by `scn-config`'s Control Node Setup |
 | `verify-proxmox.yml`  | CT 100 (local) | Read-only check that the API token authenticates. Run by Control Node Setup, after `site.yml` |
 | `assign.yml`          | CT 100 (local) | Record service → CTID assignments in runtime inventory (the `scn-config` engine) |
-| `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the engine behind `scn-config`'s Cluster Settings, Domain row) |
+| `set-domain.yml`      | CT 100 (local) | Record the cluster's public base domain in runtime inventory (the engine behind `scn-config`'s Cluster Settings, Domains row) |
+| `set-handle-domain.yml` | CT 100 (local) | Record where the PDS issues member handles (`pds_handle_domain`) in runtime inventory, or clear it (the engine behind `scn-config`'s Cluster Settings, Domains row) |
 | `set-tls.yml`         | CT 100 (local) | Record the proxy's TLS mode, and the acme contact email, in runtime inventory (the engine behind `scn-config`'s Set TLS) |
 | `set-node.yml`        | CT 100 (local) | Record the Proxmox host's name (`proxmox_node_name`) in runtime inventory (the engine behind `scn-config`'s Cluster Settings, Proxmox host name row; `bootstrap.sh` calls it automatically) |
 | `set-registry.yml`    | CT 100 (local) | Record the membership registry's per-cluster identity in runtime inventory (the engine behind `scn-config`'s Cluster Settings, the two Registry rows) |
@@ -396,8 +402,8 @@ PATH when the control node is configured. The convention:
 
 | Command | Does | Backed by |
 | ------- | ---- | --------- |
-| `scn-config` | Menu-driven cluster configuration, in the order a new cluster needs it: configure the control node and check the API token, record the [cluster settings](#cluster-settings) (Proxmox host name, domain, membership registry), assign each service its CTID ([Service CTID assignment](#service-ctid-assignment)), provision the assigned services in dependency order, manage the cluster's admins, set the outbound mail relay, set the [TLS mode](#cluster-tls-mode), and rotate signing keys | [`assign.yml`](#playbooks), [`provision.yml`](#playbooks), [`admins.yml`](#playbooks), [`set-smtp.yml`](#playbooks), [`rotate-key.yml`](#playbooks), and `site.yml`, `verify-proxmox.yml`, `set-domain.yml`, `set-registry.yml`, `set-node.yml`, `set-tls.yml` |
-| `scn-config nonint <command>` | The same, scripted: `setup`; `show-proxmox-host`, `set-proxmox-host <name>`; `show-domain`, `set-domain <domain>`; `show-registry`, `set-registry <client_key\|service_did> <value>`; `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults`; `show-admins`, `add-admin <handle-or-did> [--admit] [--tier T]`, `remove-admin <handle-or-did>`, `apply-admins [corliss] [pds]` (gives the roster as it stands to everything that keeps a copy; all of them when none is named); `show-smtp`, `set-smtp` (URL on stdin), `clear-smtp`; `show-tls`, `set-tls <acme\|none> [email]` | the same playbooks |
+| `scn-config` | Menu-driven cluster configuration, in the order a new cluster needs it: configure the control node and check the API token, record the [cluster settings](#cluster-settings) (Proxmox host name, domain, membership registry), assign each service its CTID ([Service CTID assignment](#service-ctid-assignment)), provision the assigned services in dependency order, manage the cluster's admins, set the outbound mail relay, set the [TLS mode](#cluster-tls-mode), and rotate signing keys | [`assign.yml`](#playbooks), [`provision.yml`](#playbooks), [`admins.yml`](#playbooks), [`set-smtp.yml`](#playbooks), [`rotate-key.yml`](#playbooks), and `site.yml`, `verify-proxmox.yml`, `set-domain.yml`, `set-handle-domain.yml`, `set-registry.yml`, `set-node.yml`, `set-tls.yml` |
+| `scn-config nonint <command>` | The same, scripted: `setup`; `show-proxmox-host`, `set-proxmox-host <name>`; `show-domain`, `set-domain <domain>`, `set-handle-domain <domain> [--no-cluster-domain]`, `clear-handle-domain`; `show-registry`, `set-registry <client_key\|service_did> <value>`; `show-ctid`, `assign-ctid <service> <ctid>`, `assign-ctid-defaults`; `show-admins`, `add-admin <handle-or-did> [--admit] [--tier T]`, `remove-admin <handle-or-did>`, `apply-admins [corliss] [pds]` (gives the roster as it stands to everything that keeps a copy; all of them when none is named); `show-smtp`, `set-smtp` (URL on stdin), `clear-smtp`; `show-tls`, `set-tls <acme\|none> [email]` | the same playbooks |
 | `zai-backup [run]` | Run the control-node backup (also the timer's `ExecStart`) | restic |
 | `zai-backup <restic subcmd>` | Ad-hoc query/restore against the repo (`snapshots`, `check`, `restore …`) | restic |
 | `zai-litellm-key create <name>` | Mint a per-person raw-API LiteLLM virtual key, printed once | litellm `/key/generate` |

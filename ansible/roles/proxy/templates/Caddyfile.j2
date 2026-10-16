@@ -1,12 +1,9 @@
 # {{ ansible_managed }}
 # Caddy reverse proxy — routes are git-tracked (caddy_proxy_hosts), not UI state.
-{# The on-demand ask URL, from the route carrying `on_demand_ask`. A route to an
-   unassigned service is skipped below, so its ask URL is too: it would name an
-   upstream that does not exist. #}
-{% set ns = namespace(ask='') %}
-{% for h in caddy_proxy_hosts if h.on_demand_ask is defined and hostvars[h.service].ctid is defined %}
-{% set ns.ask = 'http://' ~ hostvars[h.service].ansible_host ~ ':' ~ h.port ~ h.on_demand_ask %}
-{% endfor %}
+{# The catch-all's upstream, or empty when there is none or its service has no
+   CTID yet (the same rule as a route). #}
+{% set catch_all_upstream = (hostvars[caddy_catch_all.service].ansible_host ~ ':' ~ caddy_catch_all.port)
+     if (caddy_catch_all and hostvars[caddy_catch_all.service].ctid is defined) else '' %}
 
 {
 {% if caddy_tls_mode == 'acme' %}
@@ -21,14 +18,14 @@
 {% if caddy_acme_email %}
     email {{ caddy_acme_email }}
 {% endif %}
-{% if ns.ask %}
+{% if catch_all_upstream %}
 
     # Before issuing a cert for an on-demand name, Caddy asks this URL with
     # ?domain=<name> and issues only on a 2xx. The upstream decides which names
     # are real (the PDS: its own hostname and held handles), so a scan of
-    # made-up subdomains cannot exhaust the Let's Encrypt rate limit.
+    # made-up names cannot exhaust the Let's Encrypt rate limit.
     on_demand_tls {
-        ask {{ ns.ask }}
+        ask http://{{ catch_all_upstream }}{{ caddy_catch_all.ask }}
     }
 {% endif %}
 {% else %}
@@ -76,15 +73,20 @@
     handle {
         redir https://{host}{uri}
     }
+{% elif catch_all_upstream %}
+    # none mode: this is the only site on :80 without a hostname, so the
+    # catch-all lives here rather than in a second hostless block, which Caddy
+    # would refuse as a duplicate site.
+    handle {
+        reverse_proxy {{ catch_all_upstream }}
+    }
 {% endif %}
 }
 
 {% if caddy_tls_mode == 'acme' %}
 # Each site below is a bare hostname with no `tls` directive, and that absence is
 # the mechanism: it is what puts the name under Caddy's own certificate
-# management. A `tls` file pair here would take the name back out of it. The one
-# exception is the on-demand route, whose `tls { on_demand }` keeps it managed
-# but issues per name at first use.
+# management. A `tls` file pair here would take the name back out of it.
 {% endif %}
 {% for h in caddy_proxy_hosts %}
 {# A route to a service with no CTID has no upstream address to render
@@ -99,14 +101,6 @@
 {{ h.domain }} {
 {% else %}
 http://{{ h.domain }} {
-{% endif %}
-{% if h.on_demand_ask is defined and caddy_tls_mode == 'acme' %}
-    # A wildcard site with no `tls` directive would make Caddy want a wildcard
-    # cert, which HTTP-01 cannot issue. on_demand gets one cert per name instead,
-    # on the name's first handshake, gated by the global on_demand_tls ask.
-    tls {
-        on_demand
-    }
 {% endif %}
 {% if h.root is defined %}
     # A static route: this entry names a directory instead of an upstream
@@ -192,3 +186,21 @@ http://{{ h.domain }} {
 }
 {% endif %}
 {% endfor %}
+{% if catch_all_upstream and caddy_tls_mode == 'acme' %}
+
+# The catch-all (caddy_catch_all): every hostname with no site above, which in
+# practice means member handles. Hostless rather than `*.<domain>`, because
+# since Caddy 2.10 a wildcard site claims the certificates of the subdomains it
+# covers and the sites above lose theirs (docs/gotchas.md). A hostless site
+# covers no name, so each site above keeps its own certificate.
+#
+# on_demand issues a cert per name on its first handshake, and only after the
+# global on_demand_tls ask says yes, so a name the upstream does not know gets
+# none and fails its handshake, as it did before this site existed.
+https:// {
+    tls {
+        on_demand
+    }
+    reverse_proxy {{ catch_all_upstream }}
+}
+{% endif %}

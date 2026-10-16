@@ -25,7 +25,7 @@
 # that commit. It replaced 68222af18add (0.15.0-rc.4, 670 commits earlier).
 # What the bump is for: GET /_tls-check (e57a6f0), the endpoint Caddy's
 # on-demand TLS asks before issuing a certificate for a handle hostname. The
-# proxy role's *.<domain> route asks it (on_demand_ask in caddy_proxy_hosts).
+# proxy role's catch-all site asks it (caddy_catch_all).
 #
 # Checked against f74a3e1 before bumping: the four build features below and
 # every PDS_* name pds.env.j2 writes still exist. Two changes in the range can

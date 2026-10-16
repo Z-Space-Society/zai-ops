@@ -84,6 +84,20 @@ caddy_proxy_hosts:
   # the edge behind the admin password's basic auth. TODO(decision): block
   # them here or accept that; see "Admin surface" in docs/roles/pds.md.
   - { domain: "pds.{{ cluster_domain }}", service: pds, port: 3000 }
+  # Member handles (jacob.<domain>) are hostnames too. An app resolving one
+  # without a DNS TXT record fetches https://<handle>/.well-known/atproto-did,
+  # and wildcard DNS sends that here, so every name without a site of its own
+  # goes to the PDS. Caddy matches exact hostnames first, so the routes above
+  # are unaffected.
+  #
+  # `on_demand_ask` makes it an on-demand TLS site in acme mode: a handle's
+  # cert is issued on its first request, and only after the PDS's /_tls-check
+  # says the name is held, so a made-up name never spends Let's Encrypt quota.
+  # Caddy takes one ask URL, so at most one route may carry it.
+  - domain: "*.{{ cluster_domain }}"
+    service: pds
+    port: 3000
+    on_demand_ask: /_tls-check
   # Corliss owns the APEX (ADR-0006), not a subdomain: its OIDC issuer is the
   # bare origin, and discovery has to sit at <issuer>/.well-known/... .
   - { domain: "{{ cluster_domain }}", service: corliss, port: 8000 }

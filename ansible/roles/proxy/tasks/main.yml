@@ -41,6 +41,16 @@
       caddy_tls_mode is '{{ caddy_tls_mode }}': it must be acme or none. Record
       it with: scn-config nonint set-tls <acme|none>
 
+# Caddy's on_demand_tls takes a single ask URL, and the template renders it from
+# the route carrying `on_demand_ask`. Two such routes would silently ask the last
+# one's upstream about the first one's names.
+- name: Allow at most one on-demand TLS route
+  ansible.builtin.assert:
+    that: caddy_proxy_hosts | selectattr('on_demand_ask', 'defined') | list | length <= 1
+    fail_msg: >-
+      More than one caddy_proxy_hosts route sets on_demand_ask. Caddy asks a
+      single URL before every on-demand issuance, so only one route may carry it.
+
 # Caddy from Debian BACKPORTS, version-pinned. Still Debian-built and
 # Debian-signed, so this keeps the original "no third-party apt key" property
 # while getting past the 2.6.2 the base suite ships. See defaults/main.yml for

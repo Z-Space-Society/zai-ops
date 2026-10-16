@@ -1,5 +1,12 @@
 # {{ ansible_managed }}
 # Caddy reverse proxy — routes are git-tracked (caddy_proxy_hosts), not UI state.
+{# The on-demand ask URL, from the route carrying `on_demand_ask`. A route to an
+   unassigned service is skipped below, so its ask URL is too: it would name an
+   upstream that does not exist. #}
+{% set ns = namespace(ask='') %}
+{% for h in caddy_proxy_hosts if h.on_demand_ask is defined and hostvars[h.service].ctid is defined %}
+{% set ns.ask = 'http://' ~ hostvars[h.service].ansible_host ~ ':' ~ h.port ~ h.on_demand_ask %}
+{% endfor %}
 
 {
 {% if caddy_tls_mode == 'acme' %}
@@ -13,6 +20,16 @@
     auto_https disable_redirects
 {% if caddy_acme_email %}
     email {{ caddy_acme_email }}
+{% endif %}
+{% if ns.ask %}
+
+    # Before issuing a cert for an on-demand name, Caddy asks this URL with
+    # ?domain=<name> and issues only on a 2xx. The upstream decides which names
+    # are real (the PDS: its own hostname and held handles), so a scan of
+    # made-up subdomains cannot exhaust the Let's Encrypt rate limit.
+    on_demand_tls {
+        ask {{ ns.ask }}
+    }
 {% endif %}
 {% else %}
     # none mode: plain HTTP only, no ACME. Either no cert can be issued yet, or
@@ -65,7 +82,9 @@
 {% if caddy_tls_mode == 'acme' %}
 # Each site below is a bare hostname with no `tls` directive, and that absence is
 # the mechanism: it is what puts the name under Caddy's own certificate
-# management. A `tls` file pair here would take the name back out of it.
+# management. A `tls` file pair here would take the name back out of it. The one
+# exception is the on-demand route, whose `tls { on_demand }` keeps it managed
+# but issues per name at first use.
 {% endif %}
 {% for h in caddy_proxy_hosts %}
 {# A route to a service with no CTID has no upstream address to render
@@ -80,6 +99,14 @@
 {{ h.domain }} {
 {% else %}
 http://{{ h.domain }} {
+{% endif %}
+{% if h.on_demand_ask is defined and caddy_tls_mode == 'acme' %}
+    # A wildcard site with no `tls` directive would make Caddy want a wildcard
+    # cert, which HTTP-01 cannot issue. on_demand gets one cert per name instead,
+    # on the name's first handshake, gated by the global on_demand_tls ask.
+    tls {
+        on_demand
+    }
 {% endif %}
 {% if h.root is defined %}
     # A static route: this entry names a directory instead of an upstream

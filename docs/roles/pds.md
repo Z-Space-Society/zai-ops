@@ -87,7 +87,10 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 
 Network: `pds` is vmbr1-only, `10.1.1.<ctid>` derived from its assigned CTID
 (platform tier), DNS + TLS at the proxy (`pds.{{ domain }}` route already wired
-into `caddy_proxy_hosts`, and skipped until `pds` has a CTID). Caddy passes `subscribeRepos`
+into `caddy_proxy_hosts`, and skipped until `pds` has a CTID). Handles resolve
+over HTTPS through a second route, `*.{{ domain }}` to the PDS, with per-handle
+certs issued on demand after Caddy asks the PDS's `/_tls-check`; see the
+[proxy notes](proxy.md#notes). Caddy passes `subscribeRepos`
 WebSocket upgrades through by default; the PDS trusts exactly one proxy hop
 (`PDS_TRUSTED_PROXY_HOPS=1`).
 
@@ -120,6 +123,7 @@ curl http://127.0.0.1:3000/xrpc/_health    # 200 (readiness — storage OK)
 curl https://pds.<domain>/xrpc/_health     # through the edge
 dig pds.<domain>                           # DNS at the edge
 curl https://pds.<domain>/oauth/jwks       # one kid; two while a rotation is under way
+curl https://<handle>.<domain>/.well-known/atproto-did   # the account's DID, via the wildcard route
 journalctl -u pds | grep 'signing key selected' | tail -1
                                            # source="PDS_OAUTH_KEYS_JWK_SET[0]"
 # account smoke: invite → createAccount → handle resolves →

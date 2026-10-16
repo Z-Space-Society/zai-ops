@@ -32,7 +32,8 @@ Where a member's chats live is decided at first sign-in:
 > The sqlite database and `DATA_DIR/blobs` live on the CT rootfs, and
 > [`zai-backup`](backup.md) does not cover them (spec 0005 Q7). Losing the CT
 > loses the chats of every member whose PDS lacks spaces, and every encrypted
-> API key stored in the app. scn-chat supports Postgres
+> API key stored in the app, including the shared LiteLLM key and the
+> `scn-member-registry` token, which an admin then enters again. scn-chat supports Postgres
 > (`DATABASE_URL=postgres://…`); moving to it is how this would join the
 > `pg_dumpall` tier.
 
@@ -103,10 +104,12 @@ ansible-playbook provision.yml --limit scn-chat
 ## Notes
 
 - **Admin changes need a replay.** `ADMIN_DIDS` is read at startup. A roster add or remove reaches scn-chat only on the next `provision.yml --limit scn-chat`, which restarts it. `scn-config apply-admins` does not cover scn-chat. [scn-chat#11](https://github.com/Z-Space-Society/scn-chat/issues/11) tracks the app following the roster itself.
-- **Cron is not wired.** scn-chat expects `POST /api/cron` every few minutes, but its only user at v0.1.0, `scn-member-registry`, is not configured. [zai-ops#32](https://github.com/Z-Space-Society/zai-ops/issues/32) tracks it.
-- **Runtime settings are app state, not ansible.** Providers, models, plugins, roles and the registration mode are all set in scn-chat's `/admin` after first sign-in. Registration defaults to `open`, accepted for v0.1.0. Model and search API keys are the member's to supply.
+- **Cron is not wired, so revocations don't take effect.** scn-chat expects `POST /api/cron` every few minutes. `scn-member-registry` adds members at sign-in but removes the `scn-member` role only on a cron run, so until cron runs, a member revoked on SCN keeps their account, their role, and the admin models on the shared LiteLLM key. [zai-ops#32](https://github.com/Z-Space-Society/zai-ops/issues/32) tracks it. Until then, suspend a revoked member by hand in Admin > Users.
+- **Runtime settings are app state, not ansible.** Providers, models, plugins, roles and the registration mode are all set in scn-chat's `/admin` after first sign-in.
+- **Only SCN members can create an account.** The `scn-member-registry` plugin (Admin > Plugins, holding a registry members token) gives SCN members the `scn-member` role, and registration is `invite` with `scn-member` as the invite role. Setup steps are in scn-chat's `plugins/scn-member-registry/README.md`. A fresh deploy starts `open` until an admin does this.
 - **A fresh deploy can't chat yet.** Nobody can chat until an admin enables a provider plugin and configures a model, or members add their own keys.
+- **Admin models run on one shared LiteLLM key**, limited to the `scn-member` role. It was created by hand in the LiteLLM admin UI and is entered in scn-chat's provider settings; see [`litellm`](litellm.md#four-key-management-paths-kept-deliberately-separate).
 - **`ALLOW_PRIVATE_NETWORKS=false` stays.** The CT sits on vmbr1 beside postgres, redis and litellm, and the setting keeps the app and its web-fetch and search plugins off 10.1.1.0/24.
 - **Upstream is experimental.** The `@atproto/*` packages are spaces-alpha releases, pinned exactly by the tag. Read the changes between tags before bumping.
-- **Corliss links it in the nav** as **Chat**, between Notes and API, from v1.4.2 (`CHAT_URL`, rendered from `corliss_chat_public_url`). It is members-only there, like its neighbours, even though scn-chat's own sign-in is open.
+- **Corliss links it in the nav** as **Chat**, between Notes and API, from v1.4.2 (`CHAT_URL`, rendered from `corliss_chat_public_url`). It is members-only there, like its neighbours, and scn-chat's own sign-in is limited to members too.
 - **Staging with webhook auto-deploy** is planned, not in this round. [zai-ops#33](https://github.com/Z-Space-Society/zai-ops/issues/33) holds the work, starting from #26's first version.

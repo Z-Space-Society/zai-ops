@@ -492,7 +492,7 @@ decision record.
   unlike every secret above, it isn't a `password`/`pipe` lookup: it can only
   be produced by calling litellm's live `/key/generate` API, so it's minted
   by an Ansible task, not a Jinja lookup. See
-  [`roles/litellm.md`](roles/litellm.md#three-key-management-paths-kept-deliberately-separate).
+  [`roles/litellm.md`](roles/litellm.md#four-key-management-paths-kept-deliberately-separate).
 - Corliss's LiteLLM provisioner key (`corliss_litellm_provisioner_key`) is
   minted by an Ansible task the same way, at
   `/root/.zai-secrets/corliss_litellm_provisioner_key`, and is the one place in

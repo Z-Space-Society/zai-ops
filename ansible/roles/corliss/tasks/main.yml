@@ -2,8 +2,9 @@
 # corliss — the cluster's ATProto→OIDC login bridge. A Django app run natively
 # under systemd (gunicorn), Postgres-backed, fronted by Caddy — same shape as
 # litellm/open-webui, including how it's installed: the source is cloned from
-# Z-Space-Society/Corliss at the pinned corliss_version. Updating the app is a
-# tag bump in defaults/main.yml plus a replay of this role (ADR-0006).
+# Z-Space-Society/Corliss at corliss_version (ADR-0006). Updating the app is a
+# new tag, from a bump in defaults/main.yml or `scn-config nonint set-version`,
+# plus a replay of this role (ADR-0012).
 
 # --- Fail fast on the litellm ordering dependency ---------------------------
 # corliss_litellm_provisioner_key (defaults/main.yml) is a `file` lookup on a
@@ -156,7 +157,7 @@
 # to put in the vault.
 #
 # force: true discards any drift on the CT (a hand-edit, a half-applied run)
-# so the checkout is always exactly corliss_version — the same guarantee
+# so the checkout is always exactly the resolved release — the same guarantee
 # rsync's delete=true used to give.
 
 - name: Ensure git is present for the app checkout
@@ -179,11 +180,19 @@
     cmd: git config --system --replace-all safe.directory {{ corliss_src }}
   changed_when: false
 
-- name: Clone the Corliss app source at the pinned ref
+- name: Resolve the Corliss release to deploy
+  # corliss_version is a tag or `latest` (ADR-0012); set-version.yml records a
+  # per-cluster choice over the role default.
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/release_ref.yml"
+  vars:
+    release_repo: "{{ corliss_repo_url }}"
+    release_version: "{{ corliss_version }}"
+
+- name: Clone the Corliss app source at the release
   ansible.builtin.git:
     repo: "{{ corliss_repo_url }}"
     dest: "{{ corliss_src }}"
-    version: "{{ corliss_version }}"
+    version: "{{ release_ref }}"
     force: true
   # Read by collectstatic below, which clears stale collected files when the
   # checkout moved.
@@ -515,4 +524,4 @@
     name: manifest
   vars:
     manifest_service: corliss
-    manifest_version: "{{ corliss_version }}"
+    manifest_version: "{{ release_ref }}"

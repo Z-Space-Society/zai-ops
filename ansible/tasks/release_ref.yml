@@ -1,0 +1,52 @@
+---
+# Turn an app's version setting into the tag to check out.
+#
+#   - ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/release_ref.yml"
+#     vars:
+#       release_repo: "{{ scn_chat_repo_url }}"
+#       release_version: "{{ scn_chat_version }}"
+#
+# In:  release_repo, release_version (a tag such as v0.2.2, or `latest`).
+# Out: release_ref, the tag to clone.
+#
+# The version is runtime data (ADR-0012): the role default, or whatever
+# set-version.yml recorded in inventory/local.yml. `latest` is the newest
+# release tag upstream, vX.Y.Z only, so a pre-release tag such as v0.3.0-rc1
+# or an untagged commit on main is never deployed. Resolved here, at provision
+# time; nothing in zai-ops provisions on its own when a tag appears.
+#
+# Runs on the control node like tasks/roster.yml: it has the route out, and the
+# answer is the same for every host. Both repos are public, so no credential.
+
+- name: Release | Look up the newest release tag
+  ansible.builtin.command:
+    argv:
+      - git
+      - ls-remote
+      - --tags
+      - --refs
+      - --sort=-v:refname
+      - "{{ release_repo }}"
+      - "v*"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  register: release_tags
+  when: release_version == 'latest'
+
+- name: Release | Choose the tag to deploy
+  ansible.builtin.set_fact:
+    release_ref: >-
+      {{ (release_tags.stdout_lines
+          | map('regex_replace', '^.*refs/tags/', '')
+          | select('match', '^v[0-9]+\.[0-9]+\.[0-9]+$')
+          | first | default(''))
+         if release_version == 'latest' else release_version }}
+
+- name: Release | Require a release tag
+  ansible.builtin.assert:
+    that: release_ref | length > 0
+    fail_msg: >-
+      {{ release_repo }} has no vX.Y.Z release tag, so `latest` has nothing to
+      deploy. Pin a tag instead: scn-config nonint set-version <app> <tag>
+    quiet: true

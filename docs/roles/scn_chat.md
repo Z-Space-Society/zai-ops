@@ -42,9 +42,11 @@ Where a member's chats live is decided at first sign-in:
 | Task | Why |
 | --- | --- |
 | Download + checksum-verify the Node tarball into `/opt/node-<ver>-linux-x64`, symlink `node`/`npm`/`npx`/`corepack` | The Garage/uv tarball pattern; no third-party apt repo |
-| `corepack enable` + prepare `pnpm@<scn_chat_pnpm_version>` | The repo's own `packageManager` pin |
+| `corepack enable` | The pnpm shim, shipped with Node |
 | apt `build-essential python3 git …` | better-sqlite3 builds from source when no prebuilt binary matches |
-| `git` clone at `scn_chat_version`, `force: true` | The pin; the clone's `changed` flag triggers the rebuild |
+| Resolve `scn_chat_version` to a tag ([`tasks/release_ref.yml`](../../ansible/tasks/release_ref.yml)) | `latest` becomes the newest `vX.Y.Z` tag upstream; a tag passes through ([ADR-0012](../decisions/0012-release-versions-are-runtime-data.md)) |
+| `git` clone at that tag, `force: true` | The clone's `changed` flag triggers the rebuild, so `latest` with no new tag rebuilds nothing |
+| `corepack install` in the checkout | Installs the pnpm the tag's `packageManager` names, so a pnpm bump upstream needs no change here |
 | `git describe --tags --always` | What the manifest records, e.g. `v0.1.0` |
 | `pnpm install --frozen-lockfile` + `pnpm build`, only when the clone changed or `node_modules` is missing | A replay costs seconds |
 | System user/group, home, data (0750) and config (0750) dirs | The service runs unprivileged; the checkout is root-owned and read-only to it |
@@ -59,10 +61,9 @@ Where a member's chats live is decided at first sign-in:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `scn_chat_version` | `v0.1.1` | Release tag. Bump to upgrade; revert the commit to roll back |
+| `scn_chat_version` | `latest` | A release tag, or `latest`, the newest one each provision. A cluster pins one with `scn-config nonint set-version scn-chat <tag>` (or the Versions menu), recorded in `inventory/local.yml` over this default. Pinning back across a migration is unsafe: they run forward only |
 | `scn_chat_repo_url` | `https://github.com/Z-Space-Society/scn-chat` | |
 | `scn_chat_node_version` / `scn_chat_node_sha256` | `v24.21.0` / pinned | Change together |
-| `scn_chat_pnpm_version` | `10.33.0` | Must match `packageManager` at the pinned tag |
 | `scn_chat_port` | `3000` | Keep in sync with `corliss_chat_port` |
 | `scn_chat_public_url` | `https://chat.{{ cluster_domain }}` | The OAuth client_id base and did:web origin. Must be the origin members reach, port included |
 | `scn_chat_data_dir` | `/opt/scn-chat/data` | sqlite + blobs; not backed up |
@@ -130,6 +131,6 @@ ansible-playbook provision.yml --limit scn-chat
 - **A fresh deploy can't chat yet.** Nobody can chat until an admin enables a provider plugin and configures a model, or members add their own keys.
 - **Admin models run on one shared LiteLLM key**, limited to the `scn-member` role. It was created by hand in the LiteLLM admin UI and is entered in scn-chat's provider settings; see [`litellm`](litellm.md#four-key-management-paths-kept-deliberately-separate).
 - **`ALLOW_PRIVATE_NETWORKS=false` stays.** The CT sits on vmbr1 beside postgres, redis and litellm, and the setting keeps the app and its web-fetch and search plugins off 10.1.1.0/24.
-- **Upstream is experimental.** The `@atproto/*` packages are spaces-alpha releases, pinned exactly by the tag. Read the changes between tags before bumping.
+- **Upstream is experimental.** The `@atproto/*` packages are spaces-alpha releases, pinned exactly by the tag. On `latest`, the next provision deploys whatever was tagged last; pin a tag to read the changes first.
 - **Corliss links it in the nav** as **Chat**, between Notes and API, from v1.4.2 (`CHAT_URL`, rendered from `corliss_chat_public_url`). It is members-only there, like its neighbours, and scn-chat's own sign-in is limited to members too.
 - **Staging with webhook auto-deploy** is planned, not in this round. [zai-ops#33](https://github.com/Z-Space-Society/zai-ops/issues/33) holds the work, starting from #26's first version.

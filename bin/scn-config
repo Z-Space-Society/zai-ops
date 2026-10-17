@@ -35,6 +35,10 @@
 #   scn-config nonint show-keys                  # each signing key and its state
 #   scn-config nonint rotate-key pds_oauth       # new key in front, old one kept
 #   scn-config nonint retire-key pds_oauth       # drop the old one
+#   scn-config nonint show-versions              # each service's deployed version,
+#                                                #   and what scn-chat/corliss are set to
+#   scn-config nonint set-version scn-chat v0.2.2    # a release tag, or latest
+#   scn-config nonint clear-version scn-chat     # back to the role default
 #
 # Runs on the control node. Lives in the repo's bin/ (on PATH via
 # /etc/profile.d/zai-ops.sh) and runs in place — the script you run is always the
@@ -42,7 +46,7 @@
 #
 # This is the front end only. The playbooks (site.yml, verify-proxmox.yml,
 # set-domain.yml, set-handle-domain.yml, set-registry.yml, set-node.yml, assign.yml, admins.yml,
-# set-smtp.yml, set-scn-chat-key.yml, set-tls.yml, rotate-key.yml) validate and write; the checks here exist to give a readable message before a playbook
+# set-smtp.yml, set-scn-chat-key.yml, set-tls.yml, rotate-key.yml, set-version.yml) validate and write; the checks here exist to give a readable message before a playbook
 # run, and the playbook stays the authority.
 set -euo pipefail
 
@@ -97,6 +101,9 @@ usage: scn-config
        scn-config nonint show-keys
        scn-config nonint rotate-key <key>
        scn-config nonint retire-key <key>
+       scn-config nonint show-versions
+       scn-config nonint set-version <scn-chat|corliss> <tag|latest>
+       scn-config nonint clear-version <scn-chat|corliss>
 EOF
   exit 64
 }
@@ -783,6 +790,117 @@ nonint_rotate_key() {
 nonint_retire_key() {
   [ $# -eq 1 ] || usage
   ansible-playbook rotate-key.yml -e key_action=retire -e "key=$1"
+}
+
+# --- Release versions ---------------------------------------------------------
+# What set-version.yml reports: one row per service. VER_SETTABLE is yes for an
+# app cloned at a tag (scn-chat, corliss), whose version a cluster records;
+# the rest show their deployed version only. "-" means nothing to show.
+VER_NAME=() VER_SETTABLE=() VER_SET=() VER_DEFAULT=() VER_LATEST=() VER_DEPLOYED=()
+
+load_versions() {
+  local out name settable set default latest deployed
+  VER_NAME=() VER_SETTABLE=() VER_SET=() VER_DEFAULT=() VER_LATEST=() VER_DEPLOYED=()
+  out="$(mktemp)"
+  if ! ANSIBLE_NOCOLOR=1 ansible-playbook set-version.yml -e version_action=show \
+      -e "out=$out" >/dev/null 2>&1; then
+    rm -f "$out"
+    die "could not read the versions; run: ansible-playbook set-version.yml -e version_action=show"
+  fi
+  while IFS='|' read -r name settable set default latest deployed; do
+    [ -n "$name" ] || continue
+    VER_NAME+=("$name") VER_SETTABLE+=("$settable") VER_SET+=("$set")
+    VER_DEFAULT+=("$default") VER_LATEST+=("$latest") VER_DEPLOYED+=("$deployed")
+  done <"$out"
+  rm -f "$out"
+}
+
+# version_setting <index>: what the app deploys, as "latest" or "v0.2.2", with
+# "(default)" when nothing is recorded and the role default applies.
+version_setting() {
+  if [ "${VER_SET[$1]}" != - ]; then
+    echo "${VER_SET[$1]}"
+  else
+    echo "${VER_DEFAULT[$1]} (default)"
+  fi
+}
+
+versions_table() {
+  local i
+  printf '  %-12s %-18s %-12s %s\n' "Service" "Set to" "Deployed" "Latest"
+  printf '  %-12s %-18s %-12s %s\n' "-------" "------" "--------" "------"
+  for i in "${!VER_NAME[@]}"; do
+    if [ "${VER_SETTABLE[$i]}" = yes ]; then
+      printf '  %-12s %-18s %-12s %s\n' "${VER_NAME[$i]}" "$(version_setting "$i")" \
+        "${VER_DEPLOYED[$i]}" "${VER_LATEST[$i]}"
+    else
+      printf '  %-12s %-18s %s\n' "${VER_NAME[$i]}" "(role)" "${VER_DEPLOYED[$i]}"
+    fi
+  done
+}
+
+nonint_show_versions() {
+  load_versions
+  versions_table
+}
+
+nonint_set_version() {
+  [ $# -eq 2 ] || usage
+  ansible-playbook set-version.yml -e version_action=set -e "app=$1" -e "version=$2"
+}
+
+nonint_clear_version() {
+  [ $# -eq 1 ] || usage
+  ansible-playbook set-version.yml -e version_action=clear -e "app=$1"
+}
+
+do_versions_menu() {
+  local args=() i choice text action version out
+  # TERM=ansi: see the infobox in do_assign_menu.
+  TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Versions" \
+    --infobox "Reading the versions…" 8 "$WT_WIDTH"
+  load_versions
+  for i in "${!VER_NAME[@]}"; do
+    [ "${VER_SETTABLE[$i]}" = yes ] || continue
+    args+=("${VER_NAME[$i]}" " $(version_setting "$i"), latest ${VER_LATEST[$i]}")
+  done
+  text="$(versions_table)
+
+Pick an app to set the release it deploys: a tag, or latest, which is
+the newest release each time it is provisioned."
+  choice="$(whiptail --backtitle "$BACKTITLE" --title "Versions" \
+    --ok-button Select --cancel-button Back \
+    --menu "$text" "$(box_height "$text" $(( ${#args[@]} / 2 + 8 )))" \
+    "$WT_WIDTH" $(( ${#args[@]} / 2 )) "${args[@]}" 3>&1 1>&2 2>&3)" || return 0
+
+  for i in "${!VER_NAME[@]}"; do [ "${VER_NAME[$i]}" = "$choice" ] && break; done
+  action="$(whiptail --backtitle "$BACKTITLE" --title "Versions" \
+    --ok-button Select --cancel-button Back \
+    --menu "$choice is set to $(version_setting "$i")." 12 "$WT_WIDTH" 3 \
+    "latest" " The newest release, ${VER_LATEST[$i]} today" \
+    "tag" " Pin a release tag" \
+    "default" " Back to the role default, ${VER_DEFAULT[$i]}" \
+    3>&1 1>&2 2>&3)" || return 0
+  case "$action" in
+    latest) version=latest ;;
+    tag)
+      version="$(ask "Versions" "The release tag for $choice, e.g. ${VER_LATEST[$i]}" \
+        "${VER_DEPLOYED[$i]#-}")" || return 0
+      ;;
+  esac
+  if [ "$action" = default ]; then
+    out="$(ANSIBLE_NOCOLOR=1 nonint_clear_version "$choice" 2>&1)"
+  else
+    out="$(ANSIBLE_NOCOLOR=1 nonint_set_version "$choice" "$version" 2>&1)"
+  fi || {
+    msgbox "Versions" "Could not set $choice.
+
+$(tail -n 12 <<<"$out")"
+    return 0
+  }
+  load_versions
+  for i in "${!VER_NAME[@]}"; do [ "${VER_NAME[$i]}" = "$choice" ] && break; done
+  offer_provision "$choice" "Versions" "$choice is set to $(version_setting "$i")."
 }
 
 do_keys_menu() {
@@ -1942,7 +2060,7 @@ interactive() {
   while true; do
     choice="$(whiptail --backtitle "$BACKTITLE" --title "$TITLE" \
       --ok-button Select --cancel-button Finish \
-      --menu "" 19 "$WT_WIDTH" 10 \
+      --menu "" 20 "$WT_WIDTH" 11 \
       "1 Control Node Setup" " Configure this node, check the API token" \
       "2 Cluster Settings" " Proxmox host, domain, membership registry" \
       "3 Container Assignment" " Set the CTID per service" \
@@ -1951,6 +2069,7 @@ interactive() {
       "6 Set SMTP" " Outbound mail relay" \
       "7 Set TLS" " How the proxy gets its certificate" \
       "8 Signing Keys" " Rotate the keys services sign tokens with" \
+      "9 Versions" " Which release each app deploys" \
       3>&1 1>&2 2>&3)" || exit 0
     case "$choice" in
       1\ *) do_setup_menu ;;
@@ -1961,6 +2080,7 @@ interactive() {
       6\ *) do_smtp_menu ;;
       7\ *) do_tls_menu ;;
       8\ *) do_keys_menu ;;
+      9\ *) do_versions_menu ;;
     esac
   done
 }
@@ -1998,6 +2118,9 @@ case "${1:-}" in
       show-keys) nonint_show_keys ;;
       rotate-key) shift; nonint_rotate_key "$@" ;;
       retire-key) shift; nonint_retire_key "$@" ;;
+      show-versions) nonint_show_versions ;;
+      set-version) shift; nonint_set_version "$@" ;;
+      clear-version) shift; nonint_clear_version "$@" ;;
       *) usage ;;
     esac
     ;;

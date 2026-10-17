@@ -3,7 +3,7 @@
 #
 # scn-chat is a pnpm TS monorepo built for a single node:24-slim container; we
 # reproduce that one container as a plain CT: pinned Node 24 tarball + corepack,
-# source clone at the pinned release tag (Q9), pnpm install + build,
+# source clone at a release tag (ADR-0012), pnpm install + build,
 # sqlite on the rootfs, systemd. Same shape as the sync_relay role: a
 # source build, and a smoke test at the end that proves the feature.
 
@@ -53,10 +53,6 @@
   environment:
     PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
 
-- name: Prepare the repo's pnpm version in the corepack cache
-  ansible.builtin.command: /usr/local/bin/corepack prepare pnpm@{{ scn_chat_pnpm_version }} --activate
-  changed_when: false
-
 # --- Build dependencies ----------------------------------------------------
 
 - name: Install system build dependencies
@@ -75,16 +71,35 @@
 
 # --- Clone + build ----------------------------------------------------------
 
-- name: Clone scn-chat at the pinned release
-  # Bump scn_chat_version (defaults/main.yml) to upgrade: the clone's `changed`
-  # flag is the rebuild trigger below (the pds/happyview idiom). Full clone, no
+- name: Resolve the scn-chat release to deploy
+  # scn_chat_version is a tag or `latest` (ADR-0012); set-version.yml records a
+  # per-cluster choice over the role default.
+  ansible.builtin.include_tasks: "{{ playbook_dir }}/tasks/release_ref.yml"
+  vars:
+    release_repo: "{{ scn_chat_repo_url }}"
+    release_version: "{{ scn_chat_version }}"
+
+- name: Clone scn-chat at the release
+  # The clone's `changed` flag is the rebuild trigger below (the pds/happyview
+  # idiom), so `latest` with no new tag rebuilds nothing. Full clone, no
   # `depth:`, so moving to a new tag is a plain fetch.
   ansible.builtin.git:
     repo: "{{ scn_chat_repo_url }}"
     dest: "{{ scn_chat_src }}"
-    version: "{{ scn_chat_version }}"
+    version: "{{ release_ref }}"
     force: true
   register: scn_chat_clone
+
+- name: Install the checkout's pnpm through corepack
+  # The version comes from `packageManager` in the checkout's package.json, so
+  # a release that moves pnpm needs no change here.
+  ansible.builtin.command: /usr/local/bin/corepack install
+  args:
+    chdir: "{{ scn_chat_src }}"
+  environment:
+    PATH: "/usr/local/bin:{{ ansible_env.PATH }}"
+    HOME: /root
+  changed_when: false
 
 - name: Read the deployed scn-chat version
   # `git describe` of the checkout, so the manifest says v0.1.0 rather than a

@@ -142,7 +142,8 @@ Back in zai-ops, in the [`corliss`](roles/corliss.md) role:
   The probe URL must never carry a credential.
 - Render it in the health-probes block of
   [`corliss.env.j2`](../ansible/roles/corliss/templates/corliss.env.j2).
-- Bump `corliss_version` to the release that has the new probe.
+- Bump `corliss_version` to the release that has the new probe. The env key
+  is new role wiring, so this is a commit, not a `set-version`.
 
 ## A signing key
 

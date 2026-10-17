@@ -115,8 +115,9 @@ out and update the docs.
   in `/root/.zai-secrets` because it is minted in the app, not generated). It also runs `provision.yml` per
   service, ordered by `default_ctid` because tier order is dependency order,
   manages cluster admins (`admins.yml`), sets the mail relay
-  (`set-smtp.yml`) and, last because the default needs no choice, the proxy's
-  TLS mode (`set-tls.yml`). A new plain value is a row in Cluster Settings and
+  (`set-smtp.yml`), the proxy's TLS mode (`set-tls.yml`), the signing keys
+  (`rotate-key.yml`) and, under Versions, which release scn-chat and Corliss
+  deploy, a tag or `latest` (`set-version.yml`, ADR-0012). A new plain value is a row in Cluster Settings and
   anything with its own flow is a menu entry. Either way it gets a `nonint`
   form and a playbook underneath, never a new `zai-set-*` command.
   The menu never changes a recorded

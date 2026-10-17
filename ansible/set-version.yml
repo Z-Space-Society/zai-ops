@@ -1,0 +1,221 @@
+---
+# Record which release of an app this cluster deploys, or show every service's
+# versions.
+#
+#   ansible-playbook set-version.yml -e version_action=set -e app=scn-chat -e version=v0.2.2
+#   ansible-playbook set-version.yml -e version_action=set -e app=corliss -e version=latest
+#   ansible-playbook set-version.yml -e version_action=clear -e app=scn-chat
+#   ansible-playbook set-version.yml -e version_action=show
+#
+# (`scn-config`'s Versions menu, and `scn-config nonint show-versions |
+# set-version | clear-version`, are the front end; this playbook stays the
+# authority.)
+#
+# A version is a release tag (vX.Y.Z) or `latest`, which the role resolves to
+# the newest release tag each time it is provisioned (tasks/release_ref.yml,
+# ADR-0012). Nothing here provisions: a change reaches the app on its next
+# provision. Clearing removes the recorded value, so the role default applies
+# again.
+#
+# Why a setter and not a commit: which release a cluster runs is this-cluster
+# data, like cluster_domain and the CTID assignments, so it goes in the
+# git-ignored runtime inventory (ADR-0001). The role default stays in git as
+# what a fresh cluster gets.
+#
+# Only apps cloned at a tag from their own repo can be set. Every other service
+# installs a version its role was written against, so moving it is a role
+# change; `show` still lists what each one has deployed, from its manifest.
+#
+# Read-modify-write the WHOLE structure and re-dump, as set-registry.yml does,
+# so the domain, the CTID assignments and the inference-node roster survive.
+
+- name: Record or show app release versions
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    runtime_inventory: "{{ playbook_dir }}/inventory/local.yml"
+    # Operator-facing app name -> the variable it sets, and the role whose
+    # defaults hold that variable's default and the repo URL.
+    version_apps:
+      scn-chat: { var: scn_chat_version, role: scn_chat, repo_var: scn_chat_repo_url }
+      corliss: { var: corliss_version, role: corliss, repo_var: corliss_repo_url }
+    # Every manifest a service play writes (docs/roles/manifest.md), for show.
+    manifest_services:
+      - postgres
+      - redis
+      - garage
+      - caddy
+      - sync-relay
+      - litellm
+      - happyview
+      - pds
+      - corliss
+      - open-webui
+      - scn-chat
+    tag_regex: '^v[0-9]+\.[0-9]+\.[0-9]+$'
+  tasks:
+    - name: Require a known action
+      ansible.builtin.assert:
+        that: version_action | default('') in ['set', 'clear', 'show']
+        fail_msg: "Pass -e version_action=set, clear or show."
+
+    - name: Require a known app
+      ansible.builtin.assert:
+        that: app | default('') in version_apps
+        fail_msg: "Pass -e app=<name>, one of: {{ version_apps | list | join(', ') }}."
+      when: version_action != 'show'
+
+    # errors='ignore' → empty string when the file doesn't exist yet; 'or {}'
+    # turns that (and an empty/whitespace file) into an empty mapping.
+    - name: Load the existing runtime inventory (empty if absent)
+      ansible.builtin.set_fact:
+        runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
+
+    - name: Load each app's role defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/roles/{{ item.value.role }}/defaults/main.yml"
+        name: "defaults_{{ item.value.role }}"
+      loop: "{{ version_apps | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Change an app's version
+      when: version_action in ['set', 'clear']
+      vars:
+        entry: "{{ version_apps[app] }}"
+        repo: "{{ lookup('vars', 'defaults_' ~ entry.role)[entry.repo_var] }}"
+        recorded: "{{ runtime_data.get('all', {}).get('vars', {}).get(entry.var, '') }}"
+        # 0.2.2 and v0.2.2 both mean the tag v0.2.2.
+        wanted: >-
+          {{ '' if version_action == 'clear'
+             else ('v' ~ (version | default('') | string | trim | regex_replace('^v', '')))
+                  if (version | default('') | string | trim) != 'latest' else 'latest' }}
+      block:
+        - name: Require a tag or latest
+          ansible.builtin.assert:
+            that: wanted == 'latest' or wanted is match(tag_regex)
+            fail_msg: >-
+              '{{ version | default('') }}' is not a release. Pass a tag such as
+              v0.2.2, or latest.
+          when: version_action == 'set'
+
+        - name: Check that the tag exists upstream
+          ansible.builtin.command:
+            argv: [git, ls-remote, --exit-code, --tags, "{{ repo }}", "refs/tags/{{ wanted }}"]
+          changed_when: false
+          failed_when: false
+          register: tag_check
+          when: version_action == 'set' and wanted != 'latest'
+
+        - name: Refuse a tag that is not there
+          ansible.builtin.assert:
+            that: tag_check.rc == 0
+            fail_msg: "{{ repo }} has no tag {{ wanted }}."
+          when: tag_check is not skipped
+
+        - name: Report the no-op
+          ansible.builtin.debug:
+            msg: "{{ app }} is already {{ ('set to ' ~ wanted) if wanted else 'on its role default' }}, nothing to do."
+          when: recorded == wanted
+
+        - name: Write the runtime inventory
+          ansible.builtin.copy:
+            dest: "{{ runtime_inventory }}"
+            # Only all.vars changes: the CTID assignments and the inference-node
+            # roster beside it are carried over untouched.
+            content: >-
+              {{ runtime_data | combine({'all': (runtime_data.get('all', {}))
+                   | combine({'vars': (runtime_data.get('all', {}).get('vars', {})
+                       | dict2items | rejectattr('key', 'eq', entry.var) | items2dict)
+                       | combine({entry.var: wanted} if wanted else {})})})
+                 | to_nice_yaml(indent=2) }}
+            mode: "0644"
+          when: recorded != wanted
+
+        - name: Report the change
+          ansible.builtin.debug:
+            msg: >-
+              {{ app }} {{ ('set to ' ~ wanted) if wanted else 'back on its role default' }}
+              in {{ runtime_inventory }}. It deploys that on its next provision
+              (ansible-playbook provision.yml --limit {{ app }}).
+          when: recorded != wanted
+
+    # One line per service: name|settable|recorded|default|latest|deployed, "-"
+    # where there is nothing to show. Written to `out` for scn-config to read
+    # (the hand-off set-scn-chat-key.yml uses), or printed.
+    - name: Describe every service's versions
+      when: version_action == 'show'
+      block:
+        - name: Look up each app's newest release tag
+          ansible.builtin.command:
+            argv: [git, ls-remote, --tags, --refs, --sort=-v:refname,
+                   "{{ lookup('vars', 'defaults_' ~ item.value.role)[item.value.repo_var] }}", "v*"]
+          loop: "{{ version_apps | dict2items }}"
+          loop_control:
+            label: "{{ item.key }}"
+          changed_when: false
+          failed_when: false
+          register: latest_tags
+
+        - name: Load the manifest role's defaults (Garage endpoint and region)
+          ansible.builtin.include_vars:
+            file: "{{ playbook_dir }}/roles/manifest/defaults/main.yml"
+            name: defaults_manifest
+
+        # The read-only manifest key, the one Corliss's /systems/ reads with. A
+        # service never provisioned has no manifest and reads as "-".
+        - name: Read each service's manifest
+          amazon.aws.s3_object:
+            mode: getstr
+            bucket: "{{ manifest_bucket }}"
+            object: "{{ item }}.json"
+            endpoint_url: "{{ defaults_manifest.manifest_endpoint_url }}"
+            region: "{{ defaults_manifest.manifest_region }}"
+            access_key: "{{ manifest_reader_access_key }}"
+            secret_key: "{{ manifest_reader_secret_key }}"
+          loop: "{{ manifest_services }}"
+          failed_when: false
+          register: manifests
+          when: hostvars['object-store']['ctid'] is defined
+
+        - name: Collect the deployed versions
+          ansible.builtin.set_fact:
+            deployed: "{{ deployed | default({}) | combine({item.item: (item.contents | from_json).version}) }}"
+          loop: "{{ manifests.results | default([]) | selectattr('contents', 'defined') | list }}"
+          loop_control:
+            label: "{{ item.item }}"
+
+        - name: Collect the newest release tags
+          ansible.builtin.set_fact:
+            latest: >-
+              {{ latest | default({}) | combine({item.item.key: (item.stdout_lines
+                 | map('regex_replace', '^.*refs/tags/', '') | select('match', tag_regex)
+                 | first | default('-'))}) }}
+          loop: "{{ latest_tags.results }}"
+          loop_control:
+            label: "{{ item.item.key }}"
+
+        - name: Write or print the description
+          vars:
+            all_vars: "{{ runtime_data.get('all', {}).get('vars', {}) }}"
+            description: |
+              {% for name, entry in version_apps.items() %}
+              {{ name }}|yes|{{ all_vars.get(entry.var, '-') }}|{{ lookup('vars', 'defaults_' ~ entry.role)[entry.var] }}|{{ latest[name] }}|{{ (deployed | default({})).get(name, '-') }}
+              {% endfor %}
+              {% for name in manifest_services if name not in version_apps %}
+              {{ name }}|no|-|-|-|{{ (deployed | default({})).get(name, '-') }}
+              {% endfor %}
+          block:
+            - name: Write the description
+              ansible.builtin.copy:
+                dest: "{{ out }}"
+                content: "{{ description }}"
+                mode: "0600"
+              changed_when: false
+              when: out is defined
+
+            - name: Print the description
+              ansible.builtin.debug:
+                msg: "{{ description | trim }}"
+              when: out is not defined

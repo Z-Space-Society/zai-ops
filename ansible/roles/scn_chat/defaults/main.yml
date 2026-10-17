@@ -9,11 +9,13 @@
 # --frozen-lockfile + build, sqlite in DATA_DIR on the rootfs, systemd unit.
 # No postgres, redis or object-store dependency.
 #
-# Version policy (spec 0005 Q9): pin a scn-chat release tag. Upgrading is a
-# one-line commit bumping this, then a play run; rolling back is reverting that
-# commit. The play rebuilds and restarts only when the checkout moved, and the
-# manifest records `git describe` of what was deployed.
-scn_chat_version: "v0.1.1"
+# Version policy (ADR-0012): a release tag such as v0.2.2, or `latest`, the
+# newest vX.Y.Z tag upstream, looked up each time the play runs. This default
+# follows latest; a cluster pins a tag with `scn-config nonint set-version
+# scn-chat <tag>`, which records it in inventory/local.yml over this. The play
+# rebuilds and restarts only when the checkout moved, and the manifest records
+# `git describe` of what was deployed.
+scn_chat_version: "latest"
 scn_chat_repo_url: "https://github.com/Z-Space-Society/scn-chat"
 
 # Node.js: pinned LTS tarball with its SHA-256, the tarball + checksum
@@ -57,8 +59,3 @@ scn_chat_public_url: "https://chat.{{ cluster_domain }}"
 # authority Corliss and the PDS use; no DIDs live here or in any secret store.
 scn_chat_log_level: info
 scn_chat_plc_url: "https://plc.directory"
-
-# pnpm, from the repo's `packageManager` field at the pinned tag. Corepack
-# prepares this exact version into the cache at provision time; check it when
-# bumping scn_chat_version.
-scn_chat_pnpm_version: "10.33.0"

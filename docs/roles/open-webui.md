@@ -36,7 +36,7 @@ embedder; see [`litellm`](litellm.md)).
 This role is otherwise a near-copy of [`litellm`](litellm.md), but differs where it
 must:
 
-1. **uv-managed Python 3.12, not the system interpreter.** Open WebUI 0.10.x requires
+1. **uv-managed Python 3.12, not the system interpreter.** Open WebUI (still at 0.12.3) requires
    Python `>=3.11,<3.13`, but the Debian 13 CT template ships **3.13**, which it
    refuses. So `python3 -m venv` is unusable here. The role installs a pinned,
    checksummed [`uv`](https://docs.astral.sh/uv/) binary and uses it to fetch a
@@ -263,8 +263,9 @@ generate, and the source of the hard provisioning dependency below.
 - **[`redis`](redis.md)** must be provisioned first, and this is the hardest
   runtime dependency of the three. Provisioning needs the `redis` host merely
   *assigned* (its `ansible_host` renders `REDIS_URL`), but at runtime OpenWebUI
-  consults Redis on **every authenticated request** — an unreachable Redis 500s
-  chat and deletes the session cookie rather than degrading. Read
+  consults Redis on **every authenticated request** and registers every chat
+  reply there. An unreachable Redis fails sending, and the revocation check
+  accepts tokens until it is back, so logout is off for the duration. Read
   [the trade](redis.md#the-trade-this-role-makes-stated-deliberately) before
   touching either side.
 - **[`proxy`](proxy.md)** exposes it to the LAN via `caddy_proxy_hosts`
@@ -314,21 +315,25 @@ The **first** user to sign up becomes the admin; there's no seeded account.
   install task uses `open-webui[postgres]==<version>` so the driver is present.
 - **The DSN must pin `?client_encoding=utf8`.** OpenWebUI's *async* engine uses the
   psycopg **v3** driver (separate from the sync psycopg2 path), and with psycopg 3.3
-  (pinned by 0.10.x) `pg_catalog.version()` returns **bytes** unless the client
+  (pinned at 3.3.4 through 0.12.3) `pg_catalog.version()` returns **bytes** unless the client
   encoding is set — SQLAlchemy then throws `cannot use a string pattern on a
   bytes-like object` parsing the server version and the app crash-loops at startup.
   `openwebui_database_url` appends `?client_encoding=utf8`
   ([sqlalchemy#11373](https://github.com/sqlalchemy/sqlalchemy/discussions/11373)).
-- **Migrations run on startup, and a failure is logged but does NOT crash the app** —
-  so `/health` can return 200 over a half-migrated DB. Unlike litellm there's no
-  provision-time migration gate; on a major version bump, watch
-  `journalctl -u open-webui` for migration errors.
+- **Migrations run on startup, and since 0.11.3 a failed one stops it.** Before
+  that, a failure was logged and the app served anyway, so `/health` could
+  return 200 over a half-migrated DB. Now the daemon stops at the migration
+  error, so the provision's smoke test fails. Unlike litellm there's no
+  provision-time migration gate; `journalctl -u open-webui` names the
+  migration that failed.
 - **A version bump that carries migrations is one-way.** Re-pinning
   `openwebui_version` downwards does not undo them — Alembic downgrades are not run,
   and the old code then meets a newer schema. Take a database backup
-  (`zai-backup`) before bumping; that is the only rollback. `0.11.1` carried four,
-  one of which (`repair_double_encoded_user_oauth`) rewrites the `user.oauth`
-  column that every account here has, since OIDC is the only way in.
+  (`zai-backup`) before bumping; that is the only rollback. `0.12.3` carried
+  eight over 0.11.1. The one that matters here, `add_mfa_and_session_stamp`,
+  adds nullable `auth.mfa` and `auth.session_stamp` columns to the table every
+  OIDC account has. A JWT whose stamp differs from its row's is now rejected,
+  and pre-upgrade tokens and rows are both null, so the bump signs nobody out.
 - **nomic embeddings want `search_document:` / `search_query:` prefixes.**
   `nomic-embed-text-v1.5` retrieves poorly without them, and litellm passes input
   through verbatim — so the *client* (Open WebUI's RAG pipeline) must add them. Noted

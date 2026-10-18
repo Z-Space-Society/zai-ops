@@ -31,9 +31,11 @@ browser is authenticating with, which is the only thing that matters. Redis is
 where it writes "every token issued for this user before now is dead"
 (`open-webui:auth:user:<id>:revoked_at`).
 
-So the contents are a handful of TTL'd markers: a few kilobytes, 30-day
-expiry, nothing derived from anything and nothing anyone can miss once the
-relying party's own tokens have aged out.
+So the contents are a handful of TTL'd markers (a few kilobytes, 30-day
+expiry), plus what open-webui puts there on its own once `REDIS_URL` is set:
+a registry of in-flight chat replies and their streamed text, removed as each
+reply finishes. Nothing is derived from anything, and nothing anyone can miss
+once the relying party's own tokens have aged out.
 
 ### Why core infra (100–109) and not platform
 
@@ -132,21 +134,25 @@ It is depended *upon*, though, and asymmetrically:
 
 ## The trade this role makes, stated deliberately
 
-**Once `REDIS_URL` is set, Redis is a hard dependency of the entire chat
-surface, not just of logout.** This was established from Open WebUI 0.11.0's
+**Once `REDIS_URL` is set, an unreachable Redis takes chat down and quietly
+turns revocation off.** This was first established from Open WebUI 0.11.0's
 source before the role was built, because the alternative was discovering it
-during an outage:
+during an outage. It was re-read at 0.12.3, where the failure changed shape:
 
 - `get_current_user` calls `is_valid_token(data, request.app.state.redis)` on
-  **every** authenticated request. The `await redis.get(...)` inside it is
-  unguarded, so a `ConnectionError` propagates into the surrounding
-  `except Exception`, which **deletes the `token` cookie** and re-raises → 500.
-- It loops rather than degrades: the OIDC round trip itself doesn't touch
-  Redis, so login succeeds and mints a fresh cookie — and the next authenticated
-  call 500s and wipes it again.
+  **every** authenticated request. Since 0.11.4 the Redis read inside it is
+  wrapped: a `RedisError` is logged ("Revocation check failed; accepting
+  token") and the token is **accepted**. Members stay signed in, and nobody
+  can be revoked until Redis is back. (At 0.11.0 the same error deleted the
+  `token` cookie and 500'd, so login looped.)
+- Every chat reply is registered as a task in Redis (`create_task` →
+  `redis_save_task`), and that write is not wrapped. So sending a message fails
+  while Redis is down, even though the session survives.
 - There is no "unreachable at boot ⇒ run without it" path. `get_redis_client`
   returns `None` only when `REDIS_URL` is *unset*; `redis.asyncio.from_url`
-  connects lazily and never fails at startup.
+  connects lazily and never fails at startup. Since 0.12.0 a dropped
+  connection is retried once, so a Redis *restart* is a blip rather than an
+  error. A restart still loses every revocation marker (see persistence).
 
 **Why the trade was accepted:** both CTs live on the same Proxmox host and the
 same `vmbr1` bridge, so there is no network between them to partition. The
@@ -160,8 +166,8 @@ one-service-per-CT convention the whole inventory is built on.
 - **`REDIS_SOCKET_CONNECT_TIMEOUT` / `REDIS_SOCKET_TIMEOUT` are set to `2` in
   the open-webui role.** Both are *unset* upstream, meaning no timeout at all:
   against a CT that is down (SYN into the void, no RST) every authenticated
-  request blocks for the OS TCP timeout, ~130 s, before failing. That turns an
-  outage from fast and obvious into a hung site.
+  request blocks for the OS TCP timeout, ~130 s, before the revocation check
+  gives up. That turns an outage from fast and obvious into a hung site.
 - **`ENABLE_STAR_SESSIONS_MIDDLEWARE` is left off**, which is its default
   *independently* of `REDIS_URL`. That is the property this deployment relies
   on: with it off, the OAuth handshake's own state stays in a signed cookie, so

@@ -288,19 +288,20 @@ Lessons on **Open WebUI's `PersistentConfig` settings** (`ENABLE_LOGIN_FORM`,
   field only fires the redirect when open-webui's session cookie is absent;
   a request already carrying it falls through to the real app. See
   [`proxy`](roles/proxy.md#notes).
-- **Setting `REDIS_URL` makes Redis a hard dependency of every authenticated
-  request — it does not degrade, it takes chat down and logs everyone out.**
-  Established by reading open-webui 0.11.0's source *before* building the
-  [`redis`](roles/redis.md) role, on the theory that this is exactly the kind of
-  thing that should not be discovered during an outage. `get_current_user` calls
-  `is_valid_token(data, request.app.state.redis)` on every request; the
-  `await redis.get(...)` inside is unguarded, so a `ConnectionError` propagates
-  into the surrounding `except Exception` — which **deletes the `token` cookie**
-  and re-raises → 500. And it loops rather than failing once: the OIDC round
-  trip doesn't touch Redis, so login succeeds and mints a fresh cookie, then the
-  next authenticated call 500s and wipes it again. There is no fallback path
-  either — `get_redis_client` returns `None` only when `REDIS_URL` is *unset*,
-  and `redis.asyncio.from_url` connects lazily, so "unreachable at boot" is
+- **With `REDIS_URL` set, an unreachable Redis takes chat down and silently
+  turns revocation off. Members stay signed in, so it doesn't look like an
+  auth outage.** Established by reading open-webui's source *before* building the
+  [`redis`](roles/redis.md) role (0.11.0), and re-read at 0.12.3, on the theory
+  that this is exactly the kind of thing that should not be discovered during an
+  outage. `get_current_user` calls `is_valid_token(data, request.app.state.redis)`
+  on every request. Since 0.11.4 a `RedisError` there is logged ("Revocation
+  check failed; accepting token") and the token is **accepted**, so a revoked
+  member keeps their session until Redis returns or the 4h JWT runs out. (At
+  0.11.0 the same error deleted the `token` cookie and 500'd in a login loop.)
+  Sending a message still fails, because every reply is registered as a Redis
+  task by an unwrapped write. There is no fallback path either —
+  `get_redis_client` returns `None` only when `REDIS_URL` is *unset*, and
+  `redis.asyncio.from_url` connects lazily, so "unreachable at boot" is
   indistinguishable from configured. Two mitigations, both deliberate:
   `REDIS_SOCKET_CONNECT_TIMEOUT`/`REDIS_SOCKET_TIMEOUT` are set explicitly
   (unset upstream = no timeout = ~130 s hang per request against a dead CT), and

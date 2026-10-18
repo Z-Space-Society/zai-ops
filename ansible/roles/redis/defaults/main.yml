@@ -32,8 +32,11 @@ redis_service: redis-server
 redis_config_file: /etc/redis/redis.conf
 
 # Memory ceiling. Generous by two orders of magnitude for what actually lives
-# here (a revocation marker per revoked member, each expiring in 30 days), so
-# the ceiling is a guard against a runaway, not a capacity plan.
+# here: a revocation marker per revoked member (each expiring in 30 days), plus
+# open-webui's registry of in-flight chat replies and their streamed text,
+# which it deletes when each reply finishes. So the ceiling is a guard against a
+# runaway, not a capacity plan. Under noeviction a full Redis fails those chat
+# writes too, not only revocations.
 redis_maxmemory: 64mb
 
 # **noeviction, NOT an LRU or TTL policy.** This is the one config line here

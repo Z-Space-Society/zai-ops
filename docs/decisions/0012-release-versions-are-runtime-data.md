@@ -31,11 +31,14 @@ offers after an unrelated change, puts the role default back.
    the CTIDs (ADR-0001). Clearing it falls back to the role default.
 
 3. **Role defaults:** scn-chat follows `latest`; Corliss is pinned to a tag.
+   (Revised by [ADR-0013](0013-autodeploy-on-a-timer.md): Corliss follows
+   `latest` too.)
    Both accept either.
 
 4. **Nothing in zai-ops provisions on its own.** A `latest` app moves only
    when someone provisions it. What triggers a provision when a tag appears is
-   left to zai-ops#33.
+   left to zai-ops#33, settled by
+   [ADR-0013](0013-autodeploy-on-a-timer.md): a timer on CT 100.
 
 5. **Only apps cloned at a tag from their own repo are settable.** Every other
    service installs a version its role was written against (a checksummed

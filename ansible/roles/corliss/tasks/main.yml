@@ -523,5 +523,4 @@
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: corliss
     manifest_version: "{{ release_ref }}"

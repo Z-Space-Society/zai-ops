@@ -365,5 +365,4 @@
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: open-webui
     manifest_version: "{{ openwebui_version }}"

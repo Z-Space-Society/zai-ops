@@ -333,5 +333,4 @@
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: pds
     manifest_version: "{{ pds_version }}"

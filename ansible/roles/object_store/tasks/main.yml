@@ -162,5 +162,4 @@
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: garage
     manifest_version: "{{ garage_version }}"

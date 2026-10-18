@@ -37,7 +37,7 @@ Single-node Garage: one replica, one zone.
 | Look up + import the manifest keys | `command` → `garage key info` / `garage key import` (`no_log`) | Two scoped keys for [service manifests](manifest.md): a writer for the manifest role, a read-only key for Corliss. Imported from generated secrets so a rebuild restores the same credentials. **Not** in `garage-init.sh`: its sentinel means additions there never run on an initialised cluster. |
 | Look up + create the manifest bucket | `command` → `garage bucket info` / `garage bucket create` | `zai-manifests`, separate from `zai-backups` so neither manifest key can touch the restic repo. Converges every run. |
 | Grant the manifest keys | `command` → `garage bucket allow` (`changed_when: false`) | Writer read+write (s3_object checks the existing object before a PUT), reader read-only. Re-allowing is a no-op in Garage. |
-| Record the manifest | `include_role: manifest` (`garage`, `garage_version`) | After the bucket exists, so Garage's own manifest lands on the first run. See [`manifest`](manifest.md). |
+| Record the manifest | `include_role: manifest` (`garage_version`) | After the bucket exists, so Garage's own manifest lands on the first run. See [`manifest`](manifest.md). |
 
 ### Handlers
 

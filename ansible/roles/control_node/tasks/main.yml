@@ -133,3 +133,23 @@
     owner: root
     group: root
     mode: "0700"
+
+# Autodeploy (ADR-0013): a timer runs bin/zai-autodeploy, which provisions each
+# app set to `latest` when a newer release tag appears. Symlinked, not copied,
+# like the backup units, so a `git pull` changes them.
+- name: Symlink the autodeploy systemd units into place
+  ansible.builtin.file:
+    src: "{{ role_path }}/files/{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    state: link
+    force: true
+  loop:
+    - zai-autodeploy.service
+    - zai-autodeploy.timer
+
+- name: Enable the autodeploy timer
+  ansible.builtin.systemd:
+    name: zai-autodeploy.timer
+    state: started
+    enabled: true
+    daemon_reload: true

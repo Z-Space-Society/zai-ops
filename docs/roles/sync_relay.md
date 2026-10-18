@@ -68,7 +68,7 @@ lighter.
 | Wait for port + health endpoint | `wait_for` (`127.0.0.1:7030`) + `uri` (`/health`) | Proves the process booted and bound. `/health` deliberately does **not** touch Postgres, so this checks liveness, not storage — storage is proved by the protocol test below. |
 | Assert `auth=corliss` | `assert` on the `/health` body | With auth on, anything else means the relay is serving unverified connections on a published route. A failed deploy, not a warning. |
 | Wait for the MCP listener | `wait_for` (`127.0.0.1:7031`) | The second listener binds separately and can fail on its own. |
-| Record the manifest | `include_role: manifest` (`sync-relay`, `sync_relay_version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `sync-relay.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
+| Record the manifest | `include_role: manifest` (`sync_relay_version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `sync-relay.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
 ### Handlers
 

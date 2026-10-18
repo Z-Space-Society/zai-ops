@@ -13,6 +13,5 @@ manifest_endpoint_url: "http://{{ hostvars['object-store'].ansible_host }}:3900"
 # restates it for the same reason).
 manifest_region: "garage"
 
-# Required from the caller, no defaults on purpose (the tasks assert on them):
-#   manifest_service  the object key, <service>.json; see docs/roles/manifest.md
+# Required from the caller, no default on purpose (the tasks assert on it):
 #   manifest_version  what the play actually installed

@@ -21,7 +21,6 @@ one script, and the stack rebuilds itself from this repo.
 - [Secrets & trust model](#secrets--trust-model)
 - [Backups](#backups)
 - [Known gotchas](gotchas.md)
-- [TODO](#todo)
 
 ---
 
@@ -567,7 +566,8 @@ its own certificates again, so it holds nothing that cannot be rebuilt. See [`ba
 > the *same physical disk* as everything else, so today's backup guards
 > **CT-level** loss (restore a clobbered service container) but **not whole-host**
 > loss (dead disk, stolen box, fire). Closing that gap is a second, **off-site**
-> restic target — a one-line backend addition, tracked in [TODO](#todo).
+> restic target plus an escrow of the secrets a restore needs:
+> [#57](https://github.com/Z-Space-Society/zai-ops/issues/57).
 
 ---
 
@@ -576,13 +576,3 @@ its own certificates again, so it holds nothing that cannot be rebuilt. See [`ba
 Problems that were debugged the hard way live in their own file:
 **[gotchas.md](gotchas.md)**. Check it before chasing a Proxmox API, apt, PATH
 or TLS oddity, and add to it when you learn a new one.
-
----
-
-## TODO
-
-- **Off-site backup target.** The [`backup`](#backups) job ships runtime state to
-  the on-box object store (CT 101), which guards CT-level loss but not whole-host
-  loss. Add a second restic target off the box (SFTP/B2/S3) so a dead host or
-  lost site is recoverable — restic's backend is swappable, so this is a second
-  repo in the same wrapper, not a rewrite.

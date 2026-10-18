@@ -39,14 +39,14 @@ keep_weekly=4
 keep_monthly=6
 # Tier 2: stream a cluster-wide pg_dumpall from the postgres CT into the same
 # repo (tag zai-postgres). Postgres now holds unreproducible state (LiteLLM's
-# virtual keys/spend, Open WebUI users/chats), so this is no longer optional —
-# see F3 in Fable Security Review 2.
+# virtual keys/spend, Open WebUI users/chats, the sync relay's notes), so this
+# is not optional.
 postgres_enabled=true
 # Tier 2: the in-house PDS's data dir (accounts.sqlite, per-actor repos, blobs)
 # streamed as a tarball over SSH into the same repo (tag zai-pds). OFF until
 # the pds CT is assigned and ZAI_PDS_HOST is added to /etc/zai-backup/restic.env
-# — see docs/roles/pds.md. TODO(spike): verify tar-of-live-SQLite consistency
-# before enabling (the hardened alternative is restic client-side on the pds CT).
+# — see docs/roles/pds.md. A tar of live SQLite is not crash-consistent, which
+# is why this is off: zai-ops#50.
 pds_enabled=false
 # ----------------------------------------------------------------------------
 

@@ -41,7 +41,41 @@ on the box, `0600`, no manual entry required.
   `/proc/<pid>/cmdline` for the life of the process.
 - **Internal-only network**: all service containers except the edge proxy
   sit on `vmbr1` (`10.1.1.0/24`, no uplink) with no LAN exposure; the proxy is
-  the only dual-homed, LAN-facing container.
+  the only dual-homed service container. CT 100 also has a LAN leg (`net0` on
+  `vmbr0`) and answers SSH there
+  ([#44](https://github.com/Z-Space-Society/zai-ops/issues/44)).
+- **SSH logins**: root is key-only everywhere, the Proxmox hosts included.
+  Human admins get a sudo account from their GitHub keys (`github_user`);
+  password SSH is still on for those accounts
+  ([#56](https://github.com/Z-Space-Society/zai-ops/issues/56)).
+
+## What the cluster trusts outside itself
+
+- **GitHub.** The zai-ops checkout on CT 100 runs as root there and on every
+  CT once pulled; the autodeploy timer deploys the newest `vX.Y.Z` tag of
+  Corliss and scn-chat within five minutes; `github_user` fetches admins' SSH
+  keys from `https://github.com/<user>.keys` at each run. So whoever can push a
+  tag or a key to those accounts and repos can reach production. Nothing on
+  GitHub restricts that today
+  ([#55](https://github.com/Z-Space-Society/zai-ops/issues/55)).
+- **Package sources.** Debian (and backports for Caddy), PyPI, npm and
+  crates.io through each app's lockfile, release tarballs checked by sha256,
+  and rustup's installer, fetched unpinned
+  ([#60](https://github.com/Z-Space-Society/zai-ops/issues/60)).
+- **The edge's certificates and names.** Let's Encrypt issues them; DNS is at
+  Cloudflare, DNS-only.
+
+## Recovery
+
+A rebuild is the repo plus restored state: the vault, `/root/.vault_pass`,
+`/root/.zai-secrets`, CT 100's SSH key and `inventory/local.yml`, backed up
+nightly by `zai-backup`. That backup is on the same disk as everything else, so
+it covers losing a container and not losing the host, and restoring it needs
+`/root/.zai-secrets` from somewhere other than the backup itself. Nothing puts
+those files off the box yet
+([#57](https://github.com/Z-Space-Society/zai-ops/issues/57)), and a failing
+backup alerts nobody
+([#58](https://github.com/Z-Space-Society/zai-ops/issues/58)).
 
 ## Upgrade path for stricter deployments
 

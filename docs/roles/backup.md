@@ -27,10 +27,9 @@ It uses **restic** (encrypted, deduplicated, snapshotted) against the Garage S3
 bucket, on a **daily systemd timer**. restic is an implementation detail —
 operators talk to `zai-backup`, not to restic.
 
-> **Scope caveat:** the object store is on-box, so this currently protects
-> against **CT-level** loss, not whole-host loss. restic's backend is swappable —
-> adding an off-site repo (SFTP, B2, S3) later is a second target in the same
-> script, not a rewrite.
+> **Scope caveat:** the object store is on-box, so this protects against
+> **CT-level** loss, not whole-host loss. An off-site repository is
+> [#57](https://github.com/Z-Space-Society/zai-ops/issues/57).
 
 ## Where things live (and what's live on `git pull`)
 
@@ -107,9 +106,10 @@ enter by hand.
 
 > **DR note:** the repo is encrypted with `restic_repo_password`, which lives in
 > `/root/.zai-secrets` *and* inside the repo. To restore after losing CT 100 you
-> need that password out-of-band — escrow `/root/.zai-secrets` off-box, the same
-> way the vault password is backed up at bootstrap. An on-box CT-level restore
-> just needs the directory put back before re-running Ansible.
+> need that password out-of-band, and nothing escrows `/root/.zai-secrets` yet
+> ([#57](https://github.com/Z-Space-Society/zai-ops/issues/57)). An on-box
+> CT-level restore just needs the directory put back before re-running Ansible.
+> A failed run alerts nobody ([#58](https://github.com/Z-Space-Society/zai-ops/issues/58)).
 
 ## Run
 

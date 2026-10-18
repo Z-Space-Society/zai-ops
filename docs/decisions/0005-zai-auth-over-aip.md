@@ -121,9 +121,8 @@ Negative / tradeoffs:
   zai-auth spec and its proof artifacts.
 - [`docs/roles/corliss.md`](../roles/corliss.md) — the deployment role this
   decision unblocks (named `zai-auth` until the app moved to its own repo).
-- Fable Security Review 2, finding F7 (project vault,
-  `03_Projects/Shared Computer Network/Repos/Archive/Fable Security Review 2`)
-  — flagged this ADR as outstanding.
+- The July 2026 security review, which flagged this ADR as outstanding
+  (its finding F7).
 - Project vault: `Decisions/ADR-004 Corliss is the cluster session broker` —
   carries the AIP rejection in current terms. The standalone AIP research notes
   this decision was originally drawn from have been folded into that ADR and

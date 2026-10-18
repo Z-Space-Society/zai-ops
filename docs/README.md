@@ -109,9 +109,9 @@ ansible-playbook provision.yml --limit proxy    # or provision one by hand
   not held in a UI database — so the CT holds nothing that needs backing up. Only
   one public hostname should point at a given proxy at a time (controlled in
   DNS).
-- **Every other CT** (postgres, redis, happyview, litellm, sync-relay, corliss,
-  open-webui, scn-chat) lives only on the internal network and is reached through the
-  proxy. [`sync-relay`](roles/sync_relay.md) has two routes, `sync.<domain>`
+- **Every other CT** (postgres, redis, happyview, litellm, sync-relay, pds,
+  corliss, open-webui, scn-chat) lives only on the internal network and is
+  reached through the proxy. [`sync-relay`](roles/sync_relay.md) has two routes, `sync.<domain>`
   and `mcp.<domain>`, since Phase B made it verify Corliss's tokens; its
   `/internal/` prefix is left unrouted.
 - **CT 101** (object-store, Garage) is internal-only too — it's the restic
@@ -319,10 +319,6 @@ with `acme`. Switching away from `acme`, or re-running `acme` without an email,
 removes a recorded contact. The proxy reads the mode when it is provisioned: the
 menu offers to run that once a mode is saved, and a scripted change needs
 `ansible-playbook provision.yml --limit proxy`.
-
-A third mode, `origin_ca` (a Cloudflare Origin CA cert from the vault), was
-removed. A cluster that still has it recorded gets a failed proxy run that names
-the fix; see [`origin_ca` was removed](roles/proxy.md#origin_ca-was-removed).
 
 ---
 

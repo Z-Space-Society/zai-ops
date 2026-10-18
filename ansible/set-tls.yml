@@ -17,7 +17,7 @@
 # or hand-editing local.yml, which is not reproducible.
 #
 # The role defaults to acme, so none is only ever what someone ran this to
-# choose. origin_ca, the Cloudflare Origin CA mode, was removed and is refused.
+# choose.
 #
 # Read-modify-write the WHOLE structure and re-dump (never line-append): that
 # preserves cluster_domain, every service's CTID assignment AND the
@@ -43,7 +43,6 @@
         fail_msg: >-
           '{{ tls_mode | default('') }}' is not a TLS mode. Expected one of:
           {{ tls_modes | join(', ') }}, e.g. scn-config nonint set-tls acme.
-          (origin_ca was removed: see docs/roles/proxy.md.)
 
     # The contact renders only in acme mode, so accepting one with another mode
     # would record a value nothing reads.

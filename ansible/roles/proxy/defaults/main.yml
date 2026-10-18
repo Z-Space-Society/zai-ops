@@ -19,11 +19,6 @@
 #
 # acme is the default, so a cluster that never runs the setter is its own edge.
 # none needs `scn-config` (Set TLS).
-#
-# There was a third mode, origin_ca, which served a Cloudflare Origin CA cert
-# from the vault for a domain Cloudflare proxied. It is removed: every cluster
-# terminates its own TLS now. tasks/main.yml fails the run for a cluster that
-# still has it recorded, naming the fix. See docs/roles/proxy.md.
 caddy_tls_mode: acme
 
 # Derived, not a knob: "does this edge serve :443 at all". Kept because the :80
@@ -81,8 +76,8 @@ caddy_proxy_hosts:
   # through reverse_proxy by default). Serves XRPC + OAuth 2.1 +
   # /.well-known/did.json (synthesised from PDS_SERVICE_DID). This entry
   # forwards the whole hostname, so /admin and com.atproto.admin.* answer at
-  # the edge behind the admin password's basic auth. TODO(decision): block
-  # them here or accept that; see "Admin surface" in docs/roles/pds.md.
+  # the edge behind the admin password's basic auth. Whether to narrow that
+  # here is part of zai-ops#44; see "Admin surface" in docs/roles/pds.md.
   - { domain: "pds.{{ cluster_domain }}", service: pds, port: 3000 }
   # Corliss owns the APEX (ADR-0006), not a subdomain: its OIDC issuer is the
   # bare origin, and discovery has to sit at <issuer>/.well-known/... .

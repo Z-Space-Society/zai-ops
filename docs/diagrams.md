@@ -34,6 +34,7 @@ flowchart TB
         subgraph app["Applications 120–129 — surfaces members land on"]
             corliss["corliss · 120<br/>ATProto sign-in, membership, OIDC provider<br/>:8000"]
             owui["open-webui · 121<br/>chat UI<br/>:8080"]
+            scnchat["scn-chat · 122<br/>AI assistant, chats on the member's PDS<br/>:3000"]
         end
 
         subgraph plat["Platform 110–119 — consumed by other services"]
@@ -41,6 +42,7 @@ flowchart TB
             happyview["happyview · 111<br/>ATProto AppView, membership registry<br/>:3000"]
             litellm["litellm · 112<br/>OpenAI-compatible gateway<br/>+ co-located CPU embedder<br/>:4000"]
             relay["sync-relay · 113<br/>Automerge sync server + MCP<br/>:7030 sync · :7031 MCP"]
+            pds["pds · 114<br/>in-house ATProto PDS, SQLite<br/>:3000"]
         end
 
         subgraph core["Core infra 100–109 — data foundations"]
@@ -61,14 +63,19 @@ flowchart TB
 
     proxy -->|"apex → :8000"| corliss
     proxy -->|"owui. → :8080"| owui
+    proxy -->|"chat. → :3000"| scnchat
     proxy -->|"api. → :4000"| litellm
     proxy -->|"view. → :3000"| happyview
+    proxy -->|"sync. → :7030 · mcp. → :7031"| relay
+    proxy -->|"pds. and every unrouted hostname → :3000"| pds
 
     corliss -->|"OIDC id_token"| owui
     corliss -->|"membership reconcile"| happyview
     corliss -->|"mints member keys"| litellm
+    corliss -->|"lists and creates vaults, /internal/"| relay
     owui -->|"chat + embeddings"| litellm
     owui -->|"revoked_at markers"| redis
+    scnchat -->|"admin models, shared key"| litellm
     litellm -->|"GPU inference"| salmon
     litellm -->|"GPU inference"| orca
 
@@ -85,8 +92,8 @@ flowchart TB
     classDef tierApp fill:#fbf2e8,stroke:#a3763c,color:#123
     classDef outside fill:#f4f0f7,stroke:#6f5a8a,color:#123
     class control,objstore,postgres,redis tierCore
-    class proxy,happyview,litellm,relay tierPlat
-    class corliss,owui tierApp
+    class proxy,happyview,litellm,relay,pds tierPlat
+    class corliss,owui,scnchat tierApp
     class salmon,orca,members,cf outside
 ```
 
@@ -99,17 +106,18 @@ of its own. `corliss` is an application despite doing the authentication;
 connects to each directly, because neither has a page anyone lands on. See
 [CTID tiers](README.md#networking).
 
-**Two edges worth noticing:**
+**Three edges worth noticing:**
 
-- `sync-relay` is routed at `sync.<domain>` and `mcp.<domain>` only since
-  Phase B (relay 0.2.0), which verifies a Corliss access token on every
-  connection. Its `/internal/` prefix is not routed: Corliss reaches it over
-  `vmbr1` with the service token
-  ([ADR-0007](decisions/0007-sync-relay-and-space-membership.md)).
-- The dotted `corliss → happyview` and `corliss → open-webui` service calls go
-  **CT-to-CT over `vmbr1`**, not out through Cloudflare and back — they are
-  recovery and revocation paths that must not depend on public DNS, the CDN and
-  the proxy CT all being up.
+- `sync-relay` is routed at `sync.<domain>` and `mcp.<domain>` because the
+  relay verifies a Corliss access token on every connection. Its `/internal/`
+  prefix is answered 404 at the edge: Corliss reaches it over `vmbr1` with the
+  service token ([ADR-0007](decisions/0007-sync-relay-and-space-membership.md)).
+- `pds` takes two kinds of hostname: its own route, and every name no other
+  route claims, which is how member handles resolve. Caddy issues a certificate
+  for such a name only after the PDS's `/_tls-check` says it is a held handle.
+- Every `corliss →` service call goes **CT-to-CT over `vmbr1`**, not out through
+  the LAN and back in at the proxy. They are recovery and revocation paths that
+  must not depend on public DNS, the LAN and the proxy CT all being up.
 
 ---
 
@@ -154,15 +162,17 @@ flowchart LR
     subgraph phase4["4 · provision.yml — create over the API, configure over SSH"]
         direction TB
         p1["object-store<br/>restic backend, so it comes up first"]
-        p2["postgres<br/>every app below creates its own role + DB here"]
-        p3["redis<br/>before open-webui builds its REDIS_URL"]
-        p4["proxy<br/>acme TLS unless Set TLS recorded none"]
-        p5["happyview"]
-        p6["litellm"]
-        p7["sync-relay<br/>~15–30 min, cargo build on a cold CT"]
-        p8["corliss"]
-        p9["open-webui"]
-        p1 --> p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9
+        p2["proxy<br/>acme TLS unless Set TLS recorded none"]
+        p3["postgres<br/>every app below creates its own role + DB here"]
+        p4["redis<br/>before open-webui builds its REDIS_URL"]
+        p5["litellm<br/>mints the keys corliss and open-webui read"]
+        p6["corliss"]
+        p7["open-webui"]
+        p8["scn-chat"]
+        p9["happyview"]
+        p10["sync-relay<br/>~15–30 min, cargo build on a cold CT"]
+        p11["pds<br/>cargo build too"]
+        p1 --> p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9 --> p10 --> p11
     end
 
     subgraph phase5["5 · steady state"]
@@ -190,6 +200,7 @@ assignment](README.md#service-ctid-assignment).
 | `object-store` | it is the restic backend `backup.yml` writes to, and it creates the bucket and key every service play's [manifest](roles/manifest.md) write needs, so `provision.yml` runs it first |
 | `postgres` | `happyview`, `litellm`, `sync-relay`, `corliss` and `open-webui` each create their own role + database on it |
 | `redis` | `open-webui` builds its `REDIS_URL` from that CT's address |
+| `litellm` | `corliss` and `open-webui` read keys only its play can mint (see [Known gotchas](gotchas.md)) |
 
 `corliss` additionally needs `sync-relay`, `redis`, `object-store` and `proxy`
 to have been **assigned** — its `/systems/` probe URLs derive from `hostvars`

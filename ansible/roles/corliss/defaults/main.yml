@@ -583,9 +583,10 @@ corliss_proxmox_url: "https://{{ proxmox_api_host }}:8006"
 # points their client at; this is Corliss reaching the same service from the CT
 # next door, and the two must not be conflated:
 #
-# - **Server-side Python cannot fetch our own public origin.** Cloudflare's
-#   Browser Integrity Check refuses non-browser user agents with `error code:
-#   1010` — the trap that shipped back-channel logout fully built and inert.
+# - A call between two CTs on one bridge has no business depending on public
+#   DNS and the LAN. The edge used to enforce this (Cloudflare refused
+#   server-side Python, which shipped back-channel logout built and inert);
+#   nothing does now, so the mistake is easier to make and no more correct.
 #   See docs/roles/open-webui.md, "the public origin is resolved internally".
 # - The provisioner key has no business crossing an edge to reach a neighbour.
 #
@@ -618,12 +619,12 @@ corliss_litellm_provisioner_key: "{{ lookup('ansible.builtin.file', _zai_secrets
 # **Internal, not the public origin.** Unlike chat/api/manage above — hrefs a
 # member's browser follows — this is a service-to-service call between two CTs on
 # the same bridge, so it goes direct: one hop over vmbr1, never leaving the
-# cluster. `https://view.<domain>` would route out through the host's NAT, across
-# the public internet and Cloudflare, and back in through the proxy CT.
+# cluster. `https://view.<domain>` would route out through the host's NAT, onto
+# the LAN, and back in through the proxy CT.
 #
 # That matters because **this is the recovery path**. Reconciliation is what
 # refills an empty MembershipCache on a rebuilt cluster, and it is meant to run
-# at boot; making it depend on public DNS, Cloudflare and the proxy CT all being
+# at boot; making it depend on public DNS, the LAN and the proxy CT all being
 # healthy is a long chain for something whose whole job is to work when little
 # else does. One internal hop depends on the two CTs and nothing else. It also
 # means the token is not the only thing standing in front of an
@@ -691,9 +692,8 @@ registry_client_key: ""
 # Corliss's /systems/ page reports whether the cluster is up, and asks each
 # service directly rather than inferring anything. Everything it dials is
 # INTERNAL — one hop over vmbr1 — for the reason recorded above
-# corliss_litellm_url: server-side Python cannot fetch our own public origin
-# through Cloudflare's Browser Integrity Check, so a probe aimed at a public
-# origin would measure the edge instead of the service.
+# corliss_litellm_url, and one more: a probe aimed at a public origin would
+# measure the edge instead of the service.
 #
 # READ-ONLY LIVENESS ENDPOINTS, all of them. None carries a credential and none
 # can change anything, which is what makes handing this list to a page safe.

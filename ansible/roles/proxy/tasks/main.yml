@@ -15,22 +15,6 @@
       run: scn-config nonint set-domain <domain>
   when: caddy_proxy_hosts | length > 0
 
-# origin_ca (a Cloudflare Origin CA cert from the vault, for a domain Cloudflare
-# proxied) was removed. A cluster that still has it recorded in local.yml would
-# otherwise hit the generic mode assert below, which says what is wrong but not
-# what to do about it. Rendering acme for it instead would be worse: Let's
-# Encrypt attempted from behind Cloudflare, and 52x on every public route.
-- name: Refuse the removed origin_ca TLS mode
-  ansible.builtin.assert:
-    that: caddy_tls_mode != 'origin_ca'
-    fail_msg: >-
-      caddy_tls_mode is 'origin_ca', which this repo no longer supports: Caddy
-      gets its own Let's Encrypt certificates now. Nothing was changed on the
-      proxy. To move this cluster: set its DNS records to DNS-only (not proxied
-      by Cloudflare), make sure public ports 80 and 443 reach the proxy CT, then
-      run: scn-config nonint set-tls acme [email] and provision the proxy again.
-      See docs/roles/proxy.md, "origin_ca was removed".
-
 # The template branches on the exact mode string, so a typo would render a
 # Caddyfile meant for no mode at all, and `caddy validate` checks syntax, not
 # intent.
@@ -102,17 +86,6 @@
     name: "caddy={{ caddy_apt_version }}"
     state: present
     update_cache: true
-
-# What origin_ca mode left behind: the Origin CA cert and its private key. No
-# mode reads them any more, so a cluster that moved to acme would otherwise keep
-# a private key on disk until someone removed it by hand.
-- name: Remove the Origin CA cert and key left by the removed origin_ca mode
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /etc/caddy/cloudflare-origin.pem
-    - /etc/caddy/cloudflare-origin.key
 
 # Render the routes. `validate` is the nginx -t analog — a bad Caddyfile (e.g. an
 # upstream service with no CTID) fails the task instead of being deployed.

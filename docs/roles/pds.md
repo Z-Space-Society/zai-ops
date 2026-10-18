@@ -203,13 +203,11 @@ provision and kept on the control node at `/root/.zai-secrets/pds_admin_password
 password. An account hosted here gets no admin rights either, whoever it
 belongs to.
 
-**The edge does not hide `/admin` yet.** The intent recorded here was that the
-dashboard and admin API stay off the public route and are reached over vmbr1.
-The proxy does not implement that: the `pds.<domain>` entry in
+**The edge does not hide `/admin`.** The `pds.<domain>` entry in
 `caddy_proxy_hosts` forwards the whole hostname, so `/admin` and
 `/xrpc/com.atproto.admin.*` answer at the edge, behind basic auth alone.
-TODO(decision): add a path block at the proxy, or accept basic auth as the
-boundary and drop the claim.
+Whether to narrow that at the proxy is decided with the rest of the edge's
+filtering in [zai-ops#44](https://github.com/Z-Space-Society/zai-ops/issues/44).
 
 **Who may mint invites is not a zai-ops setting.** Each time the pds
 play runs, [`tasks/roster.yml`](../../ansible/tasks/roster.yml) reads the

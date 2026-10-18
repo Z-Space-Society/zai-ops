@@ -11,9 +11,9 @@ runs Garage.)
 
 ## Purpose
 
-Caddy is a single Go binary in Debian's own repos, so this role is one
-`apt install` — no third-party repo, and none of the Debian-13 `gpgv`/`sqv` apt
-workaround a third-party repo would need. Its config is a declarative `Caddyfile`
+Caddy is a single Go binary from Debian's own backports suite, so this role is
+one `apt install` — no third-party repo, and none of the Debian-13 `gpgv`/`sqv`
+apt workaround a third-party repo would need. Its config is a declarative `Caddyfile`
 rendered from `caddy_proxy_hosts`, so **proxy routes live in git**, not in a
 web-UI database. The CT therefore holds no unreproducible state: config is
 committed, and the TLS certs are reissued by Caddy on demand. Nothing for the
@@ -56,60 +56,13 @@ before DNS and the public `:80`/`:443` forwards exist runs `scn-config nonint se
 first. Under the `acme` default, that proxy redirects to an HTTPS it has no cert
 for, and Caddy keeps retrying issuance.
 
-### `origin_ca` was removed
-
-There used to be a third mode, `origin_ca`, for a domain that Cloudflare
-proxied: Caddy served a long-lived Cloudflare Origin CA cert from the vault
-(`cloudflare_origin_cert` / `cloudflare_origin_key`) and never ran ACME. It was
-first inferred from the vault
-([#10](https://github.com/Z-Space-Society/zai-ops/issues/10),
-[#11](https://github.com/Z-Space-Society/zai-ops/pull/11)), then made an explicit
-recorded choice with `acme` as the default
-([#12](https://github.com/Z-Space-Society/zai-ops/issues/12)), and is now gone.
-Every cluster is its own edge, so there is one cert story to run and debug, and
-an Origin CA cert is trusted by Cloudflare and nobody else, which is what made
-server-side calls to the cluster's own public origin need special handling.
-
-**A cluster that still has `caddy_tls_mode: origin_ca` recorded gets a failed
-proxy run**, not a changed Caddyfile. The role's first TLS assert stops before
-anything on the proxy CT is touched, and names the fix. Rendering `acme` for such
-a cluster would be worse: Let's Encrypt attempted from behind Cloudflare, and a
-52x on every public route. `scn-config nonint show-tls` says the same thing
-before a provision does.
-
-To move such a cluster, in this order:
-
-1. Confirm public `:80` and `:443` reach the proxy CT from anywhere, not only
-   from Cloudflare's address ranges.
-2. Set every DNS record that points at the cluster to **DNS only**. From this
-   moment until step 3 finishes, browsers reach Caddy directly and reject the
-   Origin CA cert, so have step 3 ready.
-3. `scn-config nonint set-tls acme [email]`, then provision the proxy.
-4. Check each hostname from outside (see [Verify](#verify)).
-
-Do the move **before** pulling the commit that removes the mode, or from the
-last checkout that still has it. The setter there can still record `origin_ca`,
-which is the way back if issuance fails.
-
-Once the cluster is settled on `acme`, two things are left over, and neither is
-read by anything in this repo:
-
-- **The cert and key on the proxy CT.** The role removes
-  `/etc/caddy/cloudflare-origin.pem` and `.key` on the next proxy provision.
-- **`cloudflare_origin_cert` and `cloudflare_origin_key` in the vault.** Revoke
-  the certificate in the Cloudflare dashboard (SSL/TLS → Origin Server), which
-  also deals with the copies in older vault backups, then delete both keys with
-  `ansible-vault edit group_vars/all/vault.yml`.
-
 ## Tasks
 
 | Task | Module | Why |
 | ---- | ------ | --- |
 | Add backports + pin caddy | `apt` (`python3-debian`), `deb822_repository`, `copy` (apt preferences) | Debian 13's base suite ships caddy **2.6.2**; several options this cluster needs landed in 2.7+. Backports carries 2.11.2 and is still Debian-signed, so no third-party key. The pin is scoped to `caddy` by name so backports supplies nothing else. |
 | Install Caddy | `apt` (`caddy={{ caddy_apt_version }}`) | Version-pinned, like Garage and uv. Pulls the `caddy` user, `/etc/caddy/`, `/var/lib/caddy`, and `caddy.service`. **This upgrades an existing 2.6.2 install and restarts Caddy**, which is a brief outage of every public route on the LAN-facing edge. |
-| Refuse the removed `origin_ca` mode | `assert` | A cluster that still has `origin_ca` recorded gets a failed run that names the fix, before anything on the CT changes. See [`origin_ca` was removed](#origin_ca-was-removed). |
 | Assert the TLS mode | `assert` | The template branches on the exact mode string, so a typo would render a config for no mode, and `caddy validate` checks syntax, not intent. |
-| Remove the Origin CA cert + key | `file` (`state: absent`) | Cleans up what `origin_ca` mode installed, so a cluster that moved to `acme` does not keep an unused private key on disk. A no-op everywhere else. |
 | Deploy the Caddyfile | `template` (`validate: caddy validate`) | Renders `caddy_proxy_hosts`. `validate` is the `nginx -t` analog — a bad config fails the task instead of deploying. |
 | Start + enable `caddy` | `systemd` | Running now + on boot. |
 | Validate the deployed config | `command: caddy validate` (`changed_when: false`) | Final guard that the live file is valid. |
@@ -128,7 +81,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `caddy_tls_mode` | `acme` | `acme` or `none`. See [TLS modes](#tls-modes). Recorded per cluster with `scn-config` (Set TLS), never by hand. The role asserts the value is one of the two, and refuses the removed `origin_ca` with a message naming the fix. |
+| `caddy_tls_mode` | `acme` | `acme` or `none`. See [TLS modes](#tls-modes). Recorded per cluster with `scn-config` (Set TLS), never by hand. The role asserts the value is one of the two. |
 | `caddy_tls_enabled` | `{{ caddy_tls_mode != 'none' }}` | Derived: does this edge serve `:443`? Drives the `:80` redirect and the `https://` site addresses. Set the mode, not this. |
 | `caddy_acme_email` | `""` | Let's Encrypt account contact, `acme` mode only, rendered as the global `email` option when non-empty. Not a secret. Recorded by `scn-config nonint set-tls acme <email>` and removed whenever the recorded mode leaves `acme`. Let's Encrypt no longer sends expiry reminders, so it is not a renewal alarm. |
 | `caddy_backports_suite` | `{{ ansible_distribution_release }}-backports` | Derived from the CT's own release, so the blueprint stays generic. |
@@ -137,17 +90,25 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 | `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code, skip_if_cookie }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). `skip_if_cookie` names a cookie whose presence lets the request fall through to the real app instead of redirecting — see [Notes](#notes) below, it's load-bearing for open-webui, not optional. An entry without redirects may carry `block_paths: [<path matcher>, …]`, each rendered as `respond <path> 404` ahead of the `reverse_proxy`, for paths the upstream serves but the edge must not publish (the sync relay's `/internal/*`). |
 | `caddy_catch_all` | `{ service: pds, port: 3000, ask: /_tls-check }` | Where a hostname with no route goes: member handles, to the PDS, on the cluster domain or a separate handle domain (`pds_handle_domain`) alike. In `acme` mode it renders a hostless `https://` site with `tls { on_demand }` and the global `on_demand_tls { ask http://<upstream>:<port><ask> }`; in `none` mode, the `:80` site's fallback. Skipped until the service has a CTID; `{}` disables it. Hostless on purpose, never `*.<domain>`: see [Notes](#notes). |
 
-The committed default carries one live route, with the **domain derived from
-`cluster_domain`** (set per cluster with `scn-config`, Cluster Settings) so the route holds no
-this-cluster facts — the same number-free principle the inventory follows. The
-role asserts `cluster_domain` is set when routes exist, failing with `run:
-scn-config nonint set-domain <domain>` instead of a raw undefined-variable error.
+Every route's **domain derives from `cluster_domain`** (set per cluster with
+`scn-config`, Cluster Settings) so the committed routes hold no this-cluster
+facts — the same number-free principle the inventory follows. The role asserts
+`cluster_domain` is set when routes exist, failing with `run: scn-config nonint
+set-domain <domain>` instead of a raw undefined-variable error.
 
-```yaml
-caddy_proxy_hosts:
-  - { domain: "api.{{ cluster_domain }}", service: litellm, port: 4000 }
-#  - { domain: "owui.{{ cluster_domain }}", service: open-webui, port: 8080 }
-```
+The committed routes, and what each publishes of its upstream:
+
+| Hostname | Service | Everything, or less |
+| -------- | ------- | ------------------- |
+| apex | `corliss` | everything |
+| `api.` | `litellm` | everything, `/ui` included (the admin panel, behind the master key; see [zai-ops#44](https://github.com/Z-Space-Society/zai-ops/issues/44)) |
+| `owui.` | `open-webui` | everything; `/auth*` is redirected to the OIDC login unless the session cookie is present |
+| `view.` | `happyview` | everything |
+| `chat.` | `scn-chat` | everything |
+| `pds.` | `pds` | everything, `/admin` and `com.atproto.admin.*` included (behind basic auth; see [zai-ops#44](https://github.com/Z-Space-Society/zai-ops/issues/44)) |
+| `sync.` | `sync-relay` | everything but `/internal/*`, answered 404 here |
+| `mcp.` | `sync-relay` | everything |
+| any other name | `pds` | the catch-all for member handles; a certificate only for names the PDS vouches for |
 
 ## Secrets
 
@@ -227,20 +188,18 @@ If issuance fails, check public `:80` first (see
   Iterate destructively in `none` mode (`scn-config nonint set-tls none`), then switch with
   `scn-config nonint set-tls acme`.
 
-- **open-webui's internal hairpin works under `acme`.** It resolves the public
-  origin to the proxy CT and points `SSL_CERT_FILE` at the **merged** system
-  bundle (see [`open-webui`](open-webui.md)), which carries the public roots a
-  Let's Encrypt cert chains to. That role still installs the Cloudflare Origin
-  CA roots from when Caddy served such a cert. They are unused now and are that
-  role's to remove.
+- **open-webui's internal hairpin sees the same certificate the public does.**
+  It resolves the public origin to the proxy CT (see
+  [`open-webui`](open-webui.md)), and Caddy presents its Let's Encrypt
+  certificate on that hop too, which Debian's CA bundle already trusts.
 
-- **DNS-01 with a wildcard cert is the intended follow-on, and is not built.**
-  It would mean one `*.example.com` + apex cert instead of one per hostname, and
-  no inbound `:80` requirement at all. It is a separate piece of work because
-  Caddy needs the `caddy-dns/cloudflare` module, which the Debian package does
-  not carry. That means an `xcaddy` build, which breaks the "Debian-built,
-  Debian-signed, version-pinned apt package" property above, plus a Cloudflare
-  API token scoped to DNS edits on the zone, in the vault.
+- **One certificate per hostname, by HTTP-01, is a choice with a known
+  alternative.** DNS-01 with a wildcard would mean one `*.example.com` + apex
+  cert and no inbound `:80` at all, at the price of an `xcaddy` build for the
+  DNS provider module (the Debian package carries none), which gives up the
+  "Debian-built, Debian-signed, version-pinned apt package" property above, plus
+  a DNS-edit API token for the zone in the vault. Not built; nothing today needs
+  it.
 
 - **Every hostname without a route goes to the PDS, because member handles
   are hostnames.** An app resolving `jacob.<domain>` with no `_atproto` TXT

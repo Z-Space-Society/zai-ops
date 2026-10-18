@@ -37,6 +37,7 @@ never claims a version.
 | ---- | ------ | --- |
 | Assert the caller passed a service and a version | `ansible.builtin.assert` | A missing var is a bug in the calling role, so this one raises. |
 | Write the manifest to Garage | `amazon.aws.s3_object` (`mode: put`, delegated to localhost) | `permission: []` and `encrypt: false` because Garage has no ACLs or SSE-S3 and the module turns both on by default. `overwrite: always` because every manifest carries a fresh timestamp. `failed_when: false`: a metadata write must never fail a service deploy. Skipped when `object-store` has no CTID. Under `--check` the module reports without writing. |
+| Hand the installed version to the deploy log | `ansible.builtin.set_stats` (`per_host`) | The [`deploy_log` callback](#deploy-records) puts the version in its record from here. Set whether or not the write landed: the version is what the CT got either way. |
 | Warn that the manifest was not written | `ansible.builtin.debug` | Makes a skipped or failed write visible in the run output without failing the play. Prints the module's `msg`, or its whole result (minus `invocation`) when there is none: Heron's first v0.7.0 run failed a write with no `msg`, and the warning said nothing useful. |
 
 ## Manifest keys
@@ -63,6 +64,32 @@ Each object is:
 ```json
 {"service": "redis", "version": "5:8.0.2-1", "zai_ops": "v0.6.3-2-g00db3dd", "provisioned_at": "2026-09-16T14:22:07Z"}
 ```
+
+## Deploy records
+
+Beside the manifests, the `deploy_log` callback
+([`ansible/callback_plugins/deploy_log.py`](../../ansible/callback_plugins/deploy_log.py),
+enabled in `ansible.cfg`) records every `provision.yml` run, per host, at the
+end of the run, whether it succeeded or failed:
+
+- `deploys/<host>/<YYYYMMDDTHHMMSSZ>.json`
+- `deploys/<host>/<YYYYMMDDTHHMMSSZ>.log`: one line per task (`ok`, `changed`,
+  `skipped`, `FAILED`, …) with the tail of a failed task's output
+
+```json
+{"service": "corliss", "result": "failed", "failed_task": "corliss : Sync the venv from the checkout's uv.lock",
+ "version": null, "zai_ops": "v0.12.0", "trigger": "timer",
+ "started_at": "2026-10-18T14:02:11Z", "finished_at": "2026-10-18T14:04:40Z",
+ "recap": {"ok": 41, "failures": 1, "unreachable": 0, "changed": 3, "skipped": 6, "rescued": 0, "ignored": 0}}
+```
+
+`<host>` is the inventory host (`corliss`, `proxy`, `object-store`), not the
+manifest key. `version` is null when the run failed before this role. `trigger`
+is `timer` for [`zai-autodeploy`](../decisions/0013-autodeploy-on-a-timer.md)
+and `cli` otherwise. A `--check` run writes nothing, and nor does a host whose
+every task was skipped. The callback templates the endpoint, bucket, writer key
+and revision from the definitions below, and a failed write is a warning. Corliss
+reads these with the reader key for its admin deploys page.
 
 ## Variables
 

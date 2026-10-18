@@ -60,6 +60,16 @@
   # legible without hiding the whole task.
   when: hostvars['object-store']['ctid'] is defined
 
+# The deploy_log callback records each provision run per service; this is how it
+# learns which version the run installed. Set whether or not the write above
+# landed: the version is what this CT got either way.
+- name: Hand the installed version to the deploy log
+  ansible.builtin.set_stats:
+    data:
+      deploy_log:
+        version: "{{ manifest_version | string | trim }}"
+    per_host: true
+
 # A PUT that went through always reports changed (overwrite: always), so
 # "not changed" is the failure signal once failed_when has masked `failed`.
 - name: Warn that the manifest was not written

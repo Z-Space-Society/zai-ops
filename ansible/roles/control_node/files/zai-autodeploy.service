@@ -1,0 +1,10 @@
+# Managed by the `control_node` role (symlinked into /etc/systemd/system). Static,
+# so it lives in git and edits are live on `git pull` + daemon-reload.
+[Unit]
+Description=ZAI autodeploy: provision apps set to latest when a new release appears
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/zai-ops/bin/zai-autodeploy run

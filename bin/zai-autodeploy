@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# zai-autodeploy — deploy each app set to `latest` when a newer release appears.
+#
+#   zai-autodeploy run    one pass (what zai-autodeploy.timer fires)
+#
+# An app moves only when its setting is `latest`, recorded or the role default
+# (ADR-0012). A pinned app is never touched, and an app with nothing deployed
+# yet is left for its first provision by hand. The deploy itself is the same
+# `provision.yml --limit <app>` an operator runs; the deploy_log callback
+# records it in the manifest bucket like any other run, with trigger `timer`.
+#
+# A failed deploy is remembered by tag in $state_dir, so the timer doesn't
+# retry the same release every tick. A newer tag, or a successful provision by
+# hand, moves it on.
+#
+# Runs on the control node, in place from git like zai-backup. See
+# docs/decisions/0013-autodeploy-on-a-timer.md.
+set -euo pipefail
+
+# cd to the ansible dir so ansible.cfg (inventory, vault, the callback) loads.
+cd "$(dirname "$(readlink -f "$0")")/../ansible"
+
+state_dir=/var/lib/zai-autodeploy
+
+run() {
+  # Someone else is driving Ansible (scn-config, a provision by hand). Two
+  # provisions at once can race on the same CT, so wait for the next tick.
+  if pgrep -f 'bin/ansible-playbook' >/dev/null; then
+    echo "zai-autodeploy: ansible-playbook is already running; next tick"
+    return 0
+  fi
+
+  mkdir -p "$state_dir"
+  local out rc=0 name settable set default latest deployed setting
+  out="$(mktemp)"
+  trap 'rm -f "$out"' RETURN
+
+  # One line per service: name|settable|recorded|default|latest|deployed, the
+  # same description scn-config's Versions screen reads.
+  if ! ANSIBLE_NOCOLOR=1 ansible-playbook set-version.yml -e version_action=show \
+      -e "out=$out" >/dev/null 2>&1; then
+    echo "zai-autodeploy: could not read the versions; run: ansible-playbook set-version.yml -e version_action=show" >&2
+    return 1
+  fi
+
+  while IFS='|' read -r name settable set default latest deployed; do
+    [ "$settable" = yes ] || continue
+    setting="$set"; [ "$setting" != - ] || setting="$default"
+    [ "$setting" = latest ] || continue
+    [ "$latest" != - ] || continue
+    [ "$deployed" != - ] || continue
+    if [ "$latest" = "$deployed" ]; then
+      rm -f "$state_dir/$name.failed"
+      continue
+    fi
+    if [ "$(cat "$state_dir/$name.failed" 2>/dev/null)" = "$latest" ]; then
+      echo "zai-autodeploy: $name $latest failed before; waiting for a newer tag or a provision by hand"
+      continue
+    fi
+
+    echo "zai-autodeploy: deploying $name $latest (was $deployed)"
+    if ZAI_DEPLOY_TRIGGER=timer ansible-playbook provision.yml --limit "$name" </dev/null; then
+      rm -f "$state_dir/$name.failed"
+    else
+      echo "$latest" >"$state_dir/$name.failed"
+      echo "zai-autodeploy: $name $latest failed; see /systems/ deploys or the journal" >&2
+      rc=1
+    fi
+  done <"$out"
+  return "$rc"
+}
+
+case "${1:-}" in
+  run) run ;;
+  *) echo "usage: zai-autodeploy run" >&2; exit 64 ;;
+esac

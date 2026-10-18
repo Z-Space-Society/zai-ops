@@ -1,0 +1,15 @@
+# Managed by the `control_node` role (symlinked into /etc/systemd/system).
+# Changing the interval needs `systemctl daemon-reload && systemctl restart
+# zai-autodeploy.timer` (a systemd constraint).
+#
+# No Persistent=true: it applies to OnCalendar= only. The boot run catches up.
+[Unit]
+Description=ZAI autodeploy, every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

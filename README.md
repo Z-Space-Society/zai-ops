@@ -230,7 +230,7 @@ architecture, networking, and a note for every role.
   - `inventory/` — committed blueprint (`hosts.yml`) + git-ignored runtime roster (`local.yml`)
   - `group_vars/all/` — shared vars (`main.yml`) and the encrypted `vault.yml`
   - `roles/`: one per service, each with a note in [`docs/roles/`](docs/roles/)
-- `bin/`: operator commands run on CT 100 (`scn-config`, `zai-backup`, `zai-litellm-key`)
+- `bin/`: operator commands run on CT 100 (`scn-config`, `zai-backup`, `zai-autodeploy`, `zai-litellm-key`)
 
 No application source lives here. The control app (ATProto-handle login, OIDC
 for Open WebUI) is [Z-Space-Society/Corliss](https://github.com/Z-Space-Society/Corliss);

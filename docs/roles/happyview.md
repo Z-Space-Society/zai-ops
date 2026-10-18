@@ -8,7 +8,7 @@ backfill from uploaded lexicon schemas, with state persisted in
 
 - **Source:** [`ansible/roles/happyview/`](../../ansible/roles/happyview/)
 - **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure play, `hosts: happyview`, **after** the postgres play)
-- **Target:** the `happyview` CT (CTID 121 by convention — apps tier, 120–129), over SSH, internal-only on `vmbr1`
+- **Target:** the `happyview` CT (CTID 111 by convention — platform tier, 110–119), over SSH, internal-only on `vmbr1`
 
 ## Purpose
 

@@ -251,18 +251,16 @@
 
 # --- Loop the public origin back to the Caddy edge --------------------------------
 # Server-to-server OIDC calls (discovery, token exchange, and the JWKS fetch that
-# validates a logout_token) must NOT leave the cluster. Cloudflare's Browser
-# Integrity Check 403s known non-browser User-Agents, and PyJWT's PyJWKClient —
-# the one client on the back-channel-logout path — fetches with bare urllib
-# (`Python-urllib/3.x`), so it is refused with `error code: 1010` where authlib's
-# httpx sails through. That is why login worked while logout validation returned
-# 400 forever. Resolving the apex to the proxy CT fixes the JWKS fetch and, as a
-# bonus, takes the public edge out of the login token exchange too — the same
-# "service-to-service stays internal" rule MEMBERSHIP_REGISTRY_URL already follows.
+# validates a logout_token) stay inside the cluster, the same rule
+# MEMBERSHIP_REGISTRY_URL follows: a call between two CTs on one bridge must not
+# depend on public DNS and the LAN, and the token exchange has no business
+# crossing them. The JWKS fetch is the revocation path, so it has to work when
+# little else does.
 #
 # The issuer must REMAIN the public origin (the RP compares the token's `iss`), so
-# this is a resolution change only: same URL, internal route. Depends on the
-# ca-certificates package installed above.
+# this is a resolution change only: same URL, internal route. Caddy serves its
+# Let's Encrypt certificate on the internal hop too, which Debian's CA bundle
+# (installed above) already trusts.
 
 - name: Resolve the cluster domain to the proxy CT from this container
   # The proxy CT's IP is derived from its CTID via hostvars, never hardcoded.
@@ -279,20 +277,16 @@
     mode: "0644"
   notify: restart open-webui
 
-- name: Trust the Cloudflare Origin CA roots
-  # Caddy serves a Cloudflare Origin CA cert, which is trusted ONLY by Cloudflare
-  # (docs/roles/proxy.md: origin TLS, no ACME) — so the moment the request stops
-  # going through Cloudflare, nothing here trusts it. Both roots are installed
-  # because either may have signed the deployed origin cert, and carrying the
-  # unused one costs nothing. They are committed to the repo rather than fetched:
-  # a public, static PEM is exactly the kind of artifact the blueprint should
-  # carry itself. Valid until 2029-08-15.
-  ansible.builtin.copy:
-    src: "{{ item }}"
-    dest: /usr/local/share/ca-certificates/{{ item }}
-    owner: root
-    group: root
-    mode: "0644"
+# What the removed origin_ca TLS mode left behind here: the Cloudflare Origin CA
+# roots this role installed so the hairpin above could trust Caddy's Origin CA
+# cert. Nothing is signed by them any more, and an unused root in the trust
+# store is a root that could still vouch for a certificate, so a CT that still
+# has them is cleaned up rather than left until someone notices. Same shape as
+# the proxy role removing its Origin CA cert and key.
+- name: Remove the Cloudflare Origin CA roots left by the removed origin_ca mode
+  ansible.builtin.file:
+    path: /usr/local/share/ca-certificates/{{ item }}
+    state: absent
   loop:
     - cloudflare-origin-ca-rsa.crt
     - cloudflare-origin-ca-ecc.crt

@@ -81,8 +81,8 @@ caddy_proxy_hosts:
   # through reverse_proxy by default). Serves XRPC + OAuth 2.1 +
   # /.well-known/did.json (synthesised from PDS_SERVICE_DID). This entry
   # forwards the whole hostname, so /admin and com.atproto.admin.* answer at
-  # the edge behind the admin password's basic auth. TODO(decision): block
-  # them here or accept that; see "Admin surface" in docs/roles/pds.md.
+  # the edge behind the admin password's basic auth. Whether to narrow that
+  # here is part of zai-ops#44; see "Admin surface" in docs/roles/pds.md.
   - { domain: "pds.{{ cluster_domain }}", service: pds, port: 3000 }
   # Corliss owns the APEX (ADR-0006), not a subdomain: its OIDC issuer is the
   # bare origin, and discovery has to sit at <issuer>/.well-known/... .

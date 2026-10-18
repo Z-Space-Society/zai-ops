@@ -4,7 +4,8 @@
     daemon_reload: true
 
 # Rebuilds /etc/ssl/certs/ca-certificates.crt — the merged bundle the unit points
-# every HTTP client at via SSL_CERT_FILE. Defined BEFORE the restart handler on
+# every HTTP client at via SSL_CERT_FILE — after a root is removed from
+# /usr/local/share/ca-certificates. Defined BEFORE the restart handler on
 # purpose: handlers run in definition order, not notification order, so the bundle
 # is rebuilt before the daemon restarts and re-reads it.
 - name: update ca trust

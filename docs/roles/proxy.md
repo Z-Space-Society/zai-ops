@@ -11,9 +11,9 @@ runs Garage.)
 
 ## Purpose
 
-Caddy is a single Go binary in Debian's own repos, so this role is one
-`apt install` — no third-party repo, and none of the Debian-13 `gpgv`/`sqv` apt
-workaround a third-party repo would need. Its config is a declarative `Caddyfile`
+Caddy is a single Go binary from Debian's own backports suite, so this role is
+one `apt install` — no third-party repo, and none of the Debian-13 `gpgv`/`sqv`
+apt workaround a third-party repo would need. Its config is a declarative `Caddyfile`
 rendered from `caddy_proxy_hosts`, so **proxy routes live in git**, not in a
 web-UI database. The CT therefore holds no unreproducible state: config is
 committed, and the TLS certs are reissued by Caddy on demand. Nothing for the
@@ -137,17 +137,25 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 | `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code, skip_if_cookie }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). `skip_if_cookie` names a cookie whose presence lets the request fall through to the real app instead of redirecting — see [Notes](#notes) below, it's load-bearing for open-webui, not optional. An entry without redirects may carry `block_paths: [<path matcher>, …]`, each rendered as `respond <path> 404` ahead of the `reverse_proxy`, for paths the upstream serves but the edge must not publish (the sync relay's `/internal/*`). |
 | `caddy_catch_all` | `{ service: pds, port: 3000, ask: /_tls-check }` | Where a hostname with no route goes: member handles, to the PDS, on the cluster domain or a separate handle domain (`pds_handle_domain`) alike. In `acme` mode it renders a hostless `https://` site with `tls { on_demand }` and the global `on_demand_tls { ask http://<upstream>:<port><ask> }`; in `none` mode, the `:80` site's fallback. Skipped until the service has a CTID; `{}` disables it. Hostless on purpose, never `*.<domain>`: see [Notes](#notes). |
 
-The committed default carries one live route, with the **domain derived from
-`cluster_domain`** (set per cluster with `scn-config`, Cluster Settings) so the route holds no
-this-cluster facts — the same number-free principle the inventory follows. The
-role asserts `cluster_domain` is set when routes exist, failing with `run:
-scn-config nonint set-domain <domain>` instead of a raw undefined-variable error.
+Every route's **domain derives from `cluster_domain`** (set per cluster with
+`scn-config`, Cluster Settings) so the committed routes hold no this-cluster
+facts — the same number-free principle the inventory follows. The role asserts
+`cluster_domain` is set when routes exist, failing with `run: scn-config nonint
+set-domain <domain>` instead of a raw undefined-variable error.
 
-```yaml
-caddy_proxy_hosts:
-  - { domain: "api.{{ cluster_domain }}", service: litellm, port: 4000 }
-#  - { domain: "owui.{{ cluster_domain }}", service: open-webui, port: 8080 }
-```
+The committed routes, and what each publishes of its upstream:
+
+| Hostname | Service | Everything, or less |
+| -------- | ------- | ------------------- |
+| apex | `corliss` | everything |
+| `api.` | `litellm` | everything, `/ui` included (the admin panel, behind the master key; see [zai-ops#44](https://github.com/Z-Space-Society/zai-ops/issues/44)) |
+| `owui.` | `open-webui` | everything; `/auth*` is redirected to the OIDC login unless the session cookie is present |
+| `view.` | `happyview` | everything |
+| `chat.` | `scn-chat` | everything |
+| `pds.` | `pds` | everything, `/admin` and `com.atproto.admin.*` included (behind basic auth; see [zai-ops#44](https://github.com/Z-Space-Society/zai-ops/issues/44)) |
+| `sync.` | `sync-relay` | everything but `/internal/*`, answered 404 here |
+| `mcp.` | `sync-relay` | everything |
+| any other name | `pds` | the catch-all for member handles; a certificate only for names the PDS vouches for |
 
 ## Secrets
 
@@ -227,20 +235,18 @@ If issuance fails, check public `:80` first (see
   Iterate destructively in `none` mode (`scn-config nonint set-tls none`), then switch with
   `scn-config nonint set-tls acme`.
 
-- **open-webui's internal hairpin works under `acme`.** It resolves the public
-  origin to the proxy CT and points `SSL_CERT_FILE` at the **merged** system
-  bundle (see [`open-webui`](open-webui.md)), which carries the public roots a
-  Let's Encrypt cert chains to. That role still installs the Cloudflare Origin
-  CA roots from when Caddy served such a cert. They are unused now and are that
-  role's to remove.
+- **open-webui's internal hairpin sees the same certificate the public does.**
+  It resolves the public origin to the proxy CT (see
+  [`open-webui`](open-webui.md)), and Caddy presents its Let's Encrypt
+  certificate on that hop too, which Debian's CA bundle already trusts.
 
-- **DNS-01 with a wildcard cert is the intended follow-on, and is not built.**
-  It would mean one `*.example.com` + apex cert instead of one per hostname, and
-  no inbound `:80` requirement at all. It is a separate piece of work because
-  Caddy needs the `caddy-dns/cloudflare` module, which the Debian package does
-  not carry. That means an `xcaddy` build, which breaks the "Debian-built,
-  Debian-signed, version-pinned apt package" property above, plus a Cloudflare
-  API token scoped to DNS edits on the zone, in the vault.
+- **One certificate per hostname, by HTTP-01, is a choice with a known
+  alternative.** DNS-01 with a wildcard would mean one `*.example.com` + apex
+  cert and no inbound `:80` at all, at the price of an `xcaddy` build for the
+  DNS provider module (the Debian package carries none), which gives up the
+  "Debian-built, Debian-signed, version-pinned apt package" property above, plus
+  a DNS-edit API token for the zone in the vault. Not built; nothing today needs
+  it.
 
 - **Every hostname without a route goes to the PDS, because member handles
   are hostnames.** An app resolving `jacob.<domain>` with no `_atproto` TXT

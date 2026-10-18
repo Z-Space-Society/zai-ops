@@ -12,9 +12,11 @@
 # reaches GitHub over the host's NAT. corliss_version is a TAG or `latest`,
 # never a branch (ADR-0012): `git pull` on CT 100 updates the blueprint, but the
 # app's version is corliss_version, and a cluster can record its own with
-# `scn-config nonint set-version corliss <tag>`. This default stays a pinned
-# tag because Corliss releases often need new env keys rendered here first. A
-# branch would make replays silently pick up whatever moved upstream in between.
+# `scn-config nonint set-version corliss <tag>`. This default is `latest`, so
+# zai-autodeploy takes each Corliss release (ADR-0013). A release that needs new
+# env keys rendered here has to land in zai-ops first; otherwise its deploy
+# fails, the deploy record names the task, and the timer waits for the next tag.
+# Never a branch: replays would silently pick up whatever moved upstream.
 # A tag (not a bare SHA) also keeps `git describe --tags` in the CT's checkout
 # reporting the release the CT is actually running.
 #
@@ -394,6 +396,8 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # while a rotation is under way, and migration 0008, which records the key each
 # atproto session started on so it keeps refreshing with that key.
 #
+# Release notes, newest first, for what each one needs from this role.
+#
 # v1.4.3 makes the open lock on /manage/ a button that locks: it discards the
 # stored service-account session so Authenticate can run again, which resolves
 # the DID afresh. Needed when the service account moves PDS, since the stored
@@ -406,7 +410,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # scn-chat has a CTID: SCN_CHAT_URL (corliss_chat_url, the internal probe
 # address) and CHAT_URL (corliss_chat_public_url, the public origin). No
 # migration.
-corliss_version: v1.4.3
+corliss_version: latest
 
 # Port gunicorn binds. 8000 matches the app's own local-dev convention
 # (PUBLIC_BASE_URL=http://localhost:8000 in .env.example). Bind 0.0.0.0 (not

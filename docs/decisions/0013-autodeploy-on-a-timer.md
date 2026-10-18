@@ -1,6 +1,7 @@
 # ADR-0013: Apps on `latest` deploy on a timer, and every provision records itself
 
-> Status: **Accepted** (2026-10-18). Settles ADR-0012 point 4 (zai-ops#33).
+> Status: **Accepted** (2026-10-18). Settles ADR-0012 point 4 (zai-ops#33) and
+> revises its point 3: Corliss's default is now `latest`.
 
 ## Context
 
@@ -44,20 +45,25 @@ trigger that reaches in from GitHub ran into one of these problems:
    and the trigger (`timer` or `cli`). Like the manifest write, a record that
    can't be written is a warning, never a failed run.
 
-5. **Corliss reads the records; it can't write them.** Corliss's key on the
+5. **Both apps default to `latest`.** scn-chat already did. Corliss moves from
+   a pinned tag to `latest`, so its releases deploy on the timer as well.
+
+6. **Corliss reads the records; it can't write them.** Corliss's key on the
    manifest bucket is read-only, so what it shows on its admin deploys page is
    what CT 100 wrote.
 
 ## Consequences
 
-- **scn-chat's role default is `latest`,** so on any cluster that hasn't pinned
-  it, every new scn-chat release deploys within a tick once this lands. That
-  includes Heron. Pin it (`scn-config nonint set-version scn-chat vX.Y.Z`) to
-  opt out.
-- Corliss's role default stays a pinned tag (ADR-0012). A cluster that sets it
-  to `latest` takes each release automatically, including one whose new role
-  wiring hasn't landed in zai-ops yet. That deploy fails, the record shows the
-  task, and the timer waits for the next tag.
+- **Both role defaults are `latest`,** so on any cluster that hasn't pinned
+  them, every new scn-chat or Corliss release deploys within a tick once this
+  lands. That includes Heron. Pin one (`scn-config nonint set-version <app>
+  vX.Y.Z`) to opt out.
+- **A Corliss release that needs new role wiring has to follow its zai-ops
+  change, not lead it.** ADR-0012 kept Corliss pinned for exactly this case.
+  Here, the role change is merged and deployed first, then the tag is pushed.
+  Tagged out of order, the deploy fails, the record names the task, and the
+  timer waits for the next tag while the previous release keeps serving if the
+  failure came before the restart.
 - The timer skips a tick while any `ansible-playbook` runs on CT 100, so it
   never races an operator.
 - A `--check` run writes no record, and nor does a host whose every task was

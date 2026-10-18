@@ -234,9 +234,9 @@ architecture, networking, and a note for every role.
 
 No application source lives here. The control app (ATProto-handle login, OIDC
 for Open WebUI) is [Z-Space-Society/Corliss](https://github.com/Z-Space-Society/Corliss);
-the `corliss` role clones it onto its CT at the tag pinned in
-[`defaults/main.yml`](ansible/roles/corliss/defaults/main.yml), like every other
-role installs a pinned release. See
+the `corliss` role clones it onto its CT at a release tag, `latest` by default
+in [`defaults/main.yml`](ansible/roles/corliss/defaults/main.yml), which the
+autodeploy timer follows. See
 [ADR-0006](docs/decisions/0006-corliss-standalone-apex.md).
 
 ## Contributing

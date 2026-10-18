@@ -53,6 +53,22 @@
       - corliss
       - open-webui
       - scn-chat
+    # What each non-settable service is pinned to, for show: the role whose
+    # defaults hold the pin, and the variable. The roles name their pins
+    # differently (a release tag, an apt version, a Postgres major), so this
+    # table names them rather than the roles sharing one variable name, which
+    # would collide in any play that applies two roles. Redis has no pin: it
+    # installs Debian's redis-server as the suite ships it.
+    role_pins:
+      postgres: { role: postgres, var: postgres_version }
+      redis: { role: redis }
+      object-store: { role: object_store, var: garage_version }
+      proxy: { role: proxy, var: caddy_apt_version }
+      sync-relay: { role: sync_relay, var: sync_relay_version }
+      litellm: { role: litellm, var: litellm_version }
+      happyview: { role: happyview, var: happyview_version }
+      pds: { role: pds, var: pds_version }
+      open-webui: { role: open-webui, var: openwebui_version }
     tag_regex: '^v[0-9]+\.[0-9]+\.[0-9]+$'
   tasks:
     - name: Require a known action
@@ -142,7 +158,8 @@
           when: recorded != wanted
 
     # One line per service: name|settable|recorded|default|latest|deployed, "-"
-    # where there is nothing to show. Written to `out` for scn-config to read
+    # where there is nothing to show. For a non-settable service, `default` is
+    # its role's pin (role_pins). Written to `out` for scn-config to read
     # (the hand-off set-scn-chat-key.yml uses), or printed.
     - name: Describe every service's versions
       when: version_action == 'show'
@@ -157,6 +174,20 @@
           changed_when: false
           failed_when: false
           register: latest_tags
+
+        # Read as a file rather than loaded as vars: only the one pin is wanted,
+        # and the rest of a role's defaults template against hosts this play
+        # doesn't touch.
+        - name: Read each pinned role's defaults
+          ansible.builtin.set_fact:
+            pins: >-
+              {{ pins | default({}) | combine({item.key: (
+                   (lookup('file', playbook_dir ~ '/roles/' ~ item.value.role ~ '/defaults/main.yml')
+                    | from_yaml)[item.value.var] | string)
+                   if item.value.var is defined else '-'}) }}
+          loop: "{{ role_pins | dict2items }}"
+          loop_control:
+            label: "{{ item.key }}"
 
         - name: Load the manifest role's defaults (Garage endpoint and region)
           ansible.builtin.include_vars:
@@ -204,7 +235,7 @@
               {{ name }}|yes|{{ all_vars.get(entry.var, '-') }}|{{ lookup('vars', 'defaults_' ~ entry.role)[entry.var] }}|{{ latest[name] }}|{{ (deployed | default({})).get(name, '-') }}
               {% endfor %}
               {% for name in manifest_services if name not in version_apps %}
-              {{ name }}|no|-|-|-|{{ (deployed | default({})).get(name, '-') }}
+              {{ name }}|no|-|{{ pins.get(name, '-') }}|-|{{ (deployed | default({})).get(name, '-') }}
               {% endfor %}
           block:
             - name: Write the description

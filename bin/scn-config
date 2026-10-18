@@ -815,26 +815,31 @@ load_versions() {
   rm -f "$out"
 }
 
-# version_setting <index>: what the app deploys, as "latest" or "v0.2.2", with
-# "(default)" when nothing is recorded and the role default applies.
+# version_setting <index>: what the app deploys, "latest" or "v0.2.2": the
+# recorded value, else the role default. Which of the two it is matters only
+# when changing it, and the Versions menu says so there ("Back to the role
+# default").
 version_setting() {
   if [ "${VER_SET[$1]}" != - ]; then
     echo "${VER_SET[$1]}"
   else
-    echo "${VER_DEFAULT[$1]} (default)"
+    echo "${VER_DEFAULT[$1]}"
   fi
 }
 
 versions_table() {
   local i
-  printf '  %-12s %-18s %-12s %s\n' "Service" "Set to" "Deployed" "Latest"
-  printf '  %-12s %-18s %-12s %s\n' "-------" "------" "--------" "------"
+  # Deployed goes last: a package version (5:8.0.2-3+deb13u2) runs long, and a
+  # ragged last column misaligns nothing.
+  printf '  %-14s %-18s %-12s %s\n' "Service" "Set to" "Latest" "Deployed"
+  printf '  %-14s %-18s %-12s %s\n' "-------" "------" "------" "--------"
   for i in "${!VER_NAME[@]}"; do
     if [ "${VER_SETTABLE[$i]}" = yes ]; then
-      printf '  %-12s %-18s %-12s %s\n' "${VER_NAME[$i]}" "$(version_setting "$i")" \
-        "${VER_DEPLOYED[$i]}" "${VER_LATEST[$i]}"
+      printf '  %-14s %-18s %-12s %s\n' "${VER_NAME[$i]}" "$(version_setting "$i")" \
+        "${VER_LATEST[$i]}" "${VER_DEPLOYED[$i]}"
     else
-      printf '  %-12s %-18s %s\n' "${VER_NAME[$i]}" "(role)" "${VER_DEPLOYED[$i]}"
+      # Not settable: the role's own pin, "-" for one that pins nothing.
+      printf '  %-14s %-18s %-12s %s\n' "${VER_NAME[$i]}" "${VER_DEFAULT[$i]}" "" "${VER_DEPLOYED[$i]}"
     fi
   done
 }

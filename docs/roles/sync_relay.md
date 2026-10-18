@@ -131,21 +131,34 @@ storage works. Since Corliss v1.2.1 the row no longer carries a note saying so.
 
 ## Storage
 
-One table, created by the binary at startup:
+Three tables, created by the binary at startup:
 
 ```sql
 CREATE TABLE storage (key TEXT PRIMARY KEY, value BYTEA NOT NULL);
 CREATE INDEX storage_key_prefix ON storage (key text_pattern_ops);
+
+CREATE TABLE vaults (root_doc_id TEXT PRIMARY KEY, owner_did TEXT NOT NULL,
+  name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_change_at TIMESTAMPTZ);
+CREATE UNIQUE INDEX vaults_owner_name ON vaults (owner_did, lower(name));
+
+CREATE TABLE doc_creators (doc_id TEXT PRIMARY KEY, creator_did TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 ```
 
-`text_pattern_ops` is load-bearing: the default opclass follows the database
-collation and will not serve a `LIKE 'prefix%'` scan, which would quietly turn
-every range read into a full scan of a table that only grows.
+`storage` holds the documents, `vaults` names each vault's owner and root
+folder, and `doc_creators` records who first sent each document, which is what
+decides ownership. `text_pattern_ops` is load-bearing: the default opclass
+follows the database collation and will not serve a `LIKE 'prefix%'` scan,
+which would quietly turn every range read into a full scan of a table that
+only grows.
 
 **This CT's data is not reproducible.** Every other service CT here can be
 rebuilt from Postgres plus the blueprint; this one *is* the thing in Postgres,
 and the change table grows steadily because Automerge retains the full change
-graph. It belongs in the Tier-2 backup story.
+graph. Its database is in the postgres Tier-2 backup (the nightly
+`pg_dumpall`, see [Backups](../README.md#backups)). Nothing bounds a member's
+share of it: [scn-sync-relay#1](https://github.com/Z-Space-Society/scn-sync-relay/issues/1).
 
 ## Verify
 
@@ -164,32 +177,22 @@ From the control node:
 psql -h 10.1.1.102 -U scn_sync_relay -c 'select count(*) from storage;'
 ```
 
-**The protocol test.** This was Phase A's bring-up check, run before the relay
-had a route or a verifier. With Phase B every connection needs a Corliss access
-token, so the everyday check is a member signing in from the SCN Sync plugin and
-creating a vault on Corliss's Notes page. The tunnel below still reaches the
-relay directly when a test needs to bypass the edge, and a client then has to
-present a token:
+**Reaching the relay without the edge.** Every connection needs a Corliss
+access token, so the everyday check is a member signing in from the SCN Sync
+plugin and creating a vault on Corliss's Notes page. To bypass the edge:
 
 ```sh
 # on your laptop; leave running
 ssh -L 7030:10.1.1.113:7030 jsayles@192.168.6.99
+curl http://localhost:7030/      # 400 "Connection header did not include 'upgrade'"
 ```
 
-Then point an automerge-repo client at `ws://localhost:7030` — note **no path**;
-the client connects to exactly the URL it is given. The tunnel is authenticated by
-SSH and dies when you close it, which is the property a temporary vhost would not
-have. Then:
-
-1. Create a document — `storage` gains rows.
-2. Edit from a second browser — both converge.
-3. `systemctl restart scn-sync-relay` — documents survive. This is what proves
-   Postgres storage rather than memory.
-4. Reboot the CT — same.
-
-In Phase A, step 1 failing would have meant samod's classic automerge-repo
-protocol did not interoperate with the client's prerelease. It passed, which is
-what Phase B was built on.
+The `400` says the root path is served. A `404` there means a stock client
+fails silently: `WebSocketClientAdapter` connects to exactly the URL it is
+given and appends no path. Then point an automerge-repo client at
+`ws://localhost:7030`, no path, with a token. The tunnel is authenticated by
+SSH and dies when you close it, which is the property a temporary vhost would
+not have.
 
 ## Notes
 

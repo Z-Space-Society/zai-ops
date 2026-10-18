@@ -90,7 +90,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/open-webui/defaults/main.ym
 | `openwebui_uv_version` / `openwebui_uv_sha256` | *(pinned)* | The uv binary + its tarball checksum. Bump together. |
 | `openwebui_port` / `openwebui_host` | `8080` / `0.0.0.0` | Listen socket; `0.0.0.0` so Caddy can reach it from the proxy CT. |
 | `openwebui_home` / `openwebui_venv` / `openwebui_python_install_dir` | `/opt/open-webui[/venv,/python]` | Self-contained venv + the uv-managed interpreter, all under the chowned tree. |
-| `openwebui_data_dir` / `openwebui_hf_home` | `/opt/open-webui/data[/hf-cache]` | The one runtime-writable tree (vector db, uploads, caches). |
+| `openwebui_data_dir` / `openwebui_hf_home` | `/opt/open-webui/data[/hf-cache]` | The one runtime-writable tree (vector db, uploads, caches). **Not backed up**: chats are in Postgres, this tree is not in any tier ([zai-ops#53](https://github.com/Z-Space-Society/zai-ops/issues/53)). |
 | `openwebui_env_file` | `/etc/open-webui/open-webui.env` | The `0600` secret env (Open WebUI has no config file). |
 | `openwebui_db_name` / `openwebui_db_user` | `openwebui` | The Postgres database + role this role creates. |
 | `openwebui_litellm_port` | `4000` | litellm's port — a local default (not read from litellm's role defaults); keep in sync with `litellm_port`. |

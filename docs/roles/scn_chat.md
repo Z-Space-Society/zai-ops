@@ -30,12 +30,13 @@ Where a member's chats live is decided at first sign-in:
 
 > [!warning] Not backed up
 > The sqlite database and `DATA_DIR/blobs` live on the CT rootfs, and
-> [`zai-backup`](backup.md) does not cover them (spec 0005 Q7). Losing the CT
-> loses the chats of every member whose PDS lacks spaces, and every encrypted
-> API key stored in the app, including the shared LiteLLM key and the
-> `scn-member-registry` token, which an admin then enters again. scn-chat supports Postgres
-> (`DATABASE_URL=postgres://…`); moving to it is how this would join the
-> `pg_dumpall` tier.
+> [`zai-backup`](backup.md) does not cover them. That is every member's chats
+> whose PDS lacks spaces, and everything the app keeps for itself: the roles,
+> the invite-only access mode, every plugin secret (the registry token, the
+> shared LiteLLM key), and the cron timer's API key. Losing the CT brings the
+> app back open to anyone with an atproto account, with no models. Moving the
+> database to Postgres and the blobs into the Tier-2 backup is
+> [zai-ops#52](https://github.com/Z-Space-Society/zai-ops/issues/52).
 
 ## Tasks
 
@@ -130,7 +131,7 @@ ansible-playbook provision.yml --limit scn-chat
 - **Only SCN members can create an account.** The `scn-member-registry` plugin (Admin > Plugins, holding a registry members token) gives SCN members the `scn-member` role, and registration is `invite` with `scn-member` as the invite role. Setup steps are in scn-chat's `plugins/scn-member-registry/README.md`. A fresh deploy starts `open` until an admin does this.
 - **A fresh deploy can't chat yet.** Nobody can chat until an admin enables a provider plugin and configures a model, or members add their own keys.
 - **Admin models run on one shared LiteLLM key**, limited to the `scn-member` role. It was created by hand in the LiteLLM admin UI and is entered in scn-chat's provider settings; see [`litellm`](litellm.md#four-key-management-paths-kept-deliberately-separate).
-- **`ALLOW_PRIVATE_NETWORKS=false` stays.** The CT sits on vmbr1 beside postgres, redis and litellm, and the setting keeps the app and its web-fetch and search plugins off 10.1.1.0/24.
+- **`ALLOW_PRIVATE_NETWORKS=false` stays.** The CT sits on vmbr1 beside postgres, redis and litellm. The flag governs DID and PDS resolution, the plugins' own fetches (web search, web fetch, the registry) and members' own model endpoints, and keeps all of them off 10.1.1.0/24. It does not govern the admin's configured provider, which the app calls directly: the shared LiteLLM key belongs at `http://10.1.1.112:4000` in the admin area, one hop over vmbr1, not at the public `api.` origin.
 - **Upstream is experimental.** The `@atproto/*` packages are spaces-alpha releases, pinned exactly by the tag. On `latest`, the next provision deploys whatever was tagged last; pin a tag to read the changes first.
 - **Corliss links it in the nav** as **Chat**, between Notes and API, from v1.4.2 (`CHAT_URL`, rendered from `corliss_chat_public_url`). It is members-only there, like its neighbours, and scn-chat's own sign-in is limited to members too.
 - **Staging with webhook auto-deploy** is planned, not in this round. [zai-ops#33](https://github.com/Z-Space-Society/zai-ops/issues/33) holds the work, starting from #26's first version.

@@ -1,6 +1,14 @@
 # ADR-0007 — An Automerge sync relay, with Spaces as the membership boundary
 
 > Status: **Accepted** (2026-08-30). Adds a role; supersedes nothing.
+>
+> **What shipped (2026-10-15).** Decisions 1 through 5 and 9 hold as written.
+> Decision 6 (ATProto service auth) and decision 7 (reachability from a Space's
+> manifest) were not built: Phase B authenticates with Corliss access tokens
+> and authorizes from each member's own vaults, with no Space in the path. See
+> [`docs/roles/sync_relay.md`](../roles/sync_relay.md) and the public-client
+> half of [`docs/roles/corliss.md`](../roles/corliss.md). The vault's
+> ADR-005 and ADR-006 carry the same note.
 
 ## Context
 

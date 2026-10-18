@@ -85,7 +85,7 @@ nobody gains an entitlement the registry never granted.
 | Confirm the base interpreter is under `/opt/corliss` | `command` → `python -c 'sys._base_executable'` (`failed_when`) | Guards `UV_PYTHON_INSTALL_DIR`: an interpreter outside `corliss_home` is invisible to the daemon under `ProtectHome=true`. Fail loud at provision time, not as a cryptic unit-start failure. Same guard as `open-webui`. Also `check_mode: false`: it is read-only, so `--check` runs the real guard. |
 | Collect static assets | `command` → `manage.py collectstatic --noinput` | Populates `STATIC_ROOT` (whitenoise, installed above, serves it straight out of gunicorn — no separate nginx-for-statics box) with the login/account pages' `base.css` + vendored fonts. No DB/secrets needed, just a loadable settings module. Handed `PUBLIC_BASE_URL`, because Corliss picks its theme from that host (a folder named for `cluster_domain` in the checkout's `themes/`) and this task never reads the env file. Adds `--clear` when the clone changed, so an override dropped from a theme is not left behind. Notifies restart. |
 | Render the two signing keys | `copy` (`content:`, `0640` root:corliss, `no_log`) | EC P-256 (atproto DPoP/ES256) + RSA (OIDC id_token/RS256) PEMs from the cached `group_vars` secrets — see Secrets. Group-readable: Django reads these paths itself. Notifies restart. |
-| Render the secret env file | `template` (`0600` root, `no_log`) | `DATABASE_URL`, `SECRET_KEY`, key paths, `PUBLIC_BASE_URL`, `OIDC_CLIENT_ID/SECRET`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MEMBERSHIP_PUSH_TOKEN`, the outbound links (`OPENWEBUI_URL`, `CHAT_URL`, `API_URL`, `MANAGE_URL`), `SCN_SERVICE_DID`, the three `MEMBERSHIP_REGISTRY_*` reconciliation settings, and `OIDC_BACKCHANNEL_LOGOUT_URI`. Read by systemd via `EnvironmentFile`. Notifies restart. |
+| Render the secret env file | `template` (`0600` root, `no_log`) | `DATABASE_URL`, `SECRET_KEY`, key paths, `PUBLIC_BASE_URL`, `OIDC_CLIENT_ID/SECRET`, `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `MEMBERSHIP_PUSH_TOKEN`, the outbound links (`OPENWEBUI_URL`, `CHAT_URL`, `API_URL`), `SCN_SERVICE_DID`, the three `MEMBERSHIP_REGISTRY_*` reconciliation settings, and `OIDC_BACKCHANNEL_LOGOUT_URI`. Read by systemd via `EnvironmentFile`. Notifies restart. |
 | Apply database migrations | `command` → `manage.py migrate --noinput` (`no_log`) | Provision-time, before the daemon ever starts — same principle as litellm's `prisma migrate deploy`. Idempotent (`changed_when` on "No migrations to apply"). Notifies restart. |
 | Ensure the break-glass local admin exists | `command` → `manage.py ensure_admin` (`no_log`) | Idempotently creates a local username/password superuser (`admin`, no ATProto identity) as a way in if OIDC/ATProto login is ever broken. Only sets the password at creation (never rotates it on re-runs); re-asserts `is_staff`/`is_superuser` on every run so provisioning re-runs heal it if those flags ever get flipped off. See [Notes](#notes). |
 | Chown the home to `corliss` | `ansible.builtin.file` (`recurse`) | clone/sync/migrate ran as root; the daemon reads the venv, the uv-managed interpreter and the cloned source. Runs *after* install/migrate, so it covers the interpreter too. |
@@ -128,7 +128,6 @@ Defined in [`defaults/main.yml`](../../ansible/roles/corliss/defaults/main.yml):
 | `corliss_openwebui_url` | `https://owui.{{ cluster_domain }}` | Drives the nav's Tools menu "Open WebUI" entry and the home page block — same `cluster_domain` derivation as `corliss_url`, different subdomain. |
 | `corliss_chat_public_url` | `https://chat.{{ cluster_domain }}`, or blank | Renders `CHAT_URL`, the nav's **Chat** entry for members, between Notes and API. scn-chat's public origin, not `corliss_chat_url`. **Guarded** on the `scn-chat` CTID, so a cluster without scn-chat shows no entry. Needs `corliss_version` v1.4.2 or later. |
 | `corliss_api_url` | `https://api.{{ cluster_domain }}` | Shown on `/api/` as the base URL for a **member** to point their client at — the same origin the `litellm` route serves. Not what Corliss itself calls; that is `corliss_litellm_url` below, and conflating them breaks key issuing silently. |
-| `corliss_manage_url` | `""` | Outbound link to a *separate* admin console, offered on `/manage/` as a fallback for an admin whose sign-in picked up no registry session. **Blank on purpose, unlike the other links here**: the SPA it pointed at was deleted with the `manage_console` role, so `manage.<domain>` resolves to nothing and a derived value would render a live-looking link to a dead origin. Corliss treats blank as "no console" and drops the offer; the knob remains for a cluster that stands a second admin surface up elsewhere. |
 | `corliss_happyview_url` | `https://view.{{ cluster_domain }}` | The Manage menu's "HappyView Admin" link (admins only). A browser href, so the public origin — **not** `corliss_membership_registry_url`, which is the internal address Corliss calls. |
 | `corliss_proxmox_url` | `https://{{ proxmox_api_host }}:8006` | The Manage menu's "Proxmox Admin" link. Derived from the host's LAN address in the **vault** (recorded by `bootstrap.sh`), not from `cluster_domain`: the Proxmox UI runs on the host, not a CT, so it is not a `caddy_proxy_hosts` route and has no subdomain. The one admin link that points at the LAN rather than through the edge — expect a self-signed-cert warning, and no reachability from outside. Blank hides it. |
 | `corliss_litellm_url` | `http://{{ hostvars['litellm'].ansible_host }}:4000` | Where **Corliss** reaches LiteLLM to provision members and mint their keys. Deliberately the **internal** address, not `corliss_api_url` — see below. |
@@ -417,14 +416,15 @@ curl -s https://<domain>/clients/scn-obsidian.json | grep -o '"redirect_uris": \
   the DID document's `alsoKnownAs`; a DID is taken as given. The account never
   gets a password; it only ever authenticates via ATProto OAuth, unlike the
   break-glass `admin` account above.
-- **`/logout` ends this device's corliss session only.** Now reachable from
-  the Account page's "Sign out" button (a plain GET link — no CSRF risk beyond
-  forcing a re-login), but still no discovery-doc `end_session_endpoint` or
-  relying-party integration (a member logging out of Open WebUI doesn't end
-  their corliss session — that gap is what motivated adding this route at
-  all: OIDC relying parties ending their own local session leaves corliss's
-  session alive, so re-authenticating silently re-issues a token with no
-  prompt). RP-initiated logout is still follow-up work.
+- **`/auth/logout` ends the member's Corliss session and their Open WebUI
+  sessions.** It sends a back-channel `logout_token` to Open WebUI before
+  signing out, so chat ends on every device, not only this browser. It does not
+  touch public clients' refresh tokens: signing out of the website must not
+  stop Obsidian syncing on a phone. There is no `end_session_endpoint`, so
+  signing out of Open WebUI leaves the Corliss session alive. It acts on GET
+  today, which lets any page sign a member out;
+  [Corliss#23](https://github.com/Z-Space-Society/Corliss/issues/23) makes it
+  POST-only.
 - **The app has no `email` field to add — it's already on `AbstractUser`.**
   Sourcing it (via `transition:email` + `com.atproto.server.getSession`
   against the member's own PDS — DPoP tokens can't be proxied) is documented

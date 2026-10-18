@@ -234,8 +234,7 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # a value it cannot dial is a question it cannot answer, not an outage.
 #
 # It also drops the page's "Manage Console" row, which described static files
-# already deleted with the manage_console role — the same deletion that is why
-# corliss_manage_url above is deliberately blank. Every remaining row is a
+# already deleted with the manage_console role. Every remaining row is a
 # service something can be asked about.
 #
 # v0.9.2 adds the other half of a decision: an application can be DECLINED from
@@ -548,16 +547,6 @@ corliss_happyview_url: "https://view.{{ cluster_domain }}"  # Manage menu, admin
 # no Chat entry. The public origin, NOT corliss_chat_url: that one is the
 # internal address /systems/ probes. Same subdomain as the Caddy route.
 corliss_chat_public_url: "{{ ('https://chat.' ~ cluster_domain) if hostvars['scn-chat'].ctid is defined else '' }}"
-
-# Deliberately BLANK, and not derived like the three above. The Manage Console
-# SPA it pointed at was deleted with the manage_console role, so
-# manage.{{ cluster_domain }} now resolves to nothing — a derived value here
-# would render a live-looking link to a dead origin. Corliss treats blank as
-# "no console" and drops the fallback offer on /manage/ (its own console has
-# covered everything the SPA did since v0.9.0, roster editing included), so the
-# knob stays for a cluster that stands a second admin surface up at some other
-# origin. Nothing in corliss requires it.
-corliss_manage_url: ""
 
 # The Proxmox host's own web UI, linked from the Manage menu for cluster admins.
 #

@@ -232,21 +232,13 @@ up to the current list.
 
 ## Backup
 
-Out of the box, everything unreproducible on the PDS is in `/var/lib/pds`.
-`bin/zai-backup` carries a guarded (`pds_enabled=false`) Tier-2 block that
-streams that dir over SSH into the restic repo (`--tag zai-pds`); to enable:
-
-1. Assign `pds` a CTID in `scn-config` and provision, so the CT exists and
-   `hostvars['pds'].ansible_host` resolves.
-2. Add `export ZAI_PDS_HOST="10.1.1.<ctid>"` to `/etc/zai-backup/restic.env`
-   (rendered by the `backup` role — a follow-up can add it to
-   `restic.env.j2` under a `pds_*` flag).
-3. Flip `pds_enabled=true`, `git pull`, `zai-backup` once to verify the tag.
-
-**Caveat:** a live `tar` of SQLite files is not a crash-consistent snapshot.
-WAL mode usually survives (journal re-application), but the spike must verify
-before the flag goes true; the hardened alternative is restic client-side on
-the pds CT (snapshot `/var/lib/pds` directly) or a checkpoint-then-tar.
+**The PDS is not backed up.** Everything unreproducible on it is in
+`/var/lib/pds` (`accounts.sqlite`, the per-actor repos, blobs), and losing the
+CT loses every account it hosts. `bin/zai-backup` carries a Tier-2 block for it
+behind `pds_enabled=false`, which stays off because a live `tar` of SQLite in
+WAL mode is not a crash-consistent snapshot. Closing this, with the PLC
+rotation key below, is
+[zai-ops#50](https://github.com/Z-Space-Society/zai-ops/issues/50).
 
 ## Notes / open items
 
@@ -254,12 +246,12 @@ the pds CT (snapshot `/var/lib/pds` directly) or a checkpoint-then-tar.
   is permanent and public.
 - `PDS_PRODUCTION=true` — the server refuses to start if it smells dev
   defaults (one of the operator guide's deliberate refuse-to-start modes).
-- Single instance, SQLite-only: acceptable for one LXC; backed by restic.
+- Single instance, SQLite-only: one LXC, and no replica.
 - 0016 permissioned-data (spaces) is a Phase-C direction, not a near-term
   promise — the draft is settling.
 - The SCN **account** rotation key (boris's, signed on PDS Commons Computer) is
   distinct from this server's `PDS_PLC_ROTATION_KEY_PRIVATE` (recovery for
-  identities it issues). Both are DR-critical.
-- Downstream: when `zai-pds` operator commands are warranted (invites, account
-  inspect), add a `bin/zai-pds` wrapper over `atproto-pds-admin` like
-  `zai-litellm-key`.
+  identities it issues). Both are DR-critical, and the second is not wired yet
+  ([zai-ops#50](https://github.com/Z-Space-Society/zai-ops/issues/50)).
+- Operator commands go through `atproto-pds-admin` on the CT, as in
+  [Creating an account](#creating-an-account). There is no `bin/` wrapper.

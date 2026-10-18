@@ -57,6 +57,13 @@ diff <(sudo cat ~jsayles/.ssh/authorized_keys) <(curl -s https://github.com/jsay
 
 ## Notes
 
+- **A GitHub account is a sudo login here.** Whoever holds
+  `github.com/<user>`'s keys can SSH into CT 100 and every inference node as
+  that user, and the keys are fetched live at each run, so a key added on
+  GitHub lands at the next run. Removing a key on GitHub removes nothing here.
+  Password SSH is still on for these accounts
+  ([#56](https://github.com/Z-Space-Society/zai-ops/issues/56)); once it is
+  off, the password only answers sudo.
 - The forced first-login password change over SSH **key** auth relies on
   `UsePAM yes` (Debian's default) *and* the temp password existing — PAM asks for
   the current password to authorize the new one, which a locked/empty password

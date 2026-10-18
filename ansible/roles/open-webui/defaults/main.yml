@@ -10,26 +10,31 @@
 # Pinned release. OpenWebUI moves fast and runs DB migrations on startup, so pin it
 # and bump deliberately. Releases: https://github.com/open-webui/open-webui/releases
 #
-# 0.11.1 is a large release for a patch number — 462 commits over 0.11.0 — and it
-# carries **four migrations**, so this bump is ONE-WAY: re-pinning to 0.11.0 after
-# it has started once does not undo them. Back the DB up first (zai-backup), which
-# is the only rollback there is.
+# 0.12.3 (from 0.11.1) spans seven releases and carries **eight migrations**, so
+# this bump is ONE-WAY: re-pinning to 0.11.1 after it has started once does not undo
+# them. Back the DB up first (zai-backup), which is the only rollback there is.
 #
-# Two of the four matter to this cluster specifically. `repair_double_encoded_user_oauth`
-# rewrites the `user.oauth` JSON column, which every user here has — nobody signs in
-# any other way, the login path is corliss → rauthy → OIDC. `update_user_table` and the
-# two index migrations touch the same table and the chat timers. The rest of the release
-# is mostly throughput work that this deployment is positioned to get: streaming was
-# rebuilt to send deltas instead of resending the whole message (Redis-backed installs
-# also recover an in-flight reply across a refresh), and an idle instance no longer
-# scans every chat once a second looking for due timers.
+# Two of the eight touch the tables every account here lives in, since nobody signs
+# in any way but corliss → OIDC. `add_mfa_and_session_stamp` adds `auth.mfa` and
+# `auth.session_stamp`, both nullable; open-webui now rejects a JWT whose stamp
+# differs from the row's, and a pre-upgrade token (no stamp) still matches a
+# pre-upgrade row (null), so the upgrade signs nobody out. `add_missing_auth_rows`
+# backfills accounts SCIM created without an auth row; there are none here. The other
+# six add tables and indexes (group hierarchy, apps, skill/model/tool/function
+# history, a Postgres pending-files index) and touch nothing existing.
 #
-# Checked before bumping: the supported Python window (`>= 3.11, < 3.13.0a1`) and the
-# psycopg pin (3.3.4) are both unchanged from 0.11.0, so openwebui_python_version below
-# and the client_encoding workaround in the DSN still hold.
-openwebui_version: "0.11.1"
+# Two behaviour changes the Redis block below depends on: since 0.11.3 a failed
+# migration stops startup instead of serving over a half-migrated DB, and since
+# 0.11.4 the per-request revocation check accepts the token when Redis can't be
+# reached, where it used to 500 and drop the session cookie.
+#
+# Checked before bumping: the supported Python window (`>= 3.11, < 3.13.0a1`), the
+# psycopg pin (3.3.4) and the [postgres] extra's psycopg2-binary (2.9.12) are all
+# unchanged from 0.11.1, so openwebui_python_version below and the client_encoding
+# workaround in the DSN still hold.
+openwebui_version: "0.12.3"
 
-# OpenWebUI requires Python >=3.11,<3.13 (still the window at 0.11.1) — but the Debian
+# OpenWebUI requires Python >=3.11,<3.13 (still the window at 0.12.3) — but the Debian
 # 13 CT template ships
 # Python 3.13, which it REFUSES. So unlike the litellm role we can NOT build the venv
 # from the system interpreter (`python3 -m venv`). We use uv to fetch a managed,
@@ -91,7 +96,7 @@ openwebui_env_file: /etc/open-webui/open-webui.env
 # DB IP is derived from its CTID, never hardcoded.
 #
 # ?client_encoding=utf8 is load-bearing, not cosmetic: OpenWebUI's async engine uses
-# the psycopg v3 driver, and with psycopg 3.3 (pinned at 3.3.4 through 0.11.1) `pg_catalog.version()`
+# the psycopg v3 driver, and with psycopg 3.3 (pinned at 3.3.4 through 0.12.3) `pg_catalog.version()`
 # comes back as BYTES unless the client encoding is pinned — SQLAlchemy then throws
 # "cannot use a string pattern on a bytes-like object" parsing the server version, and
 # the app crash-loops at startup. Pinning the encoding makes psycopg return str.
@@ -159,10 +164,10 @@ openwebui_oidc_client_secret: "{{ corliss_oidc_client_secret }}"
 # works exactly as well as delivery does, and this is the bound that still holds
 # on every path where delivery doesn't happen:
 #
-#   1. **Redis is down.** The revocation marker cannot be written, so the JWT
-#      stays valid. (Chat is also broken outright in that state — see the redis
-#      block below — but a Redis that recovers after the marker was lost leaves
-#      a revoked member signed in.)
+#   1. **Redis is down.** The revocation marker can be neither written nor
+#      read, and open-webui accepts the token when the read fails (see the
+#      redis block below), so the JWT stays valid. A Redis that recovers after
+#      the write was lost leaves a revoked member signed in too.
 #   2. **Redis restarted.** Nothing here is persisted, on purpose, so every
 #      in-flight revocation marker is gone and those sessions come back.
 #   3. **corliss cannot reach open-webui**, or open-webui cannot reach corliss's
@@ -183,15 +188,16 @@ openwebui_jwt_expires_in: "4h"
 # not invalidate the JWT the browser is actually authenticating with, so the
 # revoked member keeps chatting exactly as before.
 #
-# **Know what setting REDIS_URL commits this CT to.** It is not a cache that
-# degrades. Once configured, open-webui consults Redis inside get_current_user
-# on EVERY authenticated request (utils/auth.py, `is_valid_token`), the call is
-# unguarded, and the exception handler around it deletes the session cookie on
-# its way out. So an unreachable Redis does not slow chat down — it 500s every
-# request and logs the member out, and re-logging in loops. The trade was made
-# deliberately (a CT on the same host and the same bridge, so the added failure
-# modes are the CT not booting and the daemon crashing), not discovered.
-# See docs/roles/redis.md.
+# **Know what setting REDIS_URL commits this CT to.** Once configured,
+# open-webui consults Redis on EVERY authenticated request (utils/auth.py,
+# `is_valid_token`) and registers every chat reply there as a task
+# (tasks.py, `create_task`). As of 0.12.3 the two fail differently when Redis
+# is unreachable. The revocation check catches the error and accepts the token,
+# so members stay signed in but **no revocation is enforced until Redis is
+# back**. The task write is unguarded, so sending a message fails. Chat is
+# down, and logout is silently off. The trade was made deliberately (a CT on
+# the same host and the same bridge, so the added failure modes are the CT not
+# booting and the daemon crashing), not discovered. See docs/roles/redis.md.
 openwebui_redis_port: 6379
 # Local default rather than reaching into the redis role's vars — a role default
 # isn't a reliable host fact from this play (same convention as
@@ -208,8 +214,8 @@ openwebui_redis_key_prefix: open-webui
 # **Load-bearing, not tuning.** Both default to UNSET upstream, which means no
 # timeout at all: against a CT that is down (SYN into the void, no RST) every
 # authenticated request blocks for the OS TCP timeout — around 130 seconds —
-# before failing. That turns a Redis outage from a fast, obvious failure into a
-# hung site. Two seconds is far above the sub-millisecond a healthy one-hop
+# before the revocation check gives up and accepts the token. That turns a Redis
+# outage from a fast, obvious failure into a hung site. Two seconds is far above the sub-millisecond a healthy one-hop
 # round trip takes, and far below anything a person would wait through.
 openwebui_redis_socket_connect_timeout: 2
 openwebui_redis_socket_timeout: 2

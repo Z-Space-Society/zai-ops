@@ -827,14 +827,16 @@ version_setting() {
 
 versions_table() {
   local i
-  printf '  %-12s %-18s %-12s %s\n' "Service" "Set to" "Deployed" "Latest"
-  printf '  %-12s %-18s %-12s %s\n' "-------" "------" "--------" "------"
+  # Deployed goes last: a package version (5:8.0.2-3+deb13u2) runs long, and a
+  # ragged last column misaligns nothing.
+  printf '  %-14s %-18s %-12s %s\n' "Service" "Set to" "Latest" "Deployed"
+  printf '  %-14s %-18s %-12s %s\n' "-------" "------" "------" "--------"
   for i in "${!VER_NAME[@]}"; do
     if [ "${VER_SETTABLE[$i]}" = yes ]; then
-      printf '  %-12s %-18s %-12s %s\n' "${VER_NAME[$i]}" "$(version_setting "$i")" \
-        "${VER_DEPLOYED[$i]}" "${VER_LATEST[$i]}"
+      printf '  %-14s %-18s %-12s %s\n' "${VER_NAME[$i]}" "$(version_setting "$i")" \
+        "${VER_LATEST[$i]}" "${VER_DEPLOYED[$i]}"
     else
-      printf '  %-12s %-18s %s\n' "${VER_NAME[$i]}" "(role)" "${VER_DEPLOYED[$i]}"
+      printf '  %-14s %-18s %-12s %s\n' "${VER_NAME[$i]}" "(role)" "" "${VER_DEPLOYED[$i]}"
     fi
   done
 }

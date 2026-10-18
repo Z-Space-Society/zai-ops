@@ -1,8 +1,12 @@
 ---
-# Record what a service play just installed, as <service>.json in the Garage
-# manifest bucket. Corliss's /systems/ reads these to show which zai-ops revision
-# provisioned each service and which version it runs. See
+# Record what a service play just installed, as <inventory_hostname>.json in the
+# Garage manifest bucket. Corliss's /systems/ reads these to show which zai-ops
+# revision provisioned each service and which version it runs. See
 # docs/decisions/0009-service-manifests-in-garage.md.
+#
+# The inventory name is the one key for a service everywhere: manifests, deploy
+# records, and Corliss's /systems/ rows, which map it to a display name. So the
+# key is never passed in; a role can't name its service anything else.
 #
 # Called by each service role as its LAST task, after its smoke test:
 #
@@ -10,18 +14,16 @@
 #     ansible.builtin.include_role:
 #       name: manifest
 #     vars:
-#       manifest_service: <key Corliss reads>
 #       manifest_version: <what was actually installed>
 #
 # It must live inside the play that installs the thing. Rendered from anywhere
 # else it would report today's blueprint values rather than what this CT got.
 
-# A caller that forgets a var is a bug in the role, not a runtime condition, so
-# this one raises.
-- name: Assert the manifest was called with a service and a version
+# A caller that forgets the version is a bug in the role, not a runtime
+# condition, so this one raises.
+- name: Assert the manifest was called with a version
   ansible.builtin.assert:
     that:
-      - manifest_service is defined and (manifest_service | string | length) > 0
       - manifest_version is defined and (manifest_version | string | length) > 0
     quiet: true
 
@@ -33,7 +35,7 @@
   amazon.aws.s3_object:
     mode: put
     bucket: "{{ manifest_bucket }}"
-    object: "{{ manifest_service }}.json"
+    object: "{{ inventory_hostname }}.json"
     content: "{{ _manifest | to_json }}"
     metadata:
       Content-Type: application/json
@@ -49,7 +51,7 @@
     overwrite: always
   vars:
     _manifest:
-      service: "{{ manifest_service }}"
+      service: "{{ inventory_hostname }}"
       version: "{{ manifest_version | string | trim }}"
       zai_ops: "{{ zai_ops_revision }}"
       provisioned_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
@@ -75,7 +77,7 @@
 - name: Warn that the manifest was not written
   ansible.builtin.debug:
     msg: >-
-      WARNING: {{ manifest_service }}.json was not written to Garage
+      WARNING: {{ inventory_hostname }}.json was not written to Garage
       ({{ 'object-store has no CTID assigned' if manifest_write is skipped
           else manifest_write.msg | default(_manifest_failure | to_json) }}).
       The service is deployed; /systems/ will show a blank or stale version for

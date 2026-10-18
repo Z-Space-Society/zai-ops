@@ -83,5 +83,4 @@
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: redis
     manifest_version: "{{ redis_installed.stdout }}"

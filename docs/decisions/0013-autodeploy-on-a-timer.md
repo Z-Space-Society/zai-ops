@@ -52,7 +52,19 @@ trigger that reaches in from GitHub ran into one of these problems:
    manifest bucket is read-only, so what it shows on its admin deploys page is
    what CT 100 wrote.
 
+7. **A service has one key: its inventory name.** Manifests become
+   `<inventory_hostname>.json`, written by the manifest role with no key passed
+   in, and deploy records use the same name. Two keys change: `caddy.json`
+   becomes `proxy.json` and `garage.json` becomes `object-store.json`. Corliss
+   keys its `/systems/` rows by inventory name and holds the one map to display
+   names, so the deploys pages and the stack share a key.
+
 ## Consequences
+
+- **Order of the rename:** deploy this release, replay `proxy` and
+  `object-store` so their new manifests exist, then tag the Corliss release
+  that reads them. Before that release, Corliss reads the old `caddy.json` and
+  `garage.json`, which stay in the bucket until deleted.
 
 - **Both role defaults are `latest`,** so on any cluster that hasn't pinned
   them, every new scn-chat or Corliss release deploys within a tick once this

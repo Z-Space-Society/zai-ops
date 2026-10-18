@@ -85,5 +85,4 @@
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: postgres
     manifest_version: "{{ postgres_installed.stdout }}"

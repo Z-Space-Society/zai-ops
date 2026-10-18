@@ -289,5 +289,4 @@
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: scn-chat
     manifest_version: "{{ scn_chat_describe.stdout | trim }}"

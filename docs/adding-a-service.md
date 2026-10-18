@@ -69,7 +69,6 @@ The role's **last task**, after the smoke test, records what it installed:
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: <service>
     manifest_version: "{{ <service>_version }}"
 ```
 

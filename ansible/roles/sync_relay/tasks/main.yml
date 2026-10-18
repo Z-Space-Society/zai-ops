@@ -273,5 +273,4 @@
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: sync-relay
     manifest_version: "{{ sync_relay_version }}"

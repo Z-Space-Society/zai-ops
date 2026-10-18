@@ -24,7 +24,6 @@ hides drift instead of showing it.
   ansible.builtin.include_role:
     name: manifest
   vars:
-    manifest_service: redis
     manifest_version: "{{ redis_installed.stdout }}"
 ```
 
@@ -35,20 +34,28 @@ never claims a version.
 
 | Task | Module | Why |
 | ---- | ------ | --- |
-| Assert the caller passed a service and a version | `ansible.builtin.assert` | A missing var is a bug in the calling role, so this one raises. |
+| Assert the caller passed a version | `ansible.builtin.assert` | A missing version is a bug in the calling role, so this one raises. |
 | Write the manifest to Garage | `amazon.aws.s3_object` (`mode: put`, delegated to localhost) | `permission: []` and `encrypt: false` because Garage has no ACLs or SSE-S3 and the module turns both on by default. `overwrite: always` because every manifest carries a fresh timestamp. `failed_when: false`: a metadata write must never fail a service deploy. Skipped when `object-store` has no CTID. Under `--check` the module reports without writing. |
 | Hand the installed version to the deploy log | `ansible.builtin.set_stats` (`per_host`) | The [`deploy_log` callback](#deploy-records) puts the version in its record from here. Set whether or not the write landed: the version is what the CT got either way. |
 | Warn that the manifest was not written | `ansible.builtin.debug` | Makes a skipped or failed write visible in the run output without failing the play. Prints the module's `msg`, or its whole result (minus `invocation`) when there is none: Heron's first v0.7.0 run failed a write with no `msg`, and the warning said nothing useful. |
 
 ## Manifest keys
 
-Corliss reads these exact names, so they are an interface. Rename one on both
-sides in the same change.
+**The key is the inventory name**, `<inventory_hostname>.json`, and no caller
+passes one. The inventory name is how every part of zai-ops refers to a service:
+manifests, deploy records, `--limit`. Corliss keys its `/systems/` rows the same
+way and maps each to a display name (Garage, Caddy), so a display name never
+leaks back into a key. Renaming an inventory host renames its manifest, which
+Corliss reads, so do both sides in the same change.
+
+Until v0.11.1 two roles named the software instead: `caddy.json` and
+`garage.json`. Those objects stay in the bucket until deleted; nothing reads
+them now.
 
 | Key | Written by | `manifest_version` source |
 | --- | ---------- | ------------------------- |
-| `caddy.json` | [`proxy`](proxy.md) | `dpkg-query caddy` |
-| `garage.json` | [`object_store`](object_store.md) | `garage_version` |
+| `proxy.json` | [`proxy`](proxy.md) | `dpkg-query caddy` |
+| `object-store.json` | [`object_store`](object_store.md) | `garage_version` |
 | `postgres.json` | [`postgres`](postgres.md) | `dpkg-query postgresql-{{ postgres_version }}` |
 | `redis.json` | [`redis`](redis.md) | `dpkg-query {{ redis_package }}` |
 | `litellm.json` | [`litellm`](litellm.md) | `litellm_version` |
@@ -78,13 +85,12 @@ end of the run, whether it succeeded or failed:
 
 ```json
 {"service": "corliss", "result": "failed", "failed_task": "corliss : Sync the venv from the checkout's uv.lock",
- "version": null, "zai_ops": "v0.12.0", "trigger": "timer",
+ "version": null, "zai_ops": "v0.11.1", "trigger": "timer",
  "started_at": "2026-10-18T14:02:11Z", "finished_at": "2026-10-18T14:04:40Z",
  "recap": {"ok": 41, "failures": 1, "unreachable": 0, "changed": 3, "skipped": 6, "rescued": 0, "ignored": 0}}
 ```
 
-`<host>` is the inventory host (`corliss`, `proxy`, `object-store`), not the
-manifest key. `version` is null when the run failed before this role. `trigger`
+`<host>` is the inventory name, the same key as the manifest. `version` is null when the run failed before this role. `trigger`
 is `timer` for [`zai-autodeploy`](../decisions/0013-autodeploy-on-a-timer.md)
 and `cli` otherwise. A `--check` run writes nothing, and nor does a host whose
 every task was skipped. The callback templates the endpoint, bucket, writer key
@@ -97,7 +103,6 @@ Role defaults in [`defaults/main.yml`](../../ansible/roles/manifest/defaults/mai
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `manifest_service` | *(required)* | Object key without `.json`. See the table above. |
 | `manifest_version` | *(required)* | What the play actually installed. |
 | `manifest_endpoint_url` | `http://<object-store>:3900` | Garage's S3 API over `vmbr1`. |
 | `manifest_region` | `garage` | Must match `garage_region` in `object_store`. Restated because role defaults are not visible to plays that don't apply the role. |

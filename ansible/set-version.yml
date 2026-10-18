@@ -40,12 +40,12 @@
     version_apps:
       scn-chat: { var: scn_chat_version, role: scn_chat, repo_var: scn_chat_repo_url }
       corliss: { var: corliss_version, role: corliss, repo_var: corliss_repo_url }
-    # Every manifest a service play writes (docs/roles/manifest.md), for show.
+    # Every manifest a service play writes, by inventory name (docs/roles/manifest.md), for show.
     manifest_services:
       - postgres
       - redis
-      - garage
-      - caddy
+      - object-store
+      - proxy
       - sync-relay
       - litellm
       - happyview

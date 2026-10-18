@@ -19,11 +19,6 @@
 #
 # acme is the default, so a cluster that never runs the setter is its own edge.
 # none needs `scn-config` (Set TLS).
-#
-# There was a third mode, origin_ca, which served a Cloudflare Origin CA cert
-# from the vault for a domain Cloudflare proxied. It is removed: every cluster
-# terminates its own TLS now. tasks/main.yml fails the run for a cluster that
-# still has it recorded, naming the fix. See docs/roles/proxy.md.
 caddy_tls_mode: acme
 
 # Derived, not a knob: "does this edge serve :443 at all". Kept because the :80

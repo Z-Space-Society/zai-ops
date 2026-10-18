@@ -303,14 +303,11 @@ PROXMOX_HOST_RE='^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$'
 # how set-tls.yml knows to drop a contact recorded earlier.
 set_tls() { ansible-playbook set-tls.yml -e "tls_mode=$1" -e "acme_email=${2:-}"; }
 
-# proxy_tls_label <acme|none>: how to say it to a person. origin_ca is a mode
-# that was removed: a cluster can still have it recorded, and the proxy refuses
-# to provision until it is changed.
+# proxy_tls_label <acme|none>: how to say it to a person.
 proxy_tls_label() {
   case "$1" in
     acme) echo "Caddy's own Let's Encrypt certificates" ;;
     none) echo "plain HTTP, no certificate" ;;
-    origin_ca) echo "removed, choose acme or none" ;;
     *) echo "$1" ;;
   esac
 }

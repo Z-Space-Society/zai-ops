@@ -320,10 +320,6 @@ removes a recorded contact. The proxy reads the mode when it is provisioned: the
 menu offers to run that once a mode is saved, and a scripted change needs
 `ansible-playbook provision.yml --limit proxy`.
 
-A third mode, `origin_ca` (a Cloudflare Origin CA cert from the vault), was
-removed. A cluster that still has it recorded gets a failed proxy run that names
-the fix; see [`origin_ca` was removed](roles/proxy.md#origin_ca-was-removed).
-
 ---
 
 ## Inference nodes

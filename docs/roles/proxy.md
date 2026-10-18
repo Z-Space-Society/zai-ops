@@ -56,60 +56,13 @@ before DNS and the public `:80`/`:443` forwards exist runs `scn-config nonint se
 first. Under the `acme` default, that proxy redirects to an HTTPS it has no cert
 for, and Caddy keeps retrying issuance.
 
-### `origin_ca` was removed
-
-There used to be a third mode, `origin_ca`, for a domain that Cloudflare
-proxied: Caddy served a long-lived Cloudflare Origin CA cert from the vault
-(`cloudflare_origin_cert` / `cloudflare_origin_key`) and never ran ACME. It was
-first inferred from the vault
-([#10](https://github.com/Z-Space-Society/zai-ops/issues/10),
-[#11](https://github.com/Z-Space-Society/zai-ops/pull/11)), then made an explicit
-recorded choice with `acme` as the default
-([#12](https://github.com/Z-Space-Society/zai-ops/issues/12)), and is now gone.
-Every cluster is its own edge, so there is one cert story to run and debug, and
-an Origin CA cert is trusted by Cloudflare and nobody else, which is what made
-server-side calls to the cluster's own public origin need special handling.
-
-**A cluster that still has `caddy_tls_mode: origin_ca` recorded gets a failed
-proxy run**, not a changed Caddyfile. The role's first TLS assert stops before
-anything on the proxy CT is touched, and names the fix. Rendering `acme` for such
-a cluster would be worse: Let's Encrypt attempted from behind Cloudflare, and a
-52x on every public route. `scn-config nonint show-tls` says the same thing
-before a provision does.
-
-To move such a cluster, in this order:
-
-1. Confirm public `:80` and `:443` reach the proxy CT from anywhere, not only
-   from Cloudflare's address ranges.
-2. Set every DNS record that points at the cluster to **DNS only**. From this
-   moment until step 3 finishes, browsers reach Caddy directly and reject the
-   Origin CA cert, so have step 3 ready.
-3. `scn-config nonint set-tls acme [email]`, then provision the proxy.
-4. Check each hostname from outside (see [Verify](#verify)).
-
-Do the move **before** pulling the commit that removes the mode, or from the
-last checkout that still has it. The setter there can still record `origin_ca`,
-which is the way back if issuance fails.
-
-Once the cluster is settled on `acme`, two things are left over, and neither is
-read by anything in this repo:
-
-- **The cert and key on the proxy CT.** The role removes
-  `/etc/caddy/cloudflare-origin.pem` and `.key` on the next proxy provision.
-- **`cloudflare_origin_cert` and `cloudflare_origin_key` in the vault.** Revoke
-  the certificate in the Cloudflare dashboard (SSL/TLS → Origin Server), which
-  also deals with the copies in older vault backups, then delete both keys with
-  `ansible-vault edit group_vars/all/vault.yml`.
-
 ## Tasks
 
 | Task | Module | Why |
 | ---- | ------ | --- |
 | Add backports + pin caddy | `apt` (`python3-debian`), `deb822_repository`, `copy` (apt preferences) | Debian 13's base suite ships caddy **2.6.2**; several options this cluster needs landed in 2.7+. Backports carries 2.11.2 and is still Debian-signed, so no third-party key. The pin is scoped to `caddy` by name so backports supplies nothing else. |
 | Install Caddy | `apt` (`caddy={{ caddy_apt_version }}`) | Version-pinned, like Garage and uv. Pulls the `caddy` user, `/etc/caddy/`, `/var/lib/caddy`, and `caddy.service`. **This upgrades an existing 2.6.2 install and restarts Caddy**, which is a brief outage of every public route on the LAN-facing edge. |
-| Refuse the removed `origin_ca` mode | `assert` | A cluster that still has `origin_ca` recorded gets a failed run that names the fix, before anything on the CT changes. See [`origin_ca` was removed](#origin_ca-was-removed). |
 | Assert the TLS mode | `assert` | The template branches on the exact mode string, so a typo would render a config for no mode, and `caddy validate` checks syntax, not intent. |
-| Remove the Origin CA cert + key | `file` (`state: absent`) | Cleans up what `origin_ca` mode installed, so a cluster that moved to `acme` does not keep an unused private key on disk. A no-op everywhere else. |
 | Deploy the Caddyfile | `template` (`validate: caddy validate`) | Renders `caddy_proxy_hosts`. `validate` is the `nginx -t` analog — a bad config fails the task instead of deploying. |
 | Start + enable `caddy` | `systemd` | Running now + on boot. |
 | Validate the deployed config | `command: caddy validate` (`changed_when: false`) | Final guard that the live file is valid. |
@@ -128,7 +81,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `caddy_tls_mode` | `acme` | `acme` or `none`. See [TLS modes](#tls-modes). Recorded per cluster with `scn-config` (Set TLS), never by hand. The role asserts the value is one of the two, and refuses the removed `origin_ca` with a message naming the fix. |
+| `caddy_tls_mode` | `acme` | `acme` or `none`. See [TLS modes](#tls-modes). Recorded per cluster with `scn-config` (Set TLS), never by hand. The role asserts the value is one of the two. |
 | `caddy_tls_enabled` | `{{ caddy_tls_mode != 'none' }}` | Derived: does this edge serve `:443`? Drives the `:80` redirect and the `https://` site addresses. Set the mode, not this. |
 | `caddy_acme_email` | `""` | Let's Encrypt account contact, `acme` mode only, rendered as the global `email` option when non-empty. Not a secret. Recorded by `scn-config nonint set-tls acme <email>` and removed whenever the recorded mode leaves `acme`. Let's Encrypt no longer sends expiry reminders, so it is not a renewal alarm. |
 | `caddy_backports_suite` | `{{ ansible_distribution_release }}-backports` | Derived from the CT's own release, so the blueprint stays generic. |

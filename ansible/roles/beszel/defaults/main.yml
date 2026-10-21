@@ -2,8 +2,10 @@
 # Beszel hub (zai-ops#3): the monitoring dashboard agents report to. A single
 # Go binary with PocketBase (SQLite) inside, run natively under systemd.
 #
-# beszel_version and beszel_host are in group_vars/all/main.yml, not here: the
-# agent role installs the same release, and the proxy routes the same host.
+# beszel_version, beszel_host, beszel_port and beszel_superuser_email are in
+# group_vars/all/main.yml, not here: the agent role installs the same release
+# and talks to the same port as the same superuser, and the proxy routes the
+# same host.
 
 # The release tarball and its SHA-256. Bump the checksum with beszel_version,
 # and take it from the release's own beszel_<version>_checksums.txt rather than
@@ -11,7 +13,6 @@
 beszel_hub_url: "https://github.com/henrygd/beszel/releases/download/v{{ beszel_version }}/beszel_linux_amd64.tar.gz"
 beszel_hub_sha256: "c0cbab161f322426228419fbbeab4163dded6464a537cc1e2f92e090892f6368"
 
-beszel_port: 8090
 # Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race
 # with systemd-networkd and the service comes up silently loopback-only (see
 # sync_relay_host).
@@ -33,7 +34,6 @@ beszel_app_url: "https://{{ beszel_host }}"
 
 # The superuser is Ansible's own account for the admin API on 127.0.0.1; the
 # admin is the login people use until Corliss OIDC replaces it (#3 step 4).
-# Both need an email-shaped name, and neither address receives mail. Passwords
-# are generated in group_vars/all/main.yml.
-beszel_superuser_email: "ansible@{{ cluster_domain }}"
+# Both need an email-shaped name, and neither address receives mail. The
+# superuser's is in group_vars/all/main.yml, as are both passwords.
 beszel_admin_email: "admin@{{ cluster_domain }}"

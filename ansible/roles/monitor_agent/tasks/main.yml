@@ -1,0 +1,217 @@
+---
+# Install the Beszel agent natively under systemd (zai-ops#3, step 3), on the
+# control node and every service container, and keep the apt lists fresh for
+# its pending-updates count.
+#
+# The agent dials out to the hub over vmbr1 in WebSocket mode and enrolls with
+# the token the beszel role writes to the hub, so no system is added by hand.
+# It writes no manifest: the manifest key is the inventory name, which here is
+# the service's own, and the agent's version is beszel_version, which the hub's
+# manifest already records (docs/roles/monitor_agent.md).
+
+# --- Skip ---------------------------------------------------------------------------
+
+# A service with no CTID has no container. The control node has no ctid by
+# design, so it is never skipped for that.
+- name: Skip a service with no CTID
+  ansible.builtin.meta: end_host
+  when: ctid is not defined and inventory_hostname not in groups['control_node']
+
+# Without a running hub the smoke test below cannot pass. On a new cluster the
+# services are provisioned in CTID order and the hub comes late, so each one
+# skips here, and Monitoring Agents in scn-config installs them all afterwards.
+- name: Check that the hub is up
+  ansible.builtin.uri:
+    url: "{{ monitor_agent_hub_url }}/api/health"
+    timeout: 5
+  register: monitor_agent_hub_health
+  failed_when: false
+  delegate_to: localhost
+  when: hostvars['beszel'].ctid is defined
+
+- name: Say why the agent is skipped
+  ansible.builtin.debug:
+    msg: >-
+      The Beszel hub is not {{ 'provisioned' if hostvars['beszel'].ctid is not defined
+      else 'answering' }}, so {{ inventory_hostname }} gets no agent this run. Run
+      scn-config, Monitoring Agents, once the hub is up.
+  when: hostvars['beszel'].ctid is not defined or monitor_agent_hub_health.status | default(0) != 200
+
+- name: Skip without a hub
+  ansible.builtin.meta: end_host
+  when: hostvars['beszel'].ctid is not defined or monitor_agent_hub_health.status | default(0) != 200
+
+# --- Service account + directories ------------------------------------------------
+
+- name: Create the beszel-agent system group
+  ansible.builtin.group:
+    name: "{{ monitor_agent_group }}"
+    system: true
+
+- name: Create the beszel-agent system user
+  ansible.builtin.user:
+    name: "{{ monitor_agent_user }}"
+    group: "{{ monitor_agent_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ monitor_agent_data_dir }}"
+    create_home: false
+
+- name: Create the download and data directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ monitor_agent_download_dir }}", owner: root, mode: "0755" }
+    - { path: "{{ monitor_agent_data_dir }}", owner: "{{ monitor_agent_user }}", mode: "0700" }
+
+# --- Binary ------------------------------------------------------------------------
+
+# Named by version, so get_url finds the file in place and skips the download on
+# a replay, and a version bump fetches a new one. The checksum makes a tampered
+# or partial download fail the run.
+- name: Download the Beszel agent release
+  ansible.builtin.get_url:
+    url: "{{ monitor_agent_url }}"
+    dest: "{{ monitor_agent_download_dir }}/beszel-agent_linux_amd64-{{ beszel_version }}.tar.gz"
+    checksum: "sha256:{{ monitor_agent_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: monitor_agent_download
+
+- name: Check whether the agent binary is installed
+  ansible.builtin.stat:
+    path: "{{ monitor_agent_bin }}"
+  register: monitor_agent_bin_stat
+
+# Extract only when the release moved or the binary is missing, so a replay
+# leaves the running binary alone.
+- name: Install the agent binary
+  ansible.builtin.unarchive:
+    src: "{{ monitor_agent_download.dest }}"
+    remote_src: true
+    dest: "{{ monitor_agent_bin | dirname }}"
+    include: ["beszel-agent"]
+    owner: root
+    group: root
+    mode: "0755"
+  when: monitor_agent_download is changed or not monitor_agent_bin_stat.stat.exists
+  notify: restart beszel-agent
+
+# --- Identity + config -------------------------------------------------------------
+
+# Before the first start: the agent makes its own fingerprint only when this
+# file is missing. A fixed one lets a rebuilt CT reattach to its system record.
+- name: Place the agent's fingerprint
+  ansible.builtin.copy:
+    content: "{{ monitor_agent_fingerprint }}\n"
+    dest: "{{ monitor_agent_data_dir }}/fingerprint"
+    owner: "{{ monitor_agent_user }}"
+    group: "{{ monitor_agent_group }}"
+    mode: "0600"
+  notify: restart beszel-agent
+
+# Root-only: it holds the token. systemd reads it before dropping to the agent user.
+- name: Write the agent's environment file
+  ansible.builtin.template:
+    src: beszel-agent.env.j2
+    dest: /etc/beszel-agent.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart beszel-agent
+
+# --- Unit --------------------------------------------------------------------------
+
+- name: Install the beszel-agent systemd unit
+  ansible.builtin.template:
+    src: beszel-agent.service.j2
+    dest: /etc/systemd/system/beszel-agent.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart beszel-agent
+
+- name: Ensure beszel-agent is started and enabled
+  ansible.builtin.systemd:
+    name: beszel-agent
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# --- apt list refresh ----------------------------------------------------------
+
+# The agent counts pending updates with `apt-get -s dist-upgrade` and never
+# refreshes the lists (beszel#2606), so its count is only as fresh as they are.
+# A timer of our own rather than APT::Periodic: that knob acts only through
+# apt-daily.timer and apt.systemd.daily, whose stamp files and random sleeps
+# decide whether a run happens and leave no record when one doesn't. This unit
+# shows its last run in `systemctl list-timers` and its result in the journal.
+- name: Install the apt list refresh units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - apt-lists-refresh.service
+    - apt-lists-refresh.timer
+  notify: reload systemd
+
+- name: Apply pending agent restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure the apt list refresh timer is started and enabled
+  ansible.builtin.systemd:
+    name: apt-lists-refresh.timer
+    state: started
+    enabled: true
+
+# So a freshly built CT has current lists before the agent's first check,
+# rather than whatever the template shipped with until the timer first fires.
+- name: Refresh the package lists if they are a day old
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 86400
+
+# --- Smoke test --------------------------------------------------------------------
+
+# Ask the hub, not systemd: the system record is up only once the agent has
+# enrolled with the token and the hub has taken a first set of metrics from it.
+# Run on the hub CT against 127.0.0.1, where Ansible uses the superuser, never
+# over the bridge. It does not wait for the updates count: the first apt check
+# runs in the background and lands on a later report.
+- name: Sign in to the hub as the superuser
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/_superusers/auth-with-password"
+    method: POST
+    body_format: json
+    body:
+      identity: "{{ beszel_superuser_email }}"
+      password: "{{ beszel_superuser_password }}"
+  register: monitor_agent_hub_auth
+  delegate_to: beszel
+  no_log: true
+
+- name: Wait for the hub to show this system up
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/systems/records?filter={{ monitor_agent_filter | urlencode }}"
+    headers:
+      Authorization: "{{ monitor_agent_hub_auth.json.token }}"
+  vars:
+    monitor_agent_filter: "name='{{ inventory_hostname }}'"
+  register: monitor_agent_system
+  until: >-
+    monitor_agent_system.json is defined
+    and monitor_agent_system.json['items'] | selectattr('status', 'equalto', 'up') | list | length > 0
+  retries: 20
+  delay: 3
+  delegate_to: beszel

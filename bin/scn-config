@@ -39,6 +39,8 @@
 #                                                #   and what scn-chat/corliss are set to
 #   scn-config nonint set-version scn-chat v0.2.2    # a release tag, or latest
 #   scn-config nonint clear-version scn-chat     # back to the role default
+#   scn-config nonint apply-monitor-agents       # the Beszel agent everywhere,
+#   scn-config nonint apply-monitor-agents proxy #   or only on some hosts
 #
 # Runs on the control node. Lives in the repo's bin/ (on PATH via
 # /etc/profile.d/zai-ops.sh) and runs in place — the script you run is always the
@@ -46,7 +48,8 @@
 #
 # This is the front end only. The playbooks (site.yml, verify-proxmox.yml,
 # set-domain.yml, set-handle-domain.yml, set-registry.yml, set-node.yml, assign.yml, admins.yml,
-# set-smtp.yml, set-scn-chat-key.yml, set-tls.yml, rotate-key.yml, set-version.yml) validate and write; the checks here exist to give a readable message before a playbook
+# set-smtp.yml, set-scn-chat-key.yml, set-tls.yml, rotate-key.yml, set-version.yml,
+# monitor-agent.yml) validate and write; the checks here exist to give a readable message before a playbook
 # run, and the playbook stays the authority.
 set -euo pipefail
 
@@ -104,6 +107,7 @@ usage: scn-config
        scn-config nonint show-versions
        scn-config nonint set-version <scn-chat|corliss> <tag|latest>
        scn-config nonint clear-version <scn-chat|corliss>
+       scn-config nonint apply-monitor-agents [host...]
 EOF
   exit 64
 }
@@ -944,6 +948,46 @@ ${KEY_RETIRE[$i]}"
 
 $(tail -n 12 <<<"$out")"
   fi
+}
+
+# --- Monitoring agents ---------------------------------------------------------
+# The Beszel agent on the control node and every service container
+# (monitor-agent.yml, zai-ops#3). Only "go": the version is the committed
+# beszel_version, never set here.
+
+beszel_version() {
+  awk '$1=="beszel_version:"{gsub(/"/, "", $2); print $2}' group_vars/all/main.yml
+}
+
+nonint_apply_monitor_agents() {
+  if [ $# -gt 0 ]; then
+    local IFS=,
+    ansible-playbook monitor-agent.yml --limit "$*"
+  else
+    ansible-playbook monitor-agent.yml
+  fi
+}
+
+# Leaves whiptail for the run, like run_provision: the playbook output is the
+# report.
+do_monitor_agents_menu() {
+  local text failed=""
+  text="Install or update the Beszel monitoring agent on the control node and
+every provisioned service container, at Beszel $(beszel_version).
+
+A container is skipped while the hub is not provisioned or not answering."
+  whiptail --backtitle "$BACKTITLE" --title "Monitoring Agents" \
+    --yes-button Install --no-button Back \
+    --yesno "$text" "$(box_height "$text" 7)" "$WT_WIDTH" || return 0
+  clear
+  nonint_apply_monitor_agents </dev/null || failed=1
+  echo
+  if [ -n "$failed" ]; then
+    echo "scn-config: a monitoring agent FAILED; see the output above."
+  else
+    echo "scn-config: the monitoring agents are installed."
+  fi
+  read -r -p "Press Enter to return to the menu. " </dev/tty || true
 }
 
 # --- Interactive mode --------------------------------------------------------
@@ -2072,6 +2116,7 @@ interactive() {
       "7 Set TLS" " How the proxy gets its certificate" \
       "8 Signing Keys" " Rotate the keys services sign tokens with" \
       "9 Versions" " Which release each app deploys" \
+      "10 Monitoring Agents" " Install or update the Beszel agents" \
       3>&1 1>&2 2>&3)" || exit 0
     case "$choice" in
       1\ *) do_setup_menu ;;
@@ -2083,6 +2128,7 @@ interactive() {
       7\ *) do_tls_menu ;;
       8\ *) do_keys_menu ;;
       9\ *) do_versions_menu ;;
+      10\ *) do_monitor_agents_menu ;;
     esac
   done
 }
@@ -2123,6 +2169,7 @@ case "${1:-}" in
       show-versions) nonint_show_versions ;;
       set-version) shift; nonint_set_version "$@" ;;
       clear-version) shift; nonint_clear_version "$@" ;;
+      apply-monitor-agents) shift; nonint_apply_monitor_agents "$@" ;;
       *) usage ;;
     esac
     ;;

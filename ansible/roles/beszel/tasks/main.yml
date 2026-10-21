@@ -187,9 +187,14 @@
       passwordConfirm: "{{ beszel_admin_password }}"
       verified: true
       role: admin
+  register: beszel_admin_created
   when: not beszel_admin_exists | bool
   changed_when: true
   no_log: true
+
+- name: Note the admin user's id
+  ansible.builtin.set_fact:
+    beszel_admin_id: "{{ beszel_admin_record.id if beszel_admin_exists | bool else beszel_admin_created.json.id }}"
 
 # Re-setting the password every run would rotate the user's tokenKey and sign
 # the admin out each time, so the password is set only when it no longer works.
@@ -220,6 +225,44 @@
   when: >-
     beszel_admin_exists | bool and (beszel_admin_record.role != 'admin'
     or not beszel_admin_record.verified or beszel_admin_auth.status != 200)
+  changed_when: true
+  no_log: true
+
+# --- Agent token -------------------------------------------------------------------
+
+# Every agent (the monitor_agent role) enrolls with one token. The hub accepts
+# a token it finds in universal_tokens, and when no fingerprint matches it
+# creates the system record itself, so nobody clicks "Add System". The rows are
+# one per user and the collection has no API rules, so only a superuser can
+# write it here. The hub's own /api/beszel/universal-token needs a user session,
+# which step 4 removes when password login goes off. The admin owns the token
+# because that record is Ansible's and stays after step 4. Re-asserted every
+# run, so a rebuilt hub takes the agents back with nothing touched on them.
+- name: Look up the agent token
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/universal_tokens/records?filter={{ beszel_token_filter | urlencode }}"
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+  vars:
+    beszel_token_filter: "user='{{ beszel_admin_id }}'"
+  register: beszel_token_lookup
+  no_log: true
+
+- name: Write the agent token
+  ansible.builtin.uri:
+    url: >-
+      http://127.0.0.1:{{ beszel_port }}/api/collections/universal_tokens/records{{
+      ('/' ~ beszel_token_record.id) if beszel_token_record else '' }}
+    method: "{{ 'PATCH' if beszel_token_record else 'POST' }}"
+    body_format: json
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+    body:
+      user: "{{ beszel_admin_id }}"
+      token: "{{ beszel_agent_token }}"
+  vars:
+    beszel_token_record: "{{ beszel_token_lookup.json['items'] | first | default({}) }}"
+  when: not beszel_token_record or beszel_token_record.token != beszel_agent_token
   changed_when: true
   no_log: true
 

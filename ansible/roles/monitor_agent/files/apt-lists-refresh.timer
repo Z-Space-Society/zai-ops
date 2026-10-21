@@ -1,0 +1,13 @@
+# Managed by zai-ops (roles/monitor_agent).
+[Unit]
+Description=Refresh the apt package lists daily
+
+[Timer]
+OnCalendar=daily
+# Spread across an hour so every CT doesn't hit the mirror at midnight at once.
+RandomizedDelaySec=1h
+# A CT that was down at midnight refreshes when it comes back.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

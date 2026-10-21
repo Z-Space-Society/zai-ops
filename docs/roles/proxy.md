@@ -60,7 +60,7 @@ for, and Caddy keeps retrying issuance.
 
 | Task | Module | Why |
 | ---- | ------ | --- |
-| Add backports + pin caddy | `apt` (`python3-debian`), `deb822_repository`, `copy` (apt preferences) | Debian 13's base suite ships caddy **2.6.2**; several options this cluster needs landed in 2.7+. Backports carries 2.11.2 and is still Debian-signed, so no third-party key. The pin is scoped to `caddy` by name so backports supplies nothing else. |
+| Add backports + pin caddy | `apt` (`python3-debian`), `deb822_repository`, `copy` (apt preferences) | Debian 13's base suite ships caddy **2.6.2**; several options this cluster needs landed in 2.7+. Backports carries 2.11.2 and is still Debian-signed, so no third-party key. The pin is scoped to `caddy` by name so backports supplies nothing else, and it pins the exact `caddy_apt_version`, not the suite, so no upgrade can move it (see Notes). |
 | Install Caddy | `apt` (`caddy={{ caddy_apt_version }}`) | Version-pinned, like Garage and uv. Pulls the `caddy` user, `/etc/caddy/`, `/var/lib/caddy`, and `caddy.service`. **This upgrades an existing 2.6.2 install and restarts Caddy**, which is a brief outage of every public route on the LAN-facing edge. |
 | Assert the TLS mode | `assert` | The template branches on the exact mode string, so a typo would render a config for no mode, and `caddy validate` checks syntax, not intent. |
 | Deploy the Caddyfile | `template` (`validate: caddy validate`) | Renders `caddy_proxy_hosts`. `validate` is the `nginx -t` analog — a bad config fails the task instead of deploying. |
@@ -166,6 +166,18 @@ If issuance fails, check public `:80` first (see
   add a third-party trust root to obtain a capability backports already provides.
   If the goal ever becomes tracking upstream Caddy generally rather than clearing
   a version floor, that trade changes.
+
+- **The apt pin is on the version, so `apt-get upgrade` never moves Caddy.**
+  It used to pin the backports suite, which made the newest backports Caddy
+  apt's candidate: a plain upgrade would have moved the edge past
+  `caddy_apt_version` with no commit, and the next replay of this role would
+  then have failed asking apt for a lower version. Pinned to the version, the
+  proxy reads as current to apt (and to anything that counts apt's pending
+  list) while backports is ahead. [`apt-upgrade.yml`](../README.md#playbooks)
+  is what says so: its summary names the newer version, or warns that
+  backports no longer carries the pinned one, which means a rebuilt proxy
+  could not install it. Moving the pin is a commit to `caddy_apt_version` and
+  `ansible-playbook provision.yml --limit proxy`, on staging first.
 
 - **`acme` needs public `:80`, and that is not this role's to provide.** HTTP-01
   means Let's Encrypt connects to each hostname on port 80 from the internet, so

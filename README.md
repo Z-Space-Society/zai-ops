@@ -180,6 +180,18 @@ itself from this repo.
    /root/zai-ops/host/import-github-user.sh jsayles bmann
    ```
 
+8. Keep the service containers' Debian packages current. Check first, then
+   apply. The summary gives one line per CT, and it names any package a role
+   pins (Caddy) when the archive has moved past the pin.
+
+   ```bash
+   ansible-playbook apt-upgrade.yml                           # report only
+   ansible-playbook apt-upgrade.yml -e upgrade_action=apply   # upgrade, then report
+   ansible-playbook apt-upgrade.yml -e upgrade_action=apply --limit postgres   # one CT at a time
+   ```
+
+   The Proxmox host and the inference nodes are updated by hand.
+
 ## Networking
 
 The bootstrap creates an isolated internal bridge `vmbr1` (`10.1.1.0/24`, no

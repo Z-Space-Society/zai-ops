@@ -16,7 +16,7 @@
 # rebuilds and restarts only when the checkout moved, and the manifest records
 # `git describe` of what was deployed.
 scn_chat_version: "latest"
-scn_chat_repo_url: "https://github.com/Z-Space-Society/scn-chat"
+scn_chat_repo_url: "https://knot.commonscomputer.com/sharedcomputer.network/scn-chat"
 
 # Node.js: pinned LTS tarball with its SHA-256, the tarball + checksum
 # pattern Garage and uv use. v24 is the upstream image's major.

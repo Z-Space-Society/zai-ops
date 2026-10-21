@@ -1,6 +1,6 @@
 # Role: `scn_chat`
 
-Installs [scn-chat](https://github.com/Z-Space-Society/scn-chat), the SCN
+Installs [scn-chat](https://tangled.org/sharedcomputer.network/scn-chat), the SCN
 AI-assistant chat app, **natively** on its own CT: a pinned Node 24 tarball,
 the monorepo cloned at a pinned release tag, `pnpm install --frozen-lockfile`
 and `pnpm build`, sqlite in `DATA_DIR` on the rootfs, and a systemd unit.
@@ -63,7 +63,7 @@ Where a member's chats live is decided at first sign-in:
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `scn_chat_version` | `latest` | A release tag, or `latest`, the newest one each provision. A cluster pins one with `scn-config nonint set-version scn-chat <tag>` (or the Versions menu), recorded in `inventory/local.yml` over this default. Pinning back across a migration is unsafe: they run forward only |
-| `scn_chat_repo_url` | `https://github.com/Z-Space-Society/scn-chat` | |
+| `scn_chat_repo_url` | `https://knot.commonscomputer.com/sharedcomputer.network/scn-chat` | |
 | `scn_chat_node_version` / `scn_chat_node_sha256` | `v24.21.0` / pinned | Change together |
 | `scn_chat_port` | `3000` | Keep in sync with `corliss_chat_port` |
 | `scn_chat_public_url` | `https://chat.{{ cluster_domain }}` | The OAuth client_id base and did:web origin. Must be the origin members reach, port included |

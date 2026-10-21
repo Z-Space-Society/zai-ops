@@ -53,12 +53,14 @@
       - corliss
       - open-webui
       - scn-chat
+      - beszel
     # What each non-settable service is pinned to, for show: the role whose
     # defaults hold the pin, and the variable. The roles name their pins
     # differently (a release tag, an apt version, a Postgres major), so this
     # table names them rather than the roles sharing one variable name, which
     # would collide in any play that applies two roles. Redis has no pin: it
-    # installs Debian's redis-server as the suite ships it.
+    # installs Debian's redis-server as the suite ships it. Beszel's pin has no
+    # role: it is in group_vars because the hub and agent roles share it.
     role_pins:
       postgres: { role: postgres, var: postgres_version }
       redis: { role: redis }
@@ -69,6 +71,7 @@
       happyview: { role: happyview, var: happyview_version }
       pds: { role: pds, var: pds_version }
       open-webui: { role: open-webui, var: openwebui_version }
+      beszel: { var: beszel_version }
     tag_regex: '^v[0-9]+\.[0-9]+\.[0-9]+$'
   tasks:
     - name: Require a known action
@@ -177,13 +180,14 @@
 
         # Read as a file rather than loaded as vars: only the one pin is wanted,
         # and the rest of a role's defaults template against hosts this play
-        # doesn't touch.
+        # doesn't touch. A pin with no role is a group var, already loaded here.
         - name: Read each pinned role's defaults
           ansible.builtin.set_fact:
             pins: >-
               {{ pins | default({}) | combine({item.key: (
-                   (lookup('file', playbook_dir ~ '/roles/' ~ item.value.role ~ '/defaults/main.yml')
-                    | from_yaml)[item.value.var] | string)
+                   ((lookup('file', playbook_dir ~ '/roles/' ~ item.value.role ~ '/defaults/main.yml')
+                     | from_yaml)[item.value.var] if item.value.role is defined
+                    else lookup('vars', item.value.var)) | string)
                    if item.value.var is defined else '-'}) }}
           loop: "{{ role_pins | dict2items }}"
           loop_control:

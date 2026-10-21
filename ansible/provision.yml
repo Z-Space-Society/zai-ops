@@ -290,3 +290,12 @@
         pds_admin_dids: "{{ scn_roster_admin_dids }}"
   roles:
     - pds
+
+# beszel needs only object-store (its manifest) and, for monitor.<domain>, the
+# proxy route; it keeps its own SQLite state and calls no other service. Last
+# because nothing depends on it. Agents (zai-ops#3 step 3) dial in to it later.
+- name: Configure the Beszel hub
+  hosts: beszel
+  gather_facts: true
+  roles:
+    - beszel

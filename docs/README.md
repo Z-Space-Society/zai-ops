@@ -97,7 +97,7 @@ ansible-playbook provision.yml --limit proxy    # or provision one by hand
 ## Architecture
 
 > **Drawn in full** in [Diagrams → Cluster topology](diagrams.md#cluster-topology)
-> — every CT by tier, the proxy's four public routes, and the service-to-service
+> — every CT by tier, the proxy's public routes, and the service-to-service
 > calls that stay on `vmbr1`. The prose below is the same picture in words.
 
 - **CT 100** creates and configures every other container over the Proxmox API
@@ -109,10 +109,12 @@ ansible-playbook provision.yml --limit proxy    # or provision one by hand
   one public hostname should point at a given proxy at a time (controlled in
   DNS).
 - **Every other CT** (postgres, redis, happyview, litellm, sync-relay, pds,
-  corliss, open-webui, scn-chat) lives only on the internal network and is
+  corliss, open-webui, scn-chat, beszel) lives only on the internal network and is
   reached through the proxy. [`sync-relay`](roles/sync_relay.md) has two routes, `sync.<domain>`
   and `mcp.<domain>`, since Phase B made it verify Corliss's tokens; its
-  `/internal/` prefix is left unrouted.
+  `/internal/` prefix is left unrouted. [`beszel`](roles/beszel.md), the
+  monitoring hub at `monitor.<domain>`, has PocketBase's superuser paths and
+  first-user endpoint answered 404 at the edge.
 - **CT 101** (object-store, Garage) is internal-only too — it's the restic
   backend the [`backup`](#backups) job writes to, not a user-facing service.
 - **Inference nodes** (salmon, orca, …) are **bare-metal**, *outside* the Proxmox
@@ -150,7 +152,7 @@ and the gaps leave room to grow a tier without renumbering:
 | ----------- | ------------ | ------------------------------------------ |
 | `100`–`109` | Core infra   | control (100), object-store (101), postgres (102), [`redis`](roles/redis.md) (103) |
 | `110`–`119` | Platform     | proxy/edge (110), registry (111, the [`happyview`](roles/happyview.md) role), gateway (112), sync relay (113, the [`sync_relay`](roles/sync_relay.md) role), PDS (114, the [`pds`](roles/pds.md) role) |
-| `120`–`129` | Applications | [`corliss`](roles/corliss.md) (120), open-webui (121), [`scn-chat`](roles/scn_chat.md) (122), … other user-facing apps |
+| `120`–`129` | Applications | [`corliss`](roles/corliss.md) (120), open-webui (121), [`scn-chat`](roles/scn_chat.md) (122), [`beszel`](roles/beszel.md) (123), … other user-facing apps |
 
 What separates the last two tiers is **who talks to it**: platform CTs are
 consumed by other services, application CTs are consumed by members. `corliss`
@@ -453,6 +455,7 @@ the API token and has no SSH path to the host, so anything needing host accounts
 | [`sync_relay`](roles/sync_relay.md) | `sync-relay` | Automerge sync server (Rust binary, built from source) — the server end of the automerge-repo WebSocket protocol behind shared notes, Postgres-backed. Phase B (`0.2.0`): verifies Corliss-issued access tokens and serves the MCP service, routed at `sync.<domain>` and `mcp.<domain>`. See [ADR-0007](decisions/0007-sync-relay-and-space-membership.md) |
 | [`pds`](roles/pds.md)                      | `pds`      | In-house AT Protocol PDS (atproto-pds, Rust binary, built from source at a pinned revision): hosts the cluster's atproto accounts. SQLite on disk, no Postgres. Fronted by Caddy at `pds.<domain>` |
 | [`scn_chat`](roles/scn_chat.md)            | `scn-chat` | SCN AI-assistant chat app (Node 24, built from source at a pinned tag): atproto OAuth sign-in against each member's own PDS. SQLite on disk, **not backed up**. Fronted by Caddy at `chat.<domain>` |
+| [`beszel`](roles/beszel.md)                | `beszel`   | Beszel monitoring hub (Go binary from a checksummed release): per-machine metrics and pending OS updates. SQLite on disk, **not backed up**: Ansible re-asserts the hub key and logins every run, so a rebuild loses only metrics history. Fronted by Caddy at `monitor.<domain>` |
 | [`backup`](roles/backup.md)                | CT 100     | restic + daily timer backing up runtime state to the object store |
 | [`manifest`](roles/manifest.md)            | every service play (last task) | Writes `<service>.json` to Garage: installed version, zai-ops revision, timestamp. Read by Corliss's `/systems/`. See [ADR-0009](decisions/0009-service-manifests-in-garage.md) |
 
@@ -518,6 +521,12 @@ decision record.
   holds admin over scn-chat, which is why it is a secret here rather than
   runtime inventory. It reaches only the scn-chat CT's `/etc/scn-chat/cron.env`
   (`0600`), which the cron timer reads. See [`roles/scn_chat.md`](roles/scn_chat.md#cron).
+- The Beszel hub's SSH key (`beszel_hub_key`) is generated once by `ssh-keygen`
+  into `/root/.zai-secrets/beszel_hub_key` and placed in the hub's data dir
+  before its first start. Agents trust its public half, so it is what lets a
+  rebuilt hub keep its agents. The hub's superuser and admin passwords are
+  generate-once `password` lookups beside it, re-asserted on every run. See
+  [`roles/beszel.md`](roles/beszel.md).
 - CT 100 also holds `/etc/zai-litellm/admin.env` (`0600`, rendered by the
   `litellm` role) — the LiteLLM master key + API base that
   [`zai-litellm-key`](#operator-commands) uses to mint/list/revoke per-person

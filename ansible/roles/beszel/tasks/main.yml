@@ -1,0 +1,232 @@
+---
+# Install the Beszel hub natively under systemd (zai-ops#3, step 2).
+#
+# The hub is one Go binary with PocketBase inside, so its state is a SQLite
+# database in the data dir. The stance (docs/roles/beszel.md): config is code,
+# history is disposable. Everything a person would otherwise set by hand (the
+# hub key, the superuser, the admin login) is re-asserted below on every run,
+# so a rebuilt CT loses only metrics history and needs no Tier-2 backup.
+
+# --- Service account + directories ------------------------------------------------
+
+- name: Create the beszel system group
+  ansible.builtin.group:
+    name: "{{ beszel_group }}"
+    system: true
+
+- name: Create the beszel system user
+  ansible.builtin.user:
+    name: "{{ beszel_user }}"
+    group: "{{ beszel_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ beszel_data_dir }}"
+    create_home: false
+
+- name: Create the download and data directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ beszel_download_dir }}", owner: root, mode: "0755" }
+    - { path: "{{ beszel_data_dir }}", owner: "{{ beszel_user }}", mode: "0700" }
+
+# --- Binary ------------------------------------------------------------------------
+
+# Named by version, so get_url finds the file in place and skips the download on
+# a replay, and a version bump fetches a new one. The checksum makes a tampered
+# or partial download fail the run.
+- name: Download the Beszel hub release
+  ansible.builtin.get_url:
+    url: "{{ beszel_hub_url }}"
+    dest: "{{ beszel_download_dir }}/beszel_linux_amd64-{{ beszel_version }}.tar.gz"
+    checksum: "sha256:{{ beszel_hub_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: beszel_download
+
+- name: Check whether the hub binary is installed
+  ansible.builtin.stat:
+    path: "{{ beszel_bin }}"
+  register: beszel_bin_stat
+
+# Extract only when the release moved or the binary is missing, so a replay
+# leaves the running binary alone.
+- name: Install the hub binary
+  ansible.builtin.unarchive:
+    src: "{{ beszel_download.dest }}"
+    remote_src: true
+    dest: "{{ beszel_bin | dirname }}"
+    include: ["beszel"]
+    owner: root
+    group: root
+    mode: "0755"
+  when: beszel_download is changed or not beszel_bin_stat.stat.exists
+  notify: restart beszel
+
+# --- Hub key ---------------------------------------------------------------------
+
+# Before the first start: the hub generates its own key only when this file is
+# missing, and agents trust whichever key it had when they were enrolled. The
+# key comes from /root/.zai-secrets, so a rebuilt hub has the same one.
+- name: Place the hub's SSH key
+  ansible.builtin.copy:
+    content: "{{ beszel_hub_key }}\n"
+    dest: "{{ beszel_data_dir }}/id_ed25519"
+    owner: "{{ beszel_user }}"
+    group: "{{ beszel_group }}"
+    mode: "0600"
+  no_log: true
+  notify: restart beszel
+
+# --- Unit --------------------------------------------------------------------------
+
+- name: Install the beszel systemd unit
+  ansible.builtin.template:
+    src: beszel.service.j2
+    dest: /etc/systemd/system/beszel.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart beszel
+
+- name: Ensure beszel is started and enabled
+  ansible.builtin.systemd:
+    name: beszel
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Apply pending beszel restarts before the smoke test
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the hub to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ beszel_port }}"
+    timeout: 60
+
+- name: Verify the hub's health endpoint responds
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/health"
+    status_code: 200
+  register: beszel_health
+  until: beszel_health is succeeded
+  retries: 10
+  delay: 3
+
+# --- Superuser + admin login -------------------------------------------------------
+
+# The PocketBase CLI is the only way to set a superuser without already having
+# one. It runs as the beszel user against the live data dir, so it never leaves
+# a root-owned SQLite file the daemon cannot write. The password is briefly in
+# this process's argv; the CLI has no other input, and nothing else runs on this
+# CT. upsert always reports success and only re-hashes, so it is marked unchanged.
+- name: Assert Ansible's superuser
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - "{{ beszel_user }}"
+      - --
+      - "{{ beszel_bin }}"
+      - superuser
+      - upsert
+      - "{{ beszel_superuser_email }}"
+      - "{{ beszel_superuser_password }}"
+      - --dir
+      - "{{ beszel_data_dir }}"
+  changed_when: false
+  no_log: true
+
+- name: Sign in as the superuser
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/_superusers/auth-with-password"
+    method: POST
+    body_format: json
+    body:
+      identity: "{{ beszel_superuser_email }}"
+      password: "{{ beszel_superuser_password }}"
+  register: beszel_superuser_auth
+  no_log: true
+
+- name: Look up the admin user
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/users/records?filter={{ beszel_admin_filter | urlencode }}"
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+  vars:
+    beszel_admin_filter: "email='{{ beszel_admin_email }}'"
+  register: beszel_admin_lookup
+  no_log: true
+
+- name: Note the admin user's record
+  ansible.builtin.set_fact:
+    beszel_admin_record: "{{ beszel_admin_lookup.json['items'] | first | default({}) }}"
+    beszel_admin_exists: "{{ beszel_admin_lookup.json['items'] | length > 0 }}"
+  no_log: true
+
+# verified: the users collection's authRule is verified=true, so an unverified
+# user cannot sign in. role: Beszel's own admin/user/readonly field.
+- name: Create the admin user
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/users/records"
+    method: POST
+    body_format: json
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+    body:
+      email: "{{ beszel_admin_email }}"
+      password: "{{ beszel_admin_password }}"
+      passwordConfirm: "{{ beszel_admin_password }}"
+      verified: true
+      role: admin
+  when: not beszel_admin_exists | bool
+  changed_when: true
+  no_log: true
+
+# Re-setting the password every run would rotate the user's tokenKey and sign
+# the admin out each time, so the password is set only when it no longer works.
+- name: Check the admin user's password
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/users/auth-with-password"
+    method: POST
+    body_format: json
+    body:
+      identity: "{{ beszel_admin_email }}"
+      password: "{{ beszel_admin_password }}"
+    status_code: [200, 400]
+  register: beszel_admin_auth
+  when: beszel_admin_exists | bool
+  no_log: true
+
+- name: Restore the admin user's role, verification and password
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/users/records/{{ beszel_admin_record.id }}"
+    method: PATCH
+    body_format: json
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+    body: >-
+      {{ {'role': 'admin', 'verified': true}
+         | combine({'password': beszel_admin_password, 'passwordConfirm': beszel_admin_password}
+                   if beszel_admin_auth.status != 200 else {}) | to_json }}
+  when: >-
+    beszel_admin_exists | bool and (beszel_admin_record.role != 'admin'
+    or not beszel_admin_record.verified or beszel_admin_auth.status != 200)
+  changed_when: true
+  no_log: true
+
+# --- Manifest (docs/roles/manifest.md) ----------------------------------------
+# After the smoke test, so a service that failed it never claims a version.
+- name: Record the Beszel hub's manifest
+  ansible.builtin.include_role:
+    name: manifest
+  vars:
+    manifest_version: "{{ beszel_version }}"

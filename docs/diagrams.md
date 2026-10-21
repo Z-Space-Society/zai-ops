@@ -35,6 +35,7 @@ flowchart TB
             corliss["corliss · 120<br/>ATProto sign-in, membership, OIDC provider<br/>:8000"]
             owui["open-webui · 121<br/>chat UI<br/>:8080"]
             scnchat["scn-chat · 122<br/>AI assistant, chats on the member's PDS<br/>:3000"]
+            beszel["beszel · 123<br/>monitoring hub, SQLite<br/>:8090"]
         end
 
         subgraph plat["Platform 110–119 — consumed by other services"]
@@ -68,6 +69,7 @@ flowchart TB
     proxy -->|"view. → :3000"| happyview
     proxy -->|"sync. → :7030 · mcp. → :7031"| relay
     proxy -->|"pds. and every unrouted hostname → :3000"| pds
+    proxy -->|"monitor. → :8090"| beszel
 
     corliss -->|"OIDC id_token"| owui
     corliss -->|"membership reconcile"| happyview
@@ -172,7 +174,8 @@ flowchart LR
         p9["happyview"]
         p10["sync-relay<br/>~15–30 min, cargo build on a cold CT"]
         p11["pds<br/>cargo build too"]
-        p1 --> p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9 --> p10 --> p11
+        p12["beszel"]
+        p1 --> p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9 --> p10 --> p11 --> p12
     end
 
     subgraph phase5["5 · steady state"]

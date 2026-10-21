@@ -4,6 +4,14 @@
 # which loses to the base suite (500), so without this pin the version the proxy
 # role asks for would be uninstallable. With a broader pin, backports would start
 # supplying unrelated packages on this CT.
+#
+# Pinned to the exact version, not to the backports suite. A suite pin makes the
+# newest backports caddy the candidate, so a plain `apt-get upgrade` (or
+# apt-upgrade.yml) would move the edge past caddy_apt_version without a commit,
+# and the next replay of this role would then fail asking apt for a lower
+# version. Here every other caddy keeps its default priority, so the pinned one
+# is the candidate and nothing else is. 990 is below 1000, so apt never
+# downgrades to reach it either. apt-upgrade.yml reports when backports is ahead.
 Package: caddy
-Pin: release n={{ caddy_backports_suite }}
+Pin: version {{ caddy_apt_version }}
 Pin-Priority: 990

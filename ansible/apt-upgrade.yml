@@ -1,0 +1,163 @@
+---
+# Upgrade the Debian packages on the service containers, or report what is
+# pending without touching anything.
+#
+#   ansible-playbook apt-upgrade.yml                          # check (the default)
+#   ansible-playbook apt-upgrade.yml -e upgrade_action=apply  # upgrade, then check
+#   ansible-playbook apt-upgrade.yml --limit proxy            # one CT
+#
+# Ends with a Summary: one line per CT, `current` only when nothing is pending
+# and no pinned package has fallen behind. A CT that could not be reached gets
+# no line, and its failure is in the PLAY RECAP.
+#
+# Apply is the upgrade without removals (the apt module's `safe` mode, run with
+# apt-get): it may install a new dependency, but it never removes a package, so
+# whatever is left afterwards needs a dist-upgrade and a person deciding to run one.
+#
+# It never moves a package a role pins. Those pins are apt preferences on the
+# exact version (see the proxy role's caddy-backports.pref.j2), so the pinned
+# version is apt's candidate and an upgrade has nothing newer to choose. A pin
+# moves by a commit to the role and a provision of that CT, which is why each
+# one is checked here: apt reads a pinned CT as current while it is behind.
+#
+# Covers the service containers only. The Proxmox host and the inference nodes
+# are updated by hand.
+
+- name: Upgrade or check Debian packages on the service containers
+  hosts: service_containers
+  gather_facts: false
+  vars:
+    upgrade_mode: "{{ upgrade_action | default('check') }}"
+    # Packages a role pins to an exact version, by inventory name: the role
+    # whose defaults hold the pin, and the variable. The pin is read from that
+    # file, as set-version.yml reads role_pins, so it lives in one place.
+    apt_pins:
+      proxy:
+        - { package: caddy, role: proxy, var: caddy_apt_version }
+    host_pins: "{{ apt_pins.get(inventory_hostname, []) }}"
+  tasks:
+    # A service with no CTID has no container and no address, so a run without
+    # --limit leaves it out rather than failing to reach it.
+    - name: Skip a service with no CTID
+      ansible.builtin.meta: end_host
+      when: ctid is not defined
+
+    - name: Require a known action
+      ansible.builtin.assert:
+        that: upgrade_mode in ['check', 'apply']
+        fail_msg: "Pass -e upgrade_action=check or apply (check is the default)."
+
+    - name: Refresh the package lists
+      ansible.builtin.apt:
+        update_cache: true
+      changed_when: false
+
+    # force_apt_get: the CTs have no aptitude, and saying so here keeps the
+    # module from warning about the fallback on every host.
+    - name: Upgrade the installed packages
+      ansible.builtin.apt:
+        upgrade: safe
+        force_apt_get: true
+      register: upgrade_applied
+      when: upgrade_mode == 'apply'
+
+    # dist-upgrade, simulated, is everything apt would install if asked, and the
+    # same command Beszel's agent counts. After an apply, what it still lists is
+    # what the upgrade above left behind.
+    - name: List what is still pending
+      ansible.builtin.command:
+        argv: [apt-get, -s, dist-upgrade]
+      environment:
+        LC_ALL: C
+      register: upgrade_simulated
+      changed_when: false
+      check_mode: false
+
+    # Read as a file on the control node, not loaded as vars: only the one pin
+    # is wanted, and the rest of a role's defaults template against hosts this
+    # play may not touch.
+    - name: Read each pin from its role's defaults
+      ansible.builtin.set_fact:
+        pin_versions: >-
+          {{ pin_versions | default({}) | combine({item.package: (
+               lookup('file', playbook_dir ~ '/roles/' ~ item.role ~ '/defaults/main.yml')
+               | from_yaml)[item.var] | string}) }}
+      loop: "{{ host_pins }}"
+      loop_control:
+        label: "{{ item.package }}"
+
+    # What is installed, the newest version any configured suite offers, and
+    # whether the pinned version is still offered at all. Newest is compared with
+    # dpkg, never sort -V, which misorders the `~` in a backports version.
+    - name: Compare each pin with what the archive offers
+      ansible.builtin.shell: |
+        set -eu
+        installed=$(dpkg-query -W -f='${Version}' "$PKG" 2>/dev/null || true)
+        newest=
+        listed=no
+        for v in $(apt-cache madison "$PKG" | awk '{print $3}'); do
+          if [ "$v" = "$PINNED" ]; then listed=yes; fi
+          if [ -z "$newest" ] || dpkg --compare-versions "$v" gt "$newest"; then
+            newest=$v
+          fi
+        done
+        printf '%s|%s|%s\n' "$installed" "$newest" "$listed"
+      environment:
+        PKG: "{{ item.package }}"
+        PINNED: "{{ pin_versions[item.package] }}"
+      loop: "{{ host_pins }}"
+      loop_control:
+        label: "{{ item.package }}"
+      register: pin_checks
+      changed_when: false
+      check_mode: false
+
+    # One phrase per pin. Only "current" means the pin needs nothing:
+    #   installed differs  the CT is not what its role says; provision it
+    #   not offered        backports keeps only its newest build, so a rebuild
+    #                      of this CT would fail at apt
+    #   newer offered      the archive has moved on; move the pin
+    - name: Describe each pin
+      ansible.builtin.set_fact:
+        pin_lines: "{{ pin_lines | default([]) + [pin_line | trim] }}"
+      vars:
+        fields: "{{ item.stdout.split('|') }}"
+        want: "{{ pin_versions[item.item.package] }}"
+        pin_line: >-
+          {%- if fields[0] != want -%}
+          {{ item.item.package }} installed {{ fields[0] or 'nothing' }}, pin says {{ want }}: provision {{ inventory_hostname }}
+          {%- elif fields[2] != 'yes' -%}
+          {{ item.item.package }} pinned {{ want }}, no longer in the archive (newest {{ fields[1] or 'none' }}): a rebuilt {{ inventory_hostname }} cannot install it, move {{ item.item.var }}
+          {%- elif fields[1] != want -%}
+          {{ item.item.package }} pinned {{ want }}, the archive has {{ fields[1] }}: move {{ item.item.var }} and provision {{ inventory_hostname }}
+          {%- else -%}
+          {{ item.item.package }} pinned {{ want }}, current
+          {%- endif -%}
+      loop: "{{ pin_checks.results }}"
+      loop_control:
+        label: "{{ item.item.package }}"
+
+    - name: Build this CT's line
+      ansible.builtin.set_fact:
+        upgrade_report: >-
+          {{ (('upgraded; ' if upgrade_applied is changed else '')
+              ~ ('current' if not pending and not pins_behind else
+                 (pending | length) ~ (' left, need a dist-upgrade' if upgrade_mode == 'apply' else ' pending')
+                 ~ ' (' ~ (pending | select('search', 'security', ignorecase=true) | list | length) ~ ' security)'
+                 if pending else 'nothing pending'))
+             ~ ('; ' ~ (pin_lines | join('; ')) if pin_lines | default([]) else '') }}
+      vars:
+        pending: "{{ upgrade_simulated.stdout_lines | select('match', '^Inst ') | list }}"
+        pins_behind: "{{ pin_lines | default([]) | reject('search', ', current$') | list | length > 0 }}"
+
+    # run_once, not a localhost play: --limit would leave a localhost play with
+    # no hosts. It runs after every CT has finished the tasks above, on one that
+    # is still up, and reads the others' lines from hostvars. A CT that failed or
+    # was skipped has left the play by now, so it is not listed.
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ ansible_play_hosts | sort
+             | zip(ansible_play_hosts | sort | map('extract', hostvars, 'upgrade_report'))
+             | map('join', ': ') | list }}
+      run_once: true

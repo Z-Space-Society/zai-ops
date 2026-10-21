@@ -119,7 +119,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://10.1.1.<ctid>:8090/api/health   
 Through the edge:
 
 ```sh
-D=$(awk '/cluster_domain:/{print $2}' /opt/zai-ops/ansible/inventory/local.yml)
+D=$(awk '$1=="cluster_domain:"{print $2}' /opt/zai-ops/ansible/inventory/local.yml)
 for p in /api/health /_/ /api/collections/_superusers/auth-with-password \
          /api/collections/pbc_3142635823/auth-with-password /api/beszel/create-user; do
   printf '%s ' "$p"; curl -s -o /dev/null -w '%{http_code}\n' "https://monitor.$D$p"

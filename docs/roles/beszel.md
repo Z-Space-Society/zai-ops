@@ -1,0 +1,143 @@
+# Role: `beszel`
+
+Installs the [Beszel](https://beszel.dev) **hub** natively as the cluster's
+monitoring dashboard. The hub shows per-machine metrics and, since v0.21.0, the
+OS updates pending on each machine. Each machine reports through a small agent,
+added in a later step.
+
+- **Source:** [`ansible/roles/beszel/`](../../ansible/roles/beszel/)
+- **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure play, `hosts: beszel`, last)
+- **Target:** the `beszel` CT (CTID 123 by convention, application tier, 120–129), over SSH. Public through the [`proxy`](proxy.md) at `monitor.<domain>`
+- **Tracking:** [zai-ops#3](https://github.com/Z-Space-Society/zai-ops/issues/3), step 2 of six
+
+## Purpose
+
+The hub is one Go binary from the upstream release tarball, verified by
+SHA-256, and run as a dedicated system user under systemd. PocketBase, the
+backend it embeds, keeps its state in SQLite in `/var/lib/beszel`.
+
+It is an application, not platform, because of who uses it: admins sign in and
+land on it. Its public route also lets agents on machines outside the cluster
+dial in.
+
+What this step does **not** do yet: no agents (step 3), no Corliss sign-in
+(step 4, which also adds the Corliss health probe), no alerts (step 5). Until
+step 4, the only way in is the Ansible-owned admin below.
+
+## SQLite: config is code, history is disposable
+
+The backup tier is `pg_dumpall`, and the hub's database is SQLite, so the role
+keeps nothing in it that cannot be rebuilt. Every run of the role re-asserts:
+
+- **the hub key**, `id_ed25519` in the data dir, written from
+  `/root/.zai-secrets/beszel_hub_key` before the hub's first start;
+- **the superuser** Ansible uses on `127.0.0.1`;
+- **the admin login**, its role, verification and password.
+
+A rebuilt CT therefore comes back with the same key, so agents still trust it,
+and the same login. The only thing it loses is metrics history. That is
+accepted, and there is **no Tier-2 backup** of this CT.
+
+## Tasks
+
+| Task | Module | Why |
+| ---- | ------ | --- |
+| Create `beszel` group + user | `group`, `user` | Run the hub unprivileged, no login shell. |
+| Create the download and data dirs | `ansible.builtin.file` | `/opt/beszel` (root, holds the tarball) and `/var/lib/beszel` (`beszel`, `0700`). |
+| Download the release | `get_url` with `checksum: sha256:` | Named by version, so a replay downloads nothing and a bump fetches the new release. A mismatch fails the run. |
+| Install the binary | `unarchive` (`include: beszel`) | Only when the download changed or `/usr/local/bin/beszel` is missing. Notifies restart. |
+| Place the hub key | `copy` (`0600 beszel`, `no_log`) | Before the first start. The hub generates its own key only when this file is missing, and agents trust whichever key it had when they were enrolled. |
+| Install the systemd unit | `template` | Hardened; `ReadWritePaths` is the data dir only; `Restart=always`. `APP_URL` is `https://monitor.<domain>`. Notifies reload + restart. |
+| Ensure started + enabled, flush handlers | `systemd`, `meta` | Up with its final config before the smoke test. |
+| Smoke test | `wait_for` `127.0.0.1:8090`, then `uri /api/health` | `/api/health` must return 200. |
+| Assert the superuser | `command` → `runuser -u beszel -- beszel superuser upsert … --dir` | The PocketBase CLI is the only way to set a superuser without already having one. It runs as `beszel`, so it never leaves a root-owned SQLite file. `changed_when: false`: upsert always succeeds and only re-hashes. |
+| Sign in, look up the admin | `uri` (`no_log`) | A superuser token from `/api/collections/_superusers/auth-with-password`, then the user by email. |
+| Create the admin | `uri` POST (`no_log`) | Only when missing. `verified: true` (the users collection's `authRule` is `verified=true`) and `role: admin`. |
+| Check, then restore the admin | `uri` (`no_log`) | Signs in as the admin. It PATCHes only what drifted, and sets the password only when signing in fails, because setting it rotates PocketBase's token key and would sign the admin out on every run. |
+| Record the manifest | `include_role: manifest` (`beszel_version`) | Last, after the smoke test. Writes `beszel.json`. See [`manifest`](manifest.md). |
+
+### Handlers
+
+| Handler | Action |
+| ------- | ------ |
+| `reload systemd` | `systemd: daemon_reload=true` |
+| `restart beszel` | `service: name=beszel state=restarted` |
+
+## Variables
+
+In [`group_vars/all/main.yml`](../../ansible/group_vars/all/main.yml), because
+other roles read them too:
+
+| Variable | Default | Meaning |
+| -------- | ------- | ------- |
+| `beszel_version` | `0.21.0` | The release for the hub, and for the agent role in step 3. |
+| `beszel_host` | `monitor.{{ cluster_domain }}` | The public hostname. The proxy routes it; the hub's `APP_URL` is built from it. |
+| `beszel_hub_key` | generated | Ed25519 key in OpenSSH format, made once by `ssh-keygen` into `/root/.zai-secrets/beszel_hub_key`. |
+| `beszel_superuser_password` / `beszel_admin_password` | generated | `password` lookups under `/root/.zai-secrets`. |
+
+In [`defaults/main.yml`](../../ansible/roles/beszel/defaults/main.yml):
+
+| Variable | Default | Meaning |
+| -------- | ------- | ------- |
+| `beszel_hub_url` / `beszel_hub_sha256` | the v`beszel_version` tarball | Bump the checksum with the version, taken from the release's `beszel_<version>_checksums.txt`. |
+| `beszel_port` / `beszel_bind` | `8090` / `0.0.0.0` | Listen socket. The wildcard is mandatory, for the same cold-boot reason as `sync_relay_host`. |
+| `beszel_data_dir` | `/var/lib/beszel` | PocketBase's `--dir`: the database and the hub key. |
+| `beszel_app_url` | `https://{{ beszel_host }}` | Rendered as `APP_URL`. |
+| `beszel_superuser_email` | `ansible@{{ cluster_domain }}` | Ansible's superuser. Receives no mail. |
+| `beszel_admin_email` | `admin@{{ cluster_domain }}` | The login people use until step 4. Receives no mail. |
+
+## Dependencies
+
+- [`object_store`](object_store.md), for the manifest write.
+- [`proxy`](proxy.md), for `monitor.<domain>`. DNS for that name must reach the
+  edge before Caddy can issue its certificate.
+
+Nothing calls the hub yet. In step 4, Corliss gets a health probe for it.
+
+## Public surface
+
+The proxy forwards `monitor.<domain>` except for these paths, which it answers
+with a 404:
+
+| Path | What it is |
+| ---- | ---------- |
+| `/_/*` | The PocketBase superuser dashboard. |
+| `/api/collections/_superusers/*` | Superuser sign-in and records. |
+| `/api/collections/pbc_3142635823/*` | The same collection by its id. PocketBase resolves a collection by name **or** id, and this id is fixed (`"pbc_" + crc32("auth_superusers")`), so blocking only the name leaves the door open. |
+| `/api/beszel/create-user` | Creates the first user with no auth. The hub registers it only while the users table is empty at startup, which on a fresh CT is the moment before this role adds its admin. |
+
+Ansible uses all of these on `127.0.0.1`, inside the CT.
+
+## Verify
+
+From CT 100:
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' http://10.1.1.<ctid>:8090/api/health   # 200
+```
+
+Through the edge:
+
+```sh
+D=$(awk '/cluster_domain:/{print $2}' /opt/zai-ops/ansible/inventory/local.yml)
+for p in /api/health /_/ /api/collections/_superusers/auth-with-password \
+         /api/collections/pbc_3142635823/auth-with-password /api/beszel/create-user; do
+  printf '%s ' "$p"; curl -s -o /dev/null -w '%{http_code}\n' "https://monitor.$D$p"
+done   # 200, then 404 four times
+```
+
+Sign in at `https://monitor.<domain>` as `admin@<domain>` with
+`cat /root/.zai-secrets/beszel_admin_password` from CT 100.
+
+## Notes
+
+> [!note] A throwaway superuser named `_@b.b`
+> Beszel's first migration creates a superuser `_@b.b` with a random password
+> nobody knows, unless `USER_EMAIL` and `USER_PASSWORD` are set. The role leaves
+> it in place: it cannot sign in without that password, and its dashboard is
+> blocked at the edge anyway.
+
+> [!note] The superuser password is briefly in argv
+> `beszel superuser upsert` takes the password as an argument and has no other
+> input. It is visible in the CT's process list for the moment the command
+> runs, and nothing else runs on this CT.

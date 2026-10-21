@@ -101,6 +101,31 @@ caddy_proxy_hosts:
     port: 7030
     block_paths: ["/internal/*"]
   - { domain: "{{ sync_relay_mcp_host }}", service: sync-relay, port: 7031 }
+  # The Beszel hub (zai-ops#3). Public so agents outside the cluster can dial
+  # in, which leaves PocketBase's own admin surfaces on the internet unless they
+  # are answered here instead:
+  #
+  #   /_/*                     the PocketBase superuser dashboard.
+  #   /api/collections/_superusers/*
+  #   /api/collections/pbc_3142635823/*
+  #                            superuser sign-in and records. PocketBase finds a
+  #                            collection by name OR id, and _superusers has this
+  #                            fixed id ("pbc_" + crc32 of "auth_superusers"), so
+  #                            blocking the name alone leaves the same door open.
+  #   /api/beszel/create-user  creates the first user with no auth at all. The
+  #                            hub registers it only while the users table is
+  #                            empty at startup, which on a fresh CT is the
+  #                            moment before the beszel role adds its admin.
+  #
+  # Ansible reaches all of these on 127.0.0.1 inside the CT, never through here.
+  - domain: "{{ beszel_host }}"
+    service: beszel
+    port: 8090
+    block_paths:
+      - "/_/*"
+      - "/api/collections/_superusers/*"
+      - "/api/collections/pbc_3142635823/*"
+      - "/api/beszel/create-user"
 
 # Where a request for a hostname with no route of its own goes: member handles.
 # A handle (jacob.<domain>) is a hostname, and an app resolving one without a

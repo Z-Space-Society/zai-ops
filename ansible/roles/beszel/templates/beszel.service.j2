@@ -1,0 +1,27 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Beszel hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ beszel_user }}
+Group={{ beszel_group }}
+Environment=APP_URL={{ beszel_app_url }}
+ExecStart={{ beszel_bin }} serve --http {{ beszel_bind }}:{{ beszel_port }} --dir {{ beszel_data_dir }}
+
+# Restart=always, not on-failure: PocketBase exits 0 on SIGTERM, and the hub is
+# what tells an admin that something else is down, so a clean exit for any
+# other reason is still an outage nobody would see.
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# The data dir holds the SQLite database and the hub key; nothing else is written.
+ReadWritePaths={{ beszel_data_dir }}
+
+[Install]
+WantedBy=multi-user.target

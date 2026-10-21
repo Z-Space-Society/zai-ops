@@ -64,6 +64,7 @@ them now.
 | `happyview.json` | [`happyview`](happyview.md) | `happyview_version` |
 | `sync-relay.json` | [`sync_relay`](sync_relay.md) | `sync_relay_version` |
 | `pds.json` | [`pds`](pds.md) | `pds_version` |
+| `beszel.json` | [`beszel`](beszel.md) | `beszel_version` |
 | `scn-chat.json` | [`scn_chat`](scn_chat.md) | `git describe` of the checkout `scn_chat_version` resolved to |
 
 Each object is:

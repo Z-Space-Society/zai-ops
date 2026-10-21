@@ -1,0 +1,36 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Beszel agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={{ monitor_agent_user }}
+Group={{ monitor_agent_group }}
+# HUB_URL, TOKEN, KEY and the rest. WebSocket mode only: the agent dials out to
+# the hub, and DISABLE_SSH turns off its fallback listener, so it opens no port.
+EnvironmentFile=/etc/beszel-agent.env
+ExecStart={{ monitor_agent_bin }}
+
+# on-failure, not always as the hub has: the agent exits 0 only when signalled
+# to stop, its own errors exit 1, and losing the hub is not an exit at all (it
+# keeps redialling). An agent that is down is also not silent, because the hub
+# marks its system down. Nothing would say so for a hub that stopped.
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# The data dir holds the fingerprint; nothing else is written.
+ReadWritePaths={{ monitor_agent_data_dir }}
+# The hourly updates check runs `apt-get -s dist-upgrade` as this user. A
+# simulation takes no lock and only reads /etc/apt, /var/lib/apt/lists and
+# /var/lib/dpkg/status; apt's pkgcache write to /var/cache/apt fails and it
+# builds the cache in memory instead. So ProtectSystem=strict is enough, but
+# nothing added here may hide /var/lib or /etc/apt, or filter the fork and exec
+# of apt-get and dpkg.
+
+[Install]
+WantedBy=multi-user.target

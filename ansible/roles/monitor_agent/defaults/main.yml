@@ -1,0 +1,33 @@
+---
+# Beszel agent (zai-ops#3, step 3): reports this machine's metrics and pending
+# apt updates to the hub on the beszel CT. One Go binary, run natively under
+# systemd.
+#
+# beszel_version, beszel_port, the token and the hub's public key are in
+# group_vars/all/main.yml: the hub role reads the same values.
+
+# The release tarball and its SHA-256. Bump the checksum with beszel_version,
+# and take it from the release's own beszel_<version>_checksums.txt rather than
+# from a copy. get_url fails the run on a mismatch.
+monitor_agent_url: "https://github.com/henrygd/beszel/releases/download/v{{ beszel_version }}/beszel-agent_linux_amd64.tar.gz"
+monitor_agent_sha256: "898d67d456a4feed7d651bbac22def5eb41840d4f3d9bf058a5ed37c8c815599"
+
+# The hub's internal address on vmbr1, never monitor.<domain>: an agent inside
+# the cluster has no reason to hairpin through the proxy, and this way it works
+# before the edge has a certificate for that name.
+monitor_agent_hub_url: "http://{{ hostvars['beszel'].ansible_host }}:{{ beszel_port }}"
+
+monitor_agent_user: beszel-agent
+monitor_agent_group: beszel-agent
+monitor_agent_bin: /usr/local/bin/beszel-agent
+# Where the downloaded tarball is kept, named by version, so a replay at the
+# same version downloads nothing and a bump fetches the new one.
+monitor_agent_download_dir: /opt/beszel-agent
+# The agent's DATA_DIR: only its fingerprint file. The unit's only writable path.
+monitor_agent_data_dir: /var/lib/beszel-agent
+
+# What the hub knows this machine by. Written to the data dir rather than left
+# to the agent, which derives one from the machine id, so a rebuilt CT
+# reattaches to its old system record (and its history) instead of leaving a
+# stale "down" twin beside a new one. 48 hex characters, the agent's own format.
+monitor_agent_fingerprint: "{{ ((cluster_domain ~ '/' ~ inventory_hostname) | hash('sha256'))[:48] }}"

@@ -1,0 +1,22 @@
+---
+# Install or update the Beszel monitoring agent on the control node and every
+# service container (zai-ops#3, step 3).
+#
+#   ansible-playbook monitor-agent.yml                 # every host
+#   ansible-playbook monitor-agent.yml --limit proxy   # one CT
+#
+# (`scn-config`'s Monitoring Agents, and `scn-config nonint
+# apply-monitor-agents`, are the front end.)
+#
+# provision.yml imports this after the hub's play, so provisioning any one
+# service also gives it its agent. Run it on its own for the first rollout, after
+# a beszel_version bump, and after a CT 100 rebuild: site.yml leaves the agent
+# out because a new cluster has no hub yet when it runs.
+#
+# A host is skipped, not failed, while the hub is unassigned or not answering.
+
+- name: Install the Beszel monitoring agent
+  hosts: service_containers:control_node
+  gather_facts: false
+  roles:
+    - monitor_agent

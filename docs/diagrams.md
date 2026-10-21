@@ -70,6 +70,7 @@ flowchart TB
     proxy -->|"sync. → :7030 · mcp. → :7031"| relay
     proxy -->|"pds. and every unrouted hostname → :3000"| pds
     proxy -->|"monitor. → :8090"| beszel
+    control -.->|"every CT's agent dials :8090 over vmbr1"| beszel
 
     corliss -->|"OIDC id_token"| owui
     corliss -->|"membership reconcile"| happyview
@@ -174,8 +175,9 @@ flowchart LR
         p9["happyview"]
         p10["sync-relay<br/>~15–30 min, cargo build on a cold CT"]
         p11["pds<br/>cargo build too"]
-        p12["beszel"]
-        p1 --> p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9 --> p10 --> p11 --> p12
+        p12["beszel<br/>writes the agent token"]
+        p13["monitor-agent.yml · scn-config Monitoring Agents<br/>every CT's agent, now that the hub is up"]
+        p1 --> p2 --> p3 --> p4 --> p5 --> p6 --> p7 --> p8 --> p9 --> p10 --> p11 --> p12 --> p13
     end
 
     subgraph phase5["5 · steady state"]
@@ -204,6 +206,7 @@ assignment](README.md#service-ctid-assignment).
 | `postgres` | `happyview`, `litellm`, `sync-relay`, `corliss` and `open-webui` each create their own role + database on it |
 | `redis` | `open-webui` builds its `REDIS_URL` from that CT's address |
 | `litellm` | `corliss` and `open-webui` read keys only its play can mint (see [Known gotchas](gotchas.md)) |
+| `beszel` | every CT's [agent](roles/monitor_agent.md) enrolls with the token its play writes. A CT provisioned before it skips its agent, and `monitor-agent.yml` installs it afterwards |
 
 `corliss` additionally needs `sync-relay`, `redis`, `object-store` and `proxy`
 to have been **assigned** — its `/systems/` probe URLs derive from `hostvars`

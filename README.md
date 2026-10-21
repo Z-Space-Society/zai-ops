@@ -130,7 +130,12 @@ itself from this repo.
                                                   #   from source on a cold CT
    ansible-playbook provision.yml --limit corliss
    ansible-playbook provision.yml --limit open-webui
+   ansible-playbook provision.yml --limit beszel     # the monitoring hub
+   ansible-playbook monitor-agent.yml   # then every agent: services provisioned
+                                        #   before the hub skipped theirs
    ```
+
+   `scn-config`'s **Monitoring Agents** entry is that last line.
 
    (`scn-config`, `zai-backup`, … are operator commands in the repo's
    [`bin/`](bin/), on `PATH` on the control node. They run in place from git, so

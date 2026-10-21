@@ -3,7 +3,7 @@
 Installs the [Beszel](https://beszel.dev) **hub** natively as the cluster's
 monitoring dashboard. The hub shows per-machine metrics and, since v0.21.0, the
 OS updates pending on each machine. Each machine reports through a small agent,
-added in a later step.
+installed by [`monitor_agent`](monitor_agent.md).
 
 - **Source:** [`ansible/roles/beszel/`](../../ansible/roles/beszel/)
 - **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure play, `hosts: beszel`, last)
@@ -20,9 +20,10 @@ It is an application, not platform, because of who uses it: admins sign in and
 land on it. Its public route also lets agents on machines outside the cluster
 dial in.
 
-What this step does **not** do yet: no agents (step 3), no Corliss sign-in
-(step 4, which also adds the Corliss health probe), no alerts (step 5). Until
-step 4, the only way in is the Ansible-owned admin below.
+Not here yet: Corliss sign-in (step 4, which also adds the Corliss health
+probe) and alerts (step 5). Until step 4, the only way in is the Ansible-owned
+admin below. The agents (step 3) are the [`monitor_agent`](monitor_agent.md)
+role; this role writes the token they enroll with.
 
 ## SQLite: config is code, history is disposable
 
@@ -32,10 +33,12 @@ keeps nothing in it that cannot be rebuilt. Every run of the role re-asserts:
 - **the hub key**, `id_ed25519` in the data dir, written from
   `/root/.zai-secrets/beszel_hub_key` before the hub's first start;
 - **the superuser** Ansible uses on `127.0.0.1`;
-- **the admin login**, its role, verification and password.
+- **the admin login**, its role, verification and password;
+- **the agent token**, `/root/.zai-secrets/beszel_agent_token`, as the admin's
+  permanent universal token.
 
 A rebuilt CT therefore comes back with the same key, so agents still trust it,
-and the same login. The only thing it loses is metrics history. That is
+the same login, and the same token, so every agent re-enrolls by itself. The only thing it loses is metrics history. That is
 accepted, and there is **no Tier-2 backup** of this CT.
 
 ## Tasks
@@ -47,13 +50,14 @@ accepted, and there is **no Tier-2 backup** of this CT.
 | Download the release | `get_url` with `checksum: sha256:` | Named by version, so a replay downloads nothing and a bump fetches the new release. A mismatch fails the run. |
 | Install the binary | `unarchive` (`include: beszel`) | Only when the download changed or `/usr/local/bin/beszel` is missing. Notifies restart. |
 | Place the hub key | `copy` (`0600 beszel`, `no_log`) | Before the first start. The hub generates its own key only when this file is missing, and agents trust whichever key it had when they were enrolled. |
-| Install the systemd unit | `template` | Hardened; `ReadWritePaths` is the data dir only; `Restart=always`. `APP_URL` is `https://monitor.<domain>`. Notifies reload + restart. |
+| Install the systemd unit | `template` | Hardened; `ReadWritePaths` is the data dir only; `Restart=always`. `APP_URL` is `https://monitor.<domain>`. `SHARE_ALL_SYSTEMS=true`, so every signed-in user sees every system whichever user owns the token. Every user is an admin, now and after step 4, so this opens nothing new. Notifies reload + restart. |
 | Ensure started + enabled, flush handlers | `systemd`, `meta` | Up with its final config before the smoke test. |
 | Smoke test | `wait_for` `127.0.0.1:8090`, then `uri /api/health` | `/api/health` must return 200. |
 | Assert the superuser | `command` → `runuser -u beszel -- beszel superuser upsert … --dir` | The PocketBase CLI is the only way to set a superuser without already having one. It runs as `beszel`, so it never leaves a root-owned SQLite file. `changed_when: false`: upsert always succeeds and only re-hashes. |
 | Sign in, look up the admin | `uri` (`no_log`) | A superuser token from `/api/collections/_superusers/auth-with-password`, then the user by email. |
 | Create the admin | `uri` POST (`no_log`) | Only when missing. `verified: true` (the users collection's `authRule` is `verified=true`) and `role: admin`. |
 | Check, then restore the admin | `uri` (`no_log`) | Signs in as the admin. It PATCHes only what drifted, and sets the password only when signing in fails, because setting it rotates PocketBase's token key and would sign the admin out on every run. |
+| Look up, then write the agent token | `uri` (`no_log`) | `universal_tokens` has no API rules, so only a superuser can write it. POST when missing, PATCH when it differs. The hub's own `/api/beszel/universal-token` needs a user session, which step 4 removes. The admin owns it because that record is Ansible's and stays after step 4. |
 | Record the manifest | `include_role: manifest` (`beszel_version`) | Last, after the smoke test. Writes `beszel.json`. See [`manifest`](manifest.md). |
 
 ### Handlers
@@ -70,8 +74,11 @@ other roles read them too:
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `beszel_version` | `0.21.0` | The release for the hub, and for the agent role in step 3. |
+| `beszel_version` | `0.21.0` | The release for the hub, and for [`monitor_agent`](monitor_agent.md). |
 | `beszel_host` | `monitor.{{ cluster_domain }}` | The public hostname. The proxy routes it; the hub's `APP_URL` is built from it. |
+| `beszel_port` | `8090` | Listen port. The agents' `HUB_URL` names it. |
+| `beszel_superuser_email` | `ansible@{{ cluster_domain }}` | Ansible's superuser, also used by the agents' smoke test on the hub's `127.0.0.1`. Receives no mail. |
+| `beszel_agent_token` | generated | `/root/.zai-secrets/beszel_agent_token`, the token every agent enrolls with. |
 | `beszel_hub_key` | generated | Ed25519 key in OpenSSH format, made once by `ssh-keygen` into `/root/.zai-secrets/beszel_hub_key`. |
 | `beszel_superuser_password` / `beszel_admin_password` | generated | `password` lookups under `/root/.zai-secrets`. |
 
@@ -80,10 +87,9 @@ In [`defaults/main.yml`](../../ansible/roles/beszel/defaults/main.yml):
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
 | `beszel_hub_url` / `beszel_hub_sha256` | the v`beszel_version` tarball | Bump the checksum with the version, taken from the release's `beszel_<version>_checksums.txt`. |
-| `beszel_port` / `beszel_bind` | `8090` / `0.0.0.0` | Listen socket. The wildcard is mandatory, for the same cold-boot reason as `sync_relay_host`. |
+| `beszel_bind` | `0.0.0.0` | Listen address. The wildcard is mandatory, for the same cold-boot reason as `sync_relay_host`. |
 | `beszel_data_dir` | `/var/lib/beszel` | PocketBase's `--dir`: the database and the hub key. |
 | `beszel_app_url` | `https://{{ beszel_host }}` | Rendered as `APP_URL`. |
-| `beszel_superuser_email` | `ansible@{{ cluster_domain }}` | Ansible's superuser. Receives no mail. |
 | `beszel_admin_email` | `admin@{{ cluster_domain }}` | The login people use until step 4. Receives no mail. |
 
 ## Dependencies
@@ -92,7 +98,8 @@ In [`defaults/main.yml`](../../ansible/roles/beszel/defaults/main.yml):
 - [`proxy`](proxy.md), for `monitor.<domain>`. DNS for that name must reach the
   edge before Caddy can issue its certificate.
 
-Nothing calls the hub yet. In step 4, Corliss gets a health probe for it.
+Every service CT's agent, and CT 100's, dials in to the hub over vmbr1 (see
+[`monitor_agent`](monitor_agent.md)). In step 4, Corliss gets a health probe for it.
 
 ## Public surface
 
@@ -105,6 +112,9 @@ with a 404:
 | `/api/collections/_superusers/*` | Superuser sign-in and records. |
 | `/api/collections/pbc_3142635823/*` | The same collection by its id. PocketBase resolves a collection by name **or** id, and this id is fixed (`"pbc_" + crc32("auth_superusers")`), so blocking only the name leaves the door open. |
 | `/api/beszel/create-user` | Creates the first user with no auth. The hub registers it only while the users table is empty at startup, which on a fresh CT is the moment before this role adds its admin. |
+
+`/api/beszel/agent-connect` stays open on purpose: agents outside the cluster
+(step 6) dial in through it, with the agent token.
 
 Ansible uses all of these on `127.0.0.1`, inside the CT.
 

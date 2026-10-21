@@ -1,0 +1,11 @@
+# Managed by zai-ops (roles/monitor_agent). Refreshes the apt lists so the
+# Beszel agent's pending-updates count, which never runs apt-get update itself,
+# is at most a day old.
+[Unit]
+Description=Refresh the apt package lists
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/apt-get update -qq

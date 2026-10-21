@@ -293,9 +293,15 @@
 
 # beszel needs only object-store (its manifest) and, for monitor.<domain>, the
 # proxy route; it keeps its own SQLite state and calls no other service. Last
-# because nothing depends on it. Agents (zai-ops#3 step 3) dial in to it later.
+# because nothing depends on it except the agents, which come next.
 - name: Configure the Beszel hub
   hosts: beszel
   gather_facts: true
   roles:
     - beszel
+
+# Every CT this run touched gets its monitoring agent, so a provisioned or
+# rebuilt CT comes back with one and no second command. After the hub, which
+# writes the token the agents enroll with.
+- name: Install the Beszel monitoring agent
+  ansible.builtin.import_playbook: monitor-agent.yml

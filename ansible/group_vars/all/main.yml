@@ -259,16 +259,24 @@ sync_relay_service_token: "{{ lookup('ansible.builtin.password', _zai_secrets_di
 sync_relay_sync_host: "sync.{{ cluster_domain }}"
 sync_relay_mcp_host: "mcp.{{ cluster_domain }}"
 
-# Beszel (zai-ops#3): the monitoring hub on the beszel CT, and later an agent
-# on every service container. The version is here rather than in the beszel
-# role's defaults because the agent role installs the same release, and a hub
-# and agents on different releases is a mismatch nobody chose.
+# Beszel (zai-ops#3): the monitoring hub on the beszel CT, and an agent on the
+# control node and every service container (the monitor_agent role). The
+# version is here rather than in the beszel role's defaults because the agent
+# role installs the same release, and a hub and agents on different releases is
+# a mismatch nobody chose.
 beszel_version: "0.21.0"
 
 # The hub's public hostname. Here because two roles read it: the proxy routes
 # it, and the hub takes https://<host> as its APP_URL. Agents outside the
 # cluster dial in through it too.
 beszel_host: "monitor.{{ cluster_domain }}"
+
+# The hub's listen port, and the superuser Ansible signs in as on the hub's
+# 127.0.0.1. Here because the agent role reads both too: its HUB_URL names the
+# port, and its smoke test asks the hub whether this host's agent is up. The
+# superuser needs an email-shaped name; the address receives no mail.
+beszel_port: 8090
+beszel_superuser_email: "ansible@{{ cluster_domain }}"
 
 # The hub's SSH key. Agents trust its public half, so a rebuilt hub that
 # generated a fresh key would be refused by every agent until each was
@@ -282,6 +290,21 @@ beszel_hub_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secrets_dir
 # DR-critical: the beszel role re-asserts both on every run.
 beszel_superuser_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/beszel_superuser_password chars=ascii_letters,digits length=32') }}"
 beszel_admin_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/beszel_admin_password chars=ascii_letters,digits length=32') }}"
+
+# The public half of the hub key, which each agent checks the hub's signature
+# against (its KEY). Derived from the private file rather than stored beside it,
+# so the two can never disagree. The test reads beszel_hub_key first, which
+# generates the key on a cluster that has none yet.
+beszel_hub_public_key: "{{ lookup('ansible.builtin.pipe', 'ssh-keygen -y -f ' ~ _zai_secrets_dir ~ '/beszel_hub_key') if beszel_hub_key else '' }}"
+
+# The token every agent enrolls with. The beszel role writes it to the hub as
+# the admin's permanent universal token on every run, so a rebuilt hub accepts
+# the same agents with nothing touched on them. A live credential: the hub's
+# /api/beszel/agent-connect stays open on the public route for agents outside
+# the cluster (#3 step 6), and whoever holds this can add systems to it. It sits
+# in each agent's 0600 env file and rides the Tier-1 backup; the hub checks at
+# most 64 characters.
+beszel_agent_token: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/beszel_agent_token chars=ascii_letters,digits length=32') }}"
 
 # pds secrets — the in-house PDS (atproto-pds) that hosts the cluster's atproto
 # accounts. The JWT secret and admin password follow the generate-once-and-persist

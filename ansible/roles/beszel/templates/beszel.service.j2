@@ -8,6 +8,10 @@ Wants=network-online.target
 User={{ beszel_user }}
 Group={{ beszel_group }}
 Environment=APP_URL={{ beszel_app_url }}
+# Every signed-in user sees every system, whichever user owns the agent token.
+# Every user here is an admin, and stays one after step 4 (roster admins only),
+# so this opens nothing to anyone new.
+Environment=SHARE_ALL_SYSTEMS=true
 ExecStart={{ beszel_bin }} serve --http {{ beszel_bind }}:{{ beszel_port }} --dir {{ beszel_data_dir }}
 
 # Restart=always, not on-failure: PocketBase exits 0 on SIGTERM, and the hub is

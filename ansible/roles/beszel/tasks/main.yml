@@ -8,6 +8,20 @@
 # so a rebuilt CT loses only metrics history and needs no Tier-2 backup. The
 # agent token, alert mail and alert policy are re-asserted the same way.
 
+# --- No local mail ------------------------------------------------------------------
+
+# PocketBase sends through sendmail whenever its SMTP setting is off, and the
+# Debian template ships Postfix. From inside the hardened unit Postfix's postdrop
+# can't write its queue, so it retries every ten seconds and never returns,
+# hanging whatever was sending (seen on Heron, Oct 2026). Without Postfix such a
+# send fails at once with an error in the hub's log. Mail leaves this CT only
+# through the cluster relay (mail.yml).
+- name: Remove Postfix
+  ansible.builtin.apt:
+    name: postfix
+    state: absent
+    purge: true
+
 # --- Service account + directories ------------------------------------------------
 
 - name: Create the beszel system group
@@ -156,6 +170,29 @@
       password: "{{ beszel_superuser_password }}"
   register: beszel_superuser_auth
   no_log: true
+
+# PocketBase mails a superuser on every sign-in from a new address or client.
+# This superuser is Ansible's alone and signs in on every run, so the notices
+# are noise to whoever reads ansible@<domain>. The admin login keeps its alerts.
+- name: Read the superusers collection
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/_superusers"
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+  register: beszel_superusers_collection
+
+- name: Turn off new-login alerts for the superuser
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/_superusers"
+    method: PATCH
+    body_format: json
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+    body:
+      authAlert:
+        enabled: false
+  when: beszel_superusers_collection.json.authAlert.enabled | default(true)
+  changed_when: true
 
 - name: Look up the admin user
   ansible.builtin.uri:

@@ -24,9 +24,11 @@ It is an application, not platform, because of who uses it: admins sign in and
 land on it. Its public route also lets agents on machines outside the cluster
 dial in.
 
-Not here yet: Corliss sign-in (step 4, which also adds the Corliss health
-probe; [Corliss#25](https://github.com/Z-Space-Society/Corliss/issues/25)).
-Until then, the only way in is the Ansible-owned admin below. The agents (step 3) are the [`monitor_agent`](monitor_agent.md)
+Not here yet: Corliss sign-in (step 4,
+[Corliss#25](https://github.com/Z-Space-Society/Corliss/issues/25)). Corliss
+already probes the hub and links it from the Manage menu, and holds its OIDC
+client; this role does not yet write the provider into the hub. Until it does,
+the only way in is the Ansible-owned admin below. The agents (step 3) are the [`monitor_agent`](monitor_agent.md)
 role; this role writes the token they enroll with.
 
 ## SQLite: config is code, history is disposable
@@ -123,7 +125,8 @@ From the runtime inventory, set by [`set-smtp.yml`](../../ansible/set-smtp.yml)
 Every service CT's agent, CT 100's and the Proxmox host's dial in to the hub
 over vmbr1, and the inference nodes' through `monitor.<domain>` (see
 [`monitor_agent`](monitor_agent.md)). Alerts go out through the relay in
-`smtp_url`, set with `set-smtp.yml`. In step 4, Corliss gets a health probe for it.
+`smtp_url`, set with `set-smtp.yml`. Corliss (v1.6.0+) probes the hub's
+`/api/health` for `/systems/`, at the address in `corliss_beszel_hub_url`.
 
 ## Alerts
 

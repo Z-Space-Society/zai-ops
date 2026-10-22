@@ -44,6 +44,10 @@ admins can.
 
 Rebuilding the hub signs everyone out. Sign in again with the same password.
 
+A sign-in from a new address or browser sends `admin@<domain>` a "Login from a
+new location" email. That's the hub's own security notice: if it wasn't you,
+tell the other admins and provision `beszel`, which puts the password back.
+
 ## Reading the dashboard
 
 Most columns are what they say. Four need a note:
@@ -180,6 +184,6 @@ the machine comes back on its own.
 | A row is red (down) | On that machine: `systemctl status beszel-agent`, then `journalctl -u beszel-agent -n 50` |
 | A Monitoring Agents run says a host "gets no agent this run" | The hub was not answering. Check the `beszel` row, provision `beszel` if needed, then run it again |
 | The Updates count looks stale | On that machine: `systemctl list-timers apt-lists-refresh.timer` (on the host, `pve-daily-update.timer`) |
-| No alert email arrives | `scn-config nonint show-smtp` should show a relay and a recipient. Then provision `beszel` |
+| No alert email arrives | `scn-config nonint show-smtp` should show a relay and a recipient. Then provision `beszel`. The hub's log names the failure: `ssh root@10.1.1.123 'journalctl -u beszel -n 30 --no-pager'` (**CT 100**) |
 | A machine appears twice | An old row from before a reinstall under another name. Delete the one that is down |
 | You can't sign in | `cat /root/.zai-secrets/beszel_admin_password` on CT 100. A provision of `beszel` resets the login if it drifted |

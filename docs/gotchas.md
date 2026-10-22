@@ -455,3 +455,12 @@ Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
   newline would have made the copy task report a change and restart Corliss
   with a key that differed only by one byte. Any new reader of a value a
   service already has must match how the old one returned it.
+
+- **The Debian template ships Postfix, and a hardened unit can't use it.** An
+  app that falls back to `sendmail` (PocketBase does whenever its SMTP setting
+  is off) hands the mail to Postfix's `postdrop`. Under `ProtectSystem=strict`
+  it can't write `/var/spool/postfix/maildrop`, so it retries every ten seconds
+  forever and the send never returns. On Heron's Beszel hub that hung an API
+  call and held back an alert until the hub restarted. A service CT that must
+  not send local mail removes Postfix (the `beszel` role does), so the fallback
+  fails at once with an error instead.

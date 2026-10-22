@@ -53,6 +53,7 @@ accepted, and there is **no Tier-2 backup** of this CT.
 
 | Task | Module | Why |
 | ---- | ------ | --- |
+| Remove Postfix | `apt` (`absent`, `purge`) | PocketBase sends through sendmail whenever its SMTP setting is off, and the template's Postfix can't write its queue from inside the hardened unit: `postdrop` retries forever and hangs the send. Without it, such a send fails at once in the hub's log. Mail leaves only through the relay. |
 | Create `beszel` group + user | `group`, `user` | Run the hub unprivileged, no login shell. |
 | Create the download and data dirs | `ansible.builtin.file` | `/opt/beszel` (root, holds the tarball) and `/var/lib/beszel` (`beszel`, `0700`). |
 | Download the release | `get_url` with `checksum: sha256:` | Named by version, so a replay downloads nothing and a bump fetches the new release. A mismatch fails the run. |
@@ -63,6 +64,7 @@ accepted, and there is **no Tier-2 backup** of this CT.
 | Smoke test | `wait_for` `127.0.0.1:8090`, then `uri /api/health` | `/api/health` must return 200. |
 | Assert the superuser | `command` → `runuser -u beszel -- beszel superuser upsert … --dir` | The PocketBase CLI is the only way to set a superuser without already having one. It runs as `beszel`, so it never leaves a root-owned SQLite file. `changed_when: false`: upsert always succeeds and only re-hashes. |
 | Sign in, look up the admin | `uri` (`no_log`) | A superuser token from `/api/collections/_superusers/auth-with-password`, then the user by email. |
+| Turn off the superuser's new-login alerts | `uri` PATCH `/api/collections/_superusers` | PocketBase mails a superuser on every sign-in from a new address or client. This one is Ansible's and signs in every run, so the notices to `ansible@<domain>` are noise. The admin login keeps its alerts. |
 | Create the admin | `uri` POST (`no_log`) | Only when missing. `verified: true` (the users collection's `authRule` is `verified=true`) and `role: admin`. |
 | Check, then restore the admin | `uri` (`no_log`) | Signs in as the admin. It PATCHes only what drifted, and sets the password only when signing in fails, because setting it rotates PocketBase's token key and would sign the admin out on every run. |
 | Look up, then write the agent token | `uri` (`no_log`) | `universal_tokens` has no API rules, so only a superuser can write it. POST when missing, PATCH when it differs. The hub's own `/api/beszel/universal-token` needs a user session, which step 4 removes. The admin owns it because that record is Ansible's and stays after step 4. |

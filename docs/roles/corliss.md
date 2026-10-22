@@ -412,9 +412,10 @@ curl -s https://<domain>/clients/scn-obsidian.json | grep -o '"redirect_uris": \
     copy.** An add or remove reaches Corliss as it happens and nothing else, so
     a service built or restored since has never been told. **Apply** does every
     target, **Apply Select** offers a checklist, and `apply-admins [corliss]
-    [pds]` is the scripted form. Corliss's copy is the `is_staff` flags
+    [pds] [beszel]` is the scripted form. Corliss's copy is the `is_staff` flags
     (`sync_admins`, needs v1.3.2); the PDS's is `PDS_ADMIN_DIDS` (its
-    provision). HappyView's registry space access is deliberately **not** a
+    provision); the [Beszel](beszel.md) hub's is its users signed in through
+    Corliss, and its provision deletes those no longer on the roster. HappyView's registry space access is deliberately **not** a
     target: it is set only by an add or remove, and re-asserting it needs the
     service account's registry session. The targets are one list,
     `ADMIN_TARGETS` in `scn-config`; a new service that keeps a copy is added

@@ -28,9 +28,9 @@ Admins sign in through Corliss (step 4,
 [Corliss#25](https://github.com/Z-Space-Society/Corliss/issues/25)): the hub is
 Corliss's second confidential OIDC client, and Corliss refuses anyone who is
 not on the admin roster. Password login stays on beside it, as the
-Ansible-owned admin below, until the sign-in is proven on Heron; turning it
-off, and removing hub users who have left the roster, are the next steps on
-that issue. The agents (step 3) are the [`monitor_agent`](monitor_agent.md)
+Ansible-owned admin below: a backup for when Corliss is down, kept by choice.
+The play reads the roster each run, and this role deletes the hub users of
+admins who have left it. The agents (step 3) are the [`monitor_agent`](monitor_agent.md)
 role; this role writes the token they enroll with.
 
 ## SQLite: config is code, history is disposable
@@ -73,6 +73,7 @@ accepted, and there is **no Tier-2 backup** of this CT.
 | Check, then restore the admin | `uri` (`no_log`) | Signs in as the admin. It PATCHes only what drifted, and sets the password only when signing in fails, because setting it rotates PocketBase's token key and would sign the admin out on every run. |
 | Write the Corliss sign-in provider | `uri` PATCH `/api/collections/users` (`no_log`) | Provider `oidc`: `authURL` is Corliss's public `/oidc/authorize`; `tokenURL` and `extra.jwksURL` are its **internal** address; `extra.issuers` is the public origin, which is the `iss` Corliss signs; `userInfoURL` is empty, so PocketBase reads the `id_token` (Corliss has no userinfo endpoint). Without `jwksURL` PocketBase would not check the signature. Sent every run and reported unchanged: a GET leaves the secret out. Beszel leaves OAuth2 config alone at startup, so it survives a restart. |
 | Verify the sign-in legs | `uri` to Corliss's internal JWKS, then GET `/api/collections/users` and `assert` | The JWKS must answer from this CT, and the hub must report the provider with the client id and internal token URL written above. |
+| Remove admins who left the roster | `uri` GET `/api/collections/_externalAuths/records` (`provider='oidc'`), then DELETE each user whose `providerId` (their DID) is not in `beszel_admin_dids` | Beszel renews a session on every page load, so a removed admin's open tab would last for ever; deleting the user signs them out at the next refresh, and Corliss refuses them after that. `beszel_admin_dids` is set by the play from `tasks/roster.yml` and has no role default, so the role run without it fails instead of deleting everyone. The admin record is never touched: it has no Corliss link, and is excluded by id too. Deleting a user also deletes what it owns: its alerts, its settings, and any system only it is attached to. Systems enrolled by the agents belong to the admin record. |
 | Look up, then write the agent token | `uri` (`no_log`) | `universal_tokens` has no API rules, so only a superuser can write it. POST when missing, PATCH when it differs. The hub's own `/api/beszel/universal-token` needs a user session, which step 4 removes. The admin owns it because that record is Ansible's and stays after step 4. |
 | Set the mail settings | `uri` PATCH `/api/settings` (`no_log`, [`mail.yml`](../../ansible/roles/beszel/tasks/mail.yml)) | The relay, parsed from `smtp_url`, and the sender. Sent every run and reported unchanged: a GET masks the password, so there is nothing to compare. |
 | Create, then set the admin's user settings | `uri` | `settings.emails` = `[alert_email]`, or `[]` when alerts are off. Every other key (chart range, units) is left as the admin set it. Created first and then patched, because the hub's create hook sets `emails` to the user's own address whatever the request says. |
@@ -129,6 +130,9 @@ From the runtime inventory, set by [`set-smtp.yml`](../../ansible/set-smtp.yml)
 - [`object_store`](object_store.md), for the manifest write.
 - [`proxy`](proxy.md), for `monitor.<domain>`. DNS for that name must reach the
   edge before Caddy can issue its certificate.
+- [`corliss`](corliss.md) v1.6.1 or later, for the sign-in, and the admin
+  roster (`tasks/roster.yml`, read by the play) for who may keep a hub user.
+  `scn-config`'s Cluster Admins → Apply provisions `beszel` after a change.
 
 Every service CT's agent, CT 100's and the Proxmox host's dial in to the hub
 over vmbr1, and the inference nodes' through `monitor.<domain>` (see

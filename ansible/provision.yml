@@ -294,9 +294,21 @@
 # beszel needs only object-store (its manifest) and, for monitor.<domain>, the
 # proxy route; it keeps its own SQLite state and calls no other service. Last
 # because nothing depends on it except the agents, which come next.
+#
+# The roster is read here, the pds play's idiom, because the hub keeps a copy
+# of who the admins are: a user per admin who has signed in through Corliss.
+# The role removes the ones no longer on it. Beszel renews a session on every
+# page load, so this, not a token lifetime, is what ends a removed admin's.
 - name: Configure the Beszel hub
   hosts: beszel
   gather_facts: true
+  pre_tasks:
+    - name: Read the cluster admin roster
+      ansible.builtin.include_tasks: tasks/roster.yml
+
+    - name: Make the roster's current admins the hub's
+      ansible.builtin.set_fact:
+        beszel_admin_dids: "{{ scn_roster_admin_dids }}"
   roles:
     - beszel
 

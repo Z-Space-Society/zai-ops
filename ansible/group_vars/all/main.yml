@@ -353,8 +353,9 @@ pds_oauth_keys: "{{ query('signing_keys', 'pds_oauth', generate=false) }}"
 # or `nonint set-smtp`) writes the whole URL to /root/.zai-secrets/smtp_url
 # through set-smtp.yml (it carries a password, so it is a secret and not
 # runtime inventory). A missing file reads as empty, and every
-# consumer then leaves mail off. The only consumer today is the PDS, which
-# enables delivery when both this and pds_email_from_address are set.
+# consumer then leaves mail off. The PDS enables delivery when both this and
+# pds_email_from_address are set; the Beszel hub sends alerts when both this and
+# alert_email (runtime inventory, set by set-smtp.yml) are set.
 smtp_url: "{{ lookup('ansible.builtin.file', _zai_secrets_dir ~ '/smtp_url', errors='ignore') | default('', true) }}"
 pds_email_smtp_url: "{{ smtp_url }}"
 

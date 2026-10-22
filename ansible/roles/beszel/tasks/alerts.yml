@@ -1,0 +1,74 @@
+---
+# Put beszel_alerts on every system the hub knows (zai-ops#3 step 5).
+#
+# Beszel has no alert for "every system, including ones not added yet": an
+# alert is a record per user, system and kind, so it can only be written once
+# the system exists. Systems appear when an agent first enrolls, so this runs
+# at the end of every monitor-agent.yml run as well as from main.yml. That
+# covers the systems Ansible doesn't manage (the Proxmox host, the inference
+# nodes) and the ones a rebuilt hub has just recreated.
+#
+# It adds what is missing and puts back a value or delay that differs. It never
+# deletes, so an extra alert someone adds in the UI stays.
+
+- name: Sign in and find the admin
+  ansible.builtin.include_tasks: session.yml
+  when: beszel_superuser_auth is not defined or beszel_admin_id is not defined
+
+- name: List the systems
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/systems/records?perPage=500&fields=id,name"
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+  register: beszel_systems
+
+- name: List the admin's alerts
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/alerts/records?perPage=500&fields=id,system,name,value,min&filter={{ beszel_alerts_filter | urlencode }}"
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+  vars:
+    beszel_alerts_filter: "user='{{ beszel_admin_id }}'"
+  register: beszel_existing_alerts
+
+# One entry per system and alert kind, with the record it already has (if any).
+- name: Work out which alerts to write
+  ansible.builtin.set_fact:
+    beszel_alert_writes: "{{ writes }}"
+  vars:
+    writes: >-
+      {%- set out = [] -%}
+      {%- for system in beszel_systems.json['items'] -%}
+      {%- for want in beszel_alerts -%}
+      {%- set have = beszel_existing_alerts.json['items']
+             | selectattr('system', 'equalto', system.id)
+             | selectattr('name', 'equalto', want.name) | list -%}
+      {%- if not have or (have[0].value | float) != (want.value | float)
+             or (have[0].min | int) != (want.min | int) -%}
+      {%- set _ = out.append({'system': system.id, 'system_name': system.name,
+             'name': want.name, 'value': want.value, 'min': want.min,
+             'id': (have[0].id if have else '')}) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Write the missing or changed alerts
+  ansible.builtin.uri:
+    url: >-
+      http://127.0.0.1:{{ beszel_port }}/api/collections/alerts/records{{
+      ('/' ~ item.id) if item.id else '' }}
+    method: "{{ 'PATCH' if item.id else 'POST' }}"
+    body_format: json
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+    body:
+      user: "{{ beszel_admin_id }}"
+      system: "{{ item.system }}"
+      name: "{{ item.name }}"
+      value: "{{ item.value }}"
+      min: "{{ item.min }}"
+  loop: "{{ beszel_alert_writes }}"
+  loop_control:
+    label: "{{ item.system_name }}: {{ item.name }}"
+  changed_when: true

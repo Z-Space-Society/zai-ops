@@ -1,0 +1,28 @@
+---
+# A superuser token and the admin user's id, for the task files that run on
+# their own (alerts.yml, from monitor-agent.yml). main.yml has both already.
+
+- name: Sign in as the superuser
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/_superusers/auth-with-password"
+    method: POST
+    body_format: json
+    body:
+      identity: "{{ beszel_superuser_email }}"
+      password: "{{ beszel_superuser_password }}"
+  register: beszel_superuser_auth
+  no_log: true
+
+- name: Look up the admin user
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/users/records?filter={{ beszel_admin_filter | urlencode }}"
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+  vars:
+    beszel_admin_filter: "email='{{ beszel_admin_email }}'"
+  register: beszel_admin_lookup
+  no_log: true
+
+- name: Note the admin user's id
+  ansible.builtin.set_fact:
+    beszel_admin_id: "{{ (beszel_admin_lookup.json['items'] | first).id }}"

@@ -5,7 +5,8 @@
 # database in the data dir. The stance (docs/roles/beszel.md): config is code,
 # history is disposable. Everything a person would otherwise set by hand (the
 # hub key, the superuser, the admin login) is re-asserted below on every run,
-# so a rebuilt CT loses only metrics history and needs no Tier-2 backup.
+# so a rebuilt CT loses only metrics history and needs no Tier-2 backup. The
+# agent token, alert mail and alert policy are re-asserted the same way.
 
 # --- Service account + directories ------------------------------------------------
 
@@ -265,6 +266,16 @@
   when: not beszel_token_record or beszel_token_record.token != beszel_agent_token
   changed_when: true
   no_log: true
+
+# --- Alerts -------------------------------------------------------------------------
+
+- name: Set up alert mail
+  ansible.builtin.include_tasks: mail.yml
+
+# The systems the hub already knows. monitor-agent.yml runs this again after
+# every agent run, for the ones that enroll later.
+- name: Put the alerts on every system
+  ansible.builtin.include_tasks: alerts.yml
 
 # --- Manifest (docs/roles/manifest.md) ----------------------------------------
 # After the smoke test, so a service that failed it never claims a version.

@@ -26,6 +26,8 @@
 #   scn-config nonint show-smtp                  # the mail relay, minus credentials
 #   scn-config nonint set-smtp < url-file        # the relay URL, read from stdin
 #   scn-config nonint clear-smtp                 # remove it; mail off
+#   scn-config nonint set-alert-email ops@example.org  # where the monitoring
+#   scn-config nonint clear-alert-email          #   hub mails alerts; off when empty
 #   scn-config nonint show-scn-chat-key          # whether scn-chat's admin key is set
 #   scn-config nonint set-scn-chat-key < key-file    # the key, read from stdin
 #   scn-config nonint clear-scn-chat-key         # remove it; scn-chat cron off
@@ -41,6 +43,10 @@
 #   scn-config nonint clear-version scn-chat     # back to the role default
 #   scn-config nonint apply-monitor-agents       # the Beszel agent everywhere,
 #   scn-config nonint apply-monitor-agents proxy #   or only on some hosts
+#   scn-config nonint print-monitor-agent-install salmon  # a root script that
+#                                                #   installs the agent on a machine
+#                                                #   Ansible doesn't manage (holds the
+#                                                #   agent token)
 #
 # Runs on the control node. Lives in the repo's bin/ (on PATH via
 # /etc/profile.d/zai-ops.sh) and runs in place — the script you run is always the
@@ -108,6 +114,9 @@ usage: scn-config
        scn-config nonint set-version <scn-chat|corliss> <tag|latest>
        scn-config nonint clear-version <scn-chat|corliss>
        scn-config nonint apply-monitor-agents [host...]
+       scn-config nonint print-monitor-agent-install <machine>
+       scn-config nonint set-alert-email <address>
+       scn-config nonint clear-alert-email
 EOF
   exit 64
 }
@@ -632,7 +641,7 @@ SMTP_STATE=unset SMTP_SCHEME="" SMTP_HOST="" SMTP_PORT="" SMTP_TLS=""
 
 load_smtp() {
   local out key value
-  SMTP_STATE=unset SMTP_SCHEME="" SMTP_HOST="" SMTP_PORT="" SMTP_TLS=""
+  SMTP_STATE=unset SMTP_SCHEME="" SMTP_HOST="" SMTP_PORT="" SMTP_TLS="" ALERT_EMAIL=""
   out="$(mktemp)"
   if ! ANSIBLE_NOCOLOR=1 ansible-playbook set-smtp.yml -e smtp_action=show \
       -e "out=$out" >/dev/null 2>&1; then
@@ -646,6 +655,7 @@ load_smtp() {
       host) SMTP_HOST="$value" ;;
       port) SMTP_PORT="$value" ;;
       tls) SMTP_TLS="$value" ;;
+      alert_email) [ "$value" = - ] || ALERT_EMAIL="$value" ;;
     esac
   done <"$out"
   rm -f "$out"
@@ -675,9 +685,30 @@ set_smtp() {
   SCN_SMTP_URL="$url" ansible-playbook set-smtp.yml -e smtp_action=set "$@"
 }
 
+# Where the monitoring hub mails its alerts. Alerts need this and the relay.
+alert_summary() {
+  if [ -n "$ALERT_EMAIL" ] && [ "$SMTP_STATE" = set ]; then
+    echo "$ALERT_EMAIL"
+  elif [ -n "$ALERT_EMAIL" ]; then
+    echo "$ALERT_EMAIL (no relay, so alerts are off)"
+  else
+    echo "not set, so alerts are off"
+  fi
+}
+
 nonint_show_smtp() {
   load_smtp
   echo "mail relay: $(smtp_summary)"
+  echo "alert recipient: $(alert_summary)"
+}
+
+nonint_set_alert_email() {
+  [ $# -eq 1 ] || die "usage: scn-config nonint set-alert-email <address>"
+  ansible-playbook set-smtp.yml -e smtp_action=set-alert-email -e "alert_email=$1"
+}
+
+nonint_clear_alert_email() {
+  ansible-playbook set-smtp.yml -e smtp_action=clear-alert-email
 }
 
 # The URL comes from stdin so the password stays out of shell history and the
@@ -966,6 +997,22 @@ nonint_apply_monitor_agents() {
   else
     ansible-playbook monitor-agent.yml
   fi
+}
+
+# print-monitor-agent-install <machine>: a root script that installs the agent
+# on a machine Ansible doesn't manage (an inference node), on stdout. It holds
+# the agent token, so it is written 0600, printed, and removed.
+nonint_print_monitor_agent_install() {
+  [ $# -eq 1 ] || die "usage: scn-config nonint print-monitor-agent-install <machine>"
+  local out log
+  out="$(mktemp)" log="$(mktemp)"
+  if ! ansible-playbook monitor-agent-install.yml -e "machine=$1" -e "out=$out" >"$log" 2>&1; then
+    cat "$log" >&2
+    rm -f "$out" "$log"
+    die "could not write the install script for $1"
+  fi
+  cat "$out"
+  rm -f "$out" "$log"
 }
 
 # Leaves whiptail for the run, like run_provision: the playbook output is the
@@ -1757,6 +1804,7 @@ offer_provision() {
     pds) name="The PDS" ;;
     corliss) name="Corliss" ;;
     scn-chat) name="scn-chat" ;;
+    beszel) name="The monitoring hub" ;;
     *) name="The $service" ;;
   esac
   load_state
@@ -1984,6 +2032,30 @@ suffix = "" if tls == "implicit" else "?tls=required"
 print(scheme, host, port, tls, "auth" if auth else "", f"{scheme}://{auth}{host}:{port}{suffix}", sep="\n")
 '
 
+# An empty box clears the recipient, which turns alerts off.
+do_alert_email_menu() {
+  local email out
+  while true; do
+    email="$(ask "Alert recipient" "Address the monitoring hub emails its alerts to.
+Leave empty to turn alerts off." "$ALERT_EMAIL")" || return 0
+    [ -z "$email" ] || [[ "$email" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] && break
+    msgbox "Alert recipient" "That is not an email address."
+  done
+  if [ -z "$email" ]; then
+    out="$(ANSIBLE_NOCOLOR=1 nonint_clear_alert_email 2>&1)" || {
+      msgbox "Alert recipient" "Could not clear it.
+
+$(playbook_problem "$out")"; return 0; }
+    offer_provision beszel "Alert recipient" "The alert recipient is cleared, so alerts are off."
+  else
+    out="$(ANSIBLE_NOCOLOR=1 nonint_set_alert_email "$email" 2>&1)" || {
+      msgbox "Alert recipient" "It was refused, so nothing was written.
+
+$(playbook_problem "$out")"; return 0; }
+    offer_provision beszel "Alert recipient" "Alerts now go to $email."
+  fi
+}
+
 do_smtp_menu() {
   local choice text host tls port user pass url scheme query out parsed
   # TERM=ansi: see the infobox in do_assign_menu.
@@ -1992,15 +2064,23 @@ do_smtp_menu() {
   load_smtp
 
   text="Outbound mail relay: $(smtp_summary)
+Alert recipient: $(alert_summary)
 
 One relay per cluster. The PDS sends invites, confirmations and
-password resets through it."
+password resets through it, and the monitoring hub sends its alerts
+to the recipient through it."
   choice="$(whiptail --backtitle "$BACKTITLE" --title "Set SMTP" \
     --ok-button Select --cancel-button Back \
-    --menu "$text" "$(box_height "$text" 10)" "$WT_WIDTH" 2 \
+    --menu "$text" "$(box_height "$text" 11)" "$WT_WIDTH" 3 \
     "Set" " Enter the relay's details" \
     "Clear" " Remove the relay and turn mail off" \
+    "Alert recipient" " Who the monitoring hub emails" \
     3>&1 1>&2 2>&3)" || return 0
+
+  if [ "$choice" = "Alert recipient" ]; then
+    do_alert_email_menu
+    return 0
+  fi
 
   if [ "$choice" = Clear ]; then
     [ "$SMTP_STATE" = set ] || { msgbox "Set SMTP" "No relay is set."; return 0; }
@@ -2010,6 +2090,7 @@ password resets through it."
       8 "$WT_WIDTH" || return 0
     if out="$(ANSIBLE_NOCOLOR=1 nonint_clear_smtp 2>&1)"; then
       offer_provision pds "Set SMTP" "The mail relay is cleared."
+      offer_provision beszel "Set SMTP" "The mail relay is cleared, so alerts are off."
     else
       msgbox "Set SMTP" "Could not clear the relay.
 
@@ -2090,6 +2171,7 @@ print(f"{scheme}://{auth}{host}:{port}{query}")
 
   if out="$(ANSIBLE_NOCOLOR=1 set_smtp "$url" 2>&1)"; then
     offer_provision pds "Set SMTP" "The mail relay is saved."
+    offer_provision beszel "Set SMTP" "The mail relay is saved. Alerts use it once a recipient is set."
   else
     msgbox "Set SMTP" "The relay was refused — nothing was written.
 
@@ -2158,6 +2240,8 @@ case "${1:-}" in
       show-smtp) nonint_show_smtp ;;
       set-smtp) nonint_set_smtp ;;
       clear-smtp) nonint_clear_smtp ;;
+      set-alert-email) shift; nonint_set_alert_email "$@" ;;
+      clear-alert-email) nonint_clear_alert_email ;;
       show-scn-chat-key) nonint_show_scn_chat_key ;;
       set-scn-chat-key) nonint_set_scn_chat_key ;;
       clear-scn-chat-key) nonint_clear_scn_chat_key ;;
@@ -2170,6 +2254,7 @@ case "${1:-}" in
       set-version) shift; nonint_set_version "$@" ;;
       clear-version) shift; nonint_clear_version "$@" ;;
       apply-monitor-agents) shift; nonint_apply_monitor_agents "$@" ;;
+      print-monitor-agent-install) shift; nonint_print_monitor_agent_install "$@" ;;
       *) usage ;;
     esac
     ;;

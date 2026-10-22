@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Installs the Beszel monitoring agent on {{ machine }}. Generated on CT 100 by
+# monitor-agent-install.yml, zai-ops {{ zai_ops_revision | default('unknown') }}.
+# It holds the agent token: run it as root, then delete it.
+MONITOR_AGENT_PRESET=1
+MONITOR_AGENT_HUB_URL={{ ('https://' ~ beszel_host) | quote }}
+MONITOR_AGENT_TOKEN={{ beszel_agent_token | quote }}
+MONITOR_AGENT_KEY={{ beszel_hub_public_key | quote }}
+MONITOR_AGENT_NAME={{ machine | quote }}
+MONITOR_AGENT_DOMAIN={{ cluster_domain | quote }}
+MONITOR_AGENT_VERSION={{ beszel_version | quote }}
+MONITOR_AGENT_SHA256={{ monitor_agent_sha256 | quote }}
+MONITOR_AGENT_UNIT={{ lookup('ansible.builtin.template', playbook_dir ~ '/roles/monitor_agent/templates/beszel-agent.service.j2') | trim | quote }}
+MONITOR_AGENT_REFRESH_SERVICE={{ lookup('ansible.builtin.file', playbook_dir ~ '/roles/monitor_agent/files/apt-lists-refresh.service') | quote }}
+MONITOR_AGENT_REFRESH_TIMER={{ lookup('ansible.builtin.file', playbook_dir ~ '/roles/monitor_agent/files/apt-lists-refresh.timer') | quote }}
+
+# --- host/install-monitor-agent.sh, unchanged ------------------------------------
+{{ lookup('ansible.builtin.file', playbook_dir ~ '/../host/install-monitor-agent.sh') }}

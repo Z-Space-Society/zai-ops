@@ -3,12 +3,16 @@
 Installs the [Beszel](https://beszel.dev) **agent** natively on the control node
 and every service container, so each one reports its metrics and its pending
 apt updates to the [`beszel`](beszel.md) hub. It also adds a daily apt list
-refresh, without which the updates count goes stale.
+refresh, without which the updates count goes stale. The same agent goes on the
+Proxmox host and the inference nodes through a script (below).
+
+How to use the monitor day to day, as an admin: [Using the system
+monitor](../monitoring.md).
 
 - **Source:** [`ansible/roles/monitor_agent/`](../../ansible/roles/monitor_agent/)
 - **Applied by:** [`monitor-agent.yml`](../../ansible/monitor-agent.yml) (`hosts: service_containers:control_node`), which [`provision.yml`](../../ansible/provision.yml) imports after the hub's play. `scn-config`'s **Monitoring Agents** runs it on its own
-- **Target:** CT 100 (in place) and every service CT, over SSH. Internal only
-- **Tracking:** [zai-ops#3](https://github.com/Z-Space-Society/zai-ops/issues/3), step 3 of six
+- **Target:** CT 100 (in place) and every service CT, over SSH. The Proxmox host and the inference nodes get the same agent from [`host/install-monitor-agent.sh`](../../host/install-monitor-agent.sh) (below)
+- **Tracking:** [zai-ops#3](https://github.com/Z-Space-Society/zai-ops/issues/3), steps 3 and 6 of six
 
 ## Purpose
 
@@ -25,8 +29,8 @@ the bridge does not let something else pose as the hub: the agent checks the
 hub's signature against the hub key's public half (`KEY`) before it sends
 anything.
 
-Not covered here: the Proxmox host and the inference nodes (step 6), and alerts
-(step 5).
+Alerts are the [hub's](beszel.md#alerts); this role's playbook only ends by
+putting them on every system.
 
 ## Enrollment is config, not a click
 
@@ -92,10 +96,65 @@ In [`defaults/main.yml`](../../ansible/roles/monitor_agent/defaults/main.yml):
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `monitor_agent_url` / `monitor_agent_sha256` | the v`beszel_version` `beszel-agent_linux_amd64.tar.gz` | Bump the checksum with the version, taken from the release's `beszel_<version>_checksums.txt`. |
+| `monitor_agent_url` / `monitor_agent_sha256` | the v`beszel_version` `beszel-agent_linux_amd64.tar.gz` | Bump the checksum with the version, taken from the release's `beszel_<version>_checksums.txt`. The host script and the node scripts read the same pin. |
 | `monitor_agent_hub_url` | `http://<beszel ansible_host>:<beszel_port>` | The hub over vmbr1. |
 | `monitor_agent_data_dir` | `/var/lib/beszel-agent` | `DATA_DIR`: the fingerprint, and the unit's only writable path. |
 | `monitor_agent_fingerprint` | 48 hex chars of `sha256(<domain>/<inventory name>)` | What the hub knows this machine by. |
+
+## The Proxmox host
+
+The host isn't an Ansible target, so it runs
+[`host/install-monitor-agent.sh`](../../host/install-monitor-agent.sh) from its
+own clone (step 6):
+
+```sh
+/root/zai-ops/host/install-monitor-agent.sh [control-ctid]   # default 100
+```
+
+- **It reads CT 100's values as data and never runs anything CT 100 produces.**
+  `pct exec` gives it the hub's CTID and the domain (`ansible-inventory --host
+  beszel`), the agent token and the hub key's public half (from stdout, never
+  argv), and `beszel_version` and `monitor_agent_sha256` from CT 100's checkout,
+  so it installs exactly what every other agent got. CT 100 has no way into the
+  host ([ADR-0008](../decisions/0008-host-scripts-from-host-clone.md)), and
+  running its output as host root would give it one.
+- **It does what this role does**, in bash: the checksummed tarball, the
+  `beszel-agent` user, the fingerprint, the root-only env file, and this role's
+  own unit template, filled in by `sed` (it fails if a placeholder is left). It
+  reaches the hub at `http://10.1.1.<beszel ctid>:8090`, since the host is
+  10.1.1.1 on vmbr1. A re-run changes only what moved.
+- **No apt timer on the host.** Proxmox's `pve-daily-update.timer` runs
+  `pveupdate`, which already refreshes the lists daily. The script installs the
+  role's timer only where that unit doesn't exist.
+- It ends by waiting for `WebSocket connected` in the agent's journal, then runs
+  `scn-config nonint apply-monitor-agents beszel` in CT 100 to put the host's
+  alerts on.
+
+## Inference nodes
+
+The nodes are built by hand, so nothing enrolls them. CT 100 prints a
+self-contained install script instead:
+
+```sh
+scn-config nonint print-monitor-agent-install salmon > /root/salmon-agent.sh   # CT 100
+```
+
+[`monitor-agent-install.yml`](../../ansible/monitor-agent-install.yml) writes it
+from `templates/monitor-agent-install.sh.j2`: a header with the inputs, then
+`host/install-monitor-agent.sh` unchanged, which reads them because the header
+sets `MONITOR_AGENT_PRESET=1`. The header holds the hub URL, the token, the hub
+key, the pins, the name, and this role's unit and timer as rendered by Ansible,
+so there is still one copy of each.
+
+- **The URL is `https://monitor.<domain>`**, the public route: the nodes are on
+  the LAN and the hub only on vmbr1. That's why `agent-connect` stays open at the
+  edge. A cluster whose edge listens on another port (Ronchamp's `:8443`) would
+  need that port in the URL; no such cluster has inference nodes.
+- **The script holds the agent token.** Copy it to the node, run it as root,
+  and delete both copies. Then run `scn-config nonint apply-monitor-agents
+  beszel` on CT 100 to put the node's alerts on.
+- The name must be the node's own: the play refuses a container's name, since
+  the hub knows a machine by its name and fingerprint.
 
 ## Dependencies
 

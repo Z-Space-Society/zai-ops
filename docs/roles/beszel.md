@@ -3,12 +3,16 @@
 Installs the [Beszel](https://beszel.dev) **hub** natively as the cluster's
 monitoring dashboard. The hub shows per-machine metrics and, since v0.21.0, the
 OS updates pending on each machine. Each machine reports through a small agent,
-installed by [`monitor_agent`](monitor_agent.md).
+installed by [`monitor_agent`](monitor_agent.md). It emails alerts through the
+cluster's mail relay.
+
+How to use it day to day, as an admin: [Using the system
+monitor](../monitoring.md).
 
 - **Source:** [`ansible/roles/beszel/`](../../ansible/roles/beszel/)
 - **Applied by:** [`provision.yml`](../../ansible/provision.yml) (configure play, `hosts: beszel`, last)
 - **Target:** the `beszel` CT (CTID 123 by convention, application tier, 120–129), over SSH. Public through the [`proxy`](proxy.md) at `monitor.<domain>`
-- **Tracking:** [zai-ops#3](https://github.com/Z-Space-Society/zai-ops/issues/3), step 2 of six
+- **Tracking:** [zai-ops#3](https://github.com/Z-Space-Society/zai-ops/issues/3), steps 2 and 5 of six
 
 ## Purpose
 
@@ -21,8 +25,8 @@ land on it. Its public route also lets agents on machines outside the cluster
 dial in.
 
 Not here yet: Corliss sign-in (step 4, which also adds the Corliss health
-probe) and alerts (step 5). Until step 4, the only way in is the Ansible-owned
-admin below. The agents (step 3) are the [`monitor_agent`](monitor_agent.md)
+probe; [Corliss#25](https://github.com/Z-Space-Society/Corliss/issues/25)).
+Until then, the only way in is the Ansible-owned admin below. The agents (step 3) are the [`monitor_agent`](monitor_agent.md)
 role; this role writes the token they enroll with.
 
 ## SQLite: config is code, history is disposable
@@ -35,10 +39,14 @@ keeps nothing in it that cannot be rebuilt. Every run of the role re-asserts:
 - **the superuser** Ansible uses on `127.0.0.1`;
 - **the admin login**, its role, verification and password;
 - **the agent token**, `/root/.zai-secrets/beszel_agent_token`, as the admin's
-  permanent universal token.
+  permanent universal token;
+- **alert mail**: the relay and the recipient (see [Alerts](#alerts));
+- **the alert policy** on every system it knows.
 
 A rebuilt CT therefore comes back with the same key, so agents still trust it,
-the same login, and the same token, so every agent re-enrolls by itself. The only thing it loses is metrics history. That is
+the same login, and the same token, so every agent re-enrolls by itself. Its
+systems come back as the agents redial, after this role's run, so a Monitoring
+Agents run afterwards puts their alerts back. The only thing it loses is metrics history. That is
 accepted, and there is **no Tier-2 backup** of this CT.
 
 ## Tasks
@@ -58,6 +66,9 @@ accepted, and there is **no Tier-2 backup** of this CT.
 | Create the admin | `uri` POST (`no_log`) | Only when missing. `verified: true` (the users collection's `authRule` is `verified=true`) and `role: admin`. |
 | Check, then restore the admin | `uri` (`no_log`) | Signs in as the admin. It PATCHes only what drifted, and sets the password only when signing in fails, because setting it rotates PocketBase's token key and would sign the admin out on every run. |
 | Look up, then write the agent token | `uri` (`no_log`) | `universal_tokens` has no API rules, so only a superuser can write it. POST when missing, PATCH when it differs. The hub's own `/api/beszel/universal-token` needs a user session, which step 4 removes. The admin owns it because that record is Ansible's and stays after step 4. |
+| Set the mail settings | `uri` PATCH `/api/settings` (`no_log`, [`mail.yml`](../../ansible/roles/beszel/tasks/mail.yml)) | The relay, parsed from `smtp_url`, and the sender. Sent every run and reported unchanged: a GET masks the password, so there is nothing to compare. |
+| Create, then set the admin's user settings | `uri` | `settings.emails` = `[alert_email]`, or `[]` when alerts are off. Every other key (chart range, units) is left as the admin set it. Created first and then patched, because the hub's create hook sets `emails` to the user's own address whatever the request says. |
+| Put the alerts on every system | `uri` ([`alerts.yml`](../../ansible/roles/beszel/tasks/alerts.yml)) | `beszel_alerts` on every system the hub knows: POST what is missing, PATCH a value or delay that differs. Never deletes. Also run on its own as the last play of `monitor-agent.yml`. |
 | Record the manifest | `include_role: manifest` (`beszel_version`) | Last, after the smoke test. Writes `beszel.json`. See [`manifest`](manifest.md). |
 
 ### Handlers
@@ -91,6 +102,15 @@ In [`defaults/main.yml`](../../ansible/roles/beszel/defaults/main.yml):
 | `beszel_data_dir` | `/var/lib/beszel` | PocketBase's `--dir`: the database and the hub key. |
 | `beszel_app_url` | `https://{{ beszel_host }}` | Rendered as `APP_URL`. |
 | `beszel_admin_email` | `admin@{{ cluster_domain }}` | The login people use until step 4. Receives no mail. |
+| `beszel_email_from_address` / `beszel_email_from_name` | `monitor@{{ cluster_domain }}` / `SCN monitor` | The alerts' sender. The relay must accept it, as it must the PDS's. |
+| `beszel_alerts` | Status 5 min, Disk 90% 10 min, Memory 90% 10 min, SystemdFailed | The alert policy for every system. Each entry is Beszel's alert `name`, a `value` (a percentage where the kind has one) and `min` (minutes). |
+
+From the runtime inventory, set by [`set-smtp.yml`](../../ansible/set-smtp.yml)
+(`scn-config` → Set SMTP → Alert recipient):
+
+| Variable | Meaning |
+| -------- | ------- |
+| `alert_email` | Where alerts are mailed. Alerts are off unless this and `smtp_url` are both set. |
 
 ## Dependencies
 
@@ -98,8 +118,36 @@ In [`defaults/main.yml`](../../ansible/roles/beszel/defaults/main.yml):
 - [`proxy`](proxy.md), for `monitor.<domain>`. DNS for that name must reach the
   edge before Caddy can issue its certificate.
 
-Every service CT's agent, and CT 100's, dials in to the hub over vmbr1 (see
-[`monitor_agent`](monitor_agent.md)). In step 4, Corliss gets a health probe for it.
+Every service CT's agent, CT 100's and the Proxmox host's dial in to the hub
+over vmbr1, and the inference nodes' through `monitor.<domain>` (see
+[`monitor_agent`](monitor_agent.md)). Alerts go out through the relay in
+`smtp_url`, set with `set-smtp.yml`. In step 4, Corliss gets a health probe for it.
+
+## Alerts
+
+Every system the hub knows carries the alerts in `beszel_alerts`, owned by the
+admin user. Each one mails the alert recipient (`alert_email`) through the
+cluster relay (`smtp_url`).
+
+- **Off unless both are set.** Then SMTP is disabled in the hub and the admin
+  has no recipient. The empty recipient list is what actually stops mail: with
+  SMTP off, PocketBase would fall back to `sendmail`.
+- **Mail security:** `smtps://` is implicit TLS. `smtp://…?tls=required` is
+  STARTTLS: PocketBase sends STARTTLS when the relay offers it, and Go's
+  `PlainAuth` won't send a password over a connection that never upgraded. A
+  relay that drops STARTTLS fails the send, so the password never goes out in
+  clear.
+- **Why the alerts are written every agent run.** Beszel has no alert for
+  "every system, including later ones". An alert is a record per user, system
+  and kind, so it can only be written once the system exists, and systems appear
+  when an agent first enrolls. So `alerts.yml` runs here and again as the last
+  play of `monitor-agent.yml`. That covers machines Ansible doesn't manage (the
+  host, the nodes) and systems a rebuilt hub recreated after this role finished.
+- **The policy is code.** A value or delay changed in the UI is put back on the
+  next run. An extra alert added in the UI stays, because the role never deletes.
+  Quiet hours are left alone.
+- **One recipient.** The alerts belong to the admin user, so they go only to
+  `alert_email`. Admins who sign in through Corliss after step 4 get no copies.
 
 ## Public surface
 

@@ -31,16 +31,18 @@ There is one row per machine:
 
 ## Signing in
 
-Until Corliss sign-in arrives
-([Corliss#25](https://github.com/Z-Space-Society/Corliss/issues/25)), there is
-one login: `admin@<domain>`. Its password is on CT 100:
+Cluster admins sign in through Corliss: the button under the password form
+names the cluster's domain. Anyone not on the admin roster is refused at
+Corliss. Your first sign-in creates your user on the hub, and you see every
+system.
+
+The password login, `admin@<domain>`, stays as a fallback until
+[Corliss#25](https://github.com/Z-Space-Society/Corliss/issues/25) turns it
+off. Its password is on CT 100:
 
 ```sh
 cat /root/.zai-secrets/beszel_admin_password      # CT 100
 ```
-
-When that issue lands, you sign in through Corliss instead, and only cluster
-admins can.
 
 Rebuilding the hub signs everyone out. Sign in again with the same password.
 

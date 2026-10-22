@@ -24,11 +24,13 @@ It is an application, not platform, because of who uses it: admins sign in and
 land on it. Its public route also lets agents on machines outside the cluster
 dial in.
 
-Not here yet: Corliss sign-in (step 4,
-[Corliss#25](https://github.com/Z-Space-Society/Corliss/issues/25)). Corliss
-already probes the hub and links it from the Manage menu, and holds its OIDC
-client; this role does not yet write the provider into the hub. Until it does,
-the only way in is the Ansible-owned admin below. The agents (step 3) are the [`monitor_agent`](monitor_agent.md)
+Admins sign in through Corliss (step 4,
+[Corliss#25](https://github.com/Z-Space-Society/Corliss/issues/25)): the hub is
+Corliss's second confidential OIDC client, and Corliss refuses anyone who is
+not on the admin roster. Password login stays on beside it, as the
+Ansible-owned admin below, until the sign-in is proven on Heron; turning it
+off, and removing hub users who have left the roster, are the next steps on
+that issue. The agents (step 3) are the [`monitor_agent`](monitor_agent.md)
 role; this role writes the token they enroll with.
 
 ## SQLite: config is code, history is disposable
@@ -61,7 +63,7 @@ accepted, and there is **no Tier-2 backup** of this CT.
 | Download the release | `get_url` with `checksum: sha256:` | Named by version, so a replay downloads nothing and a bump fetches the new release. A mismatch fails the run. |
 | Install the binary | `unarchive` (`include: beszel`) | Only when the download changed or `/usr/local/bin/beszel` is missing. Notifies restart. |
 | Place the hub key | `copy` (`0600 beszel`, `no_log`) | Before the first start. The hub generates its own key only when this file is missing, and agents trust whichever key it had when they were enrolled. |
-| Install the systemd unit | `template` | Hardened; `ReadWritePaths` is the data dir only; `Restart=always`. `APP_URL` is `https://monitor.<domain>`. `SHARE_ALL_SYSTEMS=true`, so every signed-in user sees every system whichever user owns the token. Every user is an admin, now and after step 4, so this opens nothing new. Notifies reload + restart. |
+| Install the systemd unit | `template` | Hardened; `ReadWritePaths` is the data dir only; `Restart=always`. `APP_URL` is `https://monitor.<domain>`. `SHARE_ALL_SYSTEMS=true`, so every signed-in user sees every system whichever user owns the token. Every user is an admin, now and after step 4, so this opens nothing new. `USER_CREATION=true`, so an admin's first sign-in through Corliss can create their user: the hub rewrites `users.createRule` from it at every start, so it can't be set through the API. Notifies reload + restart. |
 | Ensure started + enabled, flush handlers | `systemd`, `meta` | Up with its final config before the smoke test. |
 | Smoke test | `wait_for` `127.0.0.1:8090`, then `uri /api/health` | `/api/health` must return 200. |
 | Assert the superuser | `command` → `runuser -u beszel -- beszel superuser upsert … --dir` | The PocketBase CLI is the only way to set a superuser without already having one. It runs as `beszel`, so it never leaves a root-owned SQLite file. `changed_when: false`: upsert always succeeds and only re-hashes. |
@@ -69,6 +71,8 @@ accepted, and there is **no Tier-2 backup** of this CT.
 | Turn off the superuser's new-login alerts | `uri` PATCH `/api/collections/_superusers` | PocketBase mails a superuser on every sign-in from a new address or client. This one is Ansible's and signs in every run, so the notices to `ansible@<domain>` are noise. The admin login keeps its alerts. |
 | Create the admin | `uri` POST (`no_log`) | Only when missing. `verified: true` (the users collection's `authRule` is `verified=true`) and `role: admin`. |
 | Check, then restore the admin | `uri` (`no_log`) | Signs in as the admin. It PATCHes only what drifted, and sets the password only when signing in fails, because setting it rotates PocketBase's token key and would sign the admin out on every run. |
+| Write the Corliss sign-in provider | `uri` PATCH `/api/collections/users` (`no_log`) | Provider `oidc`: `authURL` is Corliss's public `/oidc/authorize`; `tokenURL` and `extra.jwksURL` are its **internal** address; `extra.issuers` is the public origin, which is the `iss` Corliss signs; `userInfoURL` is empty, so PocketBase reads the `id_token` (Corliss has no userinfo endpoint). Without `jwksURL` PocketBase would not check the signature. Sent every run and reported unchanged: a GET leaves the secret out. Beszel leaves OAuth2 config alone at startup, so it survives a restart. |
+| Verify the sign-in legs | `uri` to Corliss's internal JWKS, then GET `/api/collections/users` and `assert` | The JWKS must answer from this CT, and the hub must report the provider with the client id and internal token URL written above. |
 | Look up, then write the agent token | `uri` (`no_log`) | `universal_tokens` has no API rules, so only a superuser can write it. POST when missing, PATCH when it differs. The hub's own `/api/beszel/universal-token` needs a user session, which step 4 removes. The admin owns it because that record is Ansible's and stays after step 4. |
 | Set the mail settings | `uri` PATCH `/api/settings` (`no_log`, [`mail.yml`](../../ansible/roles/beszel/tasks/mail.yml)) | The relay, parsed from `smtp_url`, and the sender. Sent every run and reported unchanged: a GET masks the password, so there is nothing to compare. |
 | Create, then set the admin's user settings | `uri` | `settings.emails` = `[alert_email]`, or `[]` when alerts are off. Every other key (chart range, units) is left as the admin set it. Created first and then patched, because the hub's create hook sets `emails` to the user's own address whatever the request says. |
@@ -105,7 +109,11 @@ In [`defaults/main.yml`](../../ansible/roles/beszel/defaults/main.yml):
 | `beszel_bind` | `0.0.0.0` | Listen address. The wildcard is mandatory, for the same cold-boot reason as `sync_relay_host`. |
 | `beszel_data_dir` | `/var/lib/beszel` | PocketBase's `--dir`: the database and the hub key. |
 | `beszel_app_url` | `https://{{ beszel_host }}` | Rendered as `APP_URL`. |
-| `beszel_admin_email` | `admin@{{ cluster_domain }}` | The login people use until step 4. Receives no mail. |
+| `beszel_admin_email` | `admin@{{ cluster_domain }}` | The password login, kept beside Corliss sign-in until it is turned off. Receives no mail. |
+| `beszel_oidc_client_id` | `beszel` | Must equal the corliss role's `corliss_beszel_oidc_client_id`. The secret is `corliss_beszel_oidc_client_secret` in group_vars, shared with the corliss role. |
+| `beszel_oidc_display_name` | `{{ cluster_domain }}` | What the hub's sign-in button names. |
+| `beszel_corliss_public_url` | `https://{{ cluster_domain }}` | Corliss's public origin: the browser's `authURL`, and the issuer. Mirrors `corliss_url`. |
+| `beszel_corliss_internal_url` | `http://{{ hostvars['corliss'].ansible_host }}:8000` | Where the hub exchanges the code and fetches the JWKS, over vmbr1. Port mirrors `corliss_port`. |
 | `beszel_email_from_address` / `beszel_email_from_name` | `monitor@{{ cluster_domain }}` / `SCN monitor` | The alerts' sender. The relay must accept it, as it must the PDS's. |
 | `beszel_alerts` | Status 5 min, Disk 90% 10 min, Memory 90% 10 min, SystemdFailed | The alert policy for every system. Each entry is Beszel's alert `name`, a `value` (a percentage where the kind has one) and `min` (minutes). |
 

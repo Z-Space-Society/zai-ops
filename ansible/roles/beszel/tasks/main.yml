@@ -266,6 +266,74 @@
   changed_when: true
   no_log: true
 
+# --- Sign-in through Corliss ------------------------------------------------------
+
+# The hub as Corliss's second OIDC client (#3 step 4). Beszel rewrites password
+# auth, createRule and MFA from env at every start but leaves the OAuth2 config
+# alone, so a provider written here survives a restart.
+#
+# PocketBase's oidc provider reads the user from the id_token when userInfoURL
+# is empty, which it must be: Corliss has no userinfo endpoint. It checks `aud`
+# against the client id, `iss` against `issuers` (the public origin, which is
+# what Corliss signs), and the signature against `jwksURL`; without jwksURL it
+# would skip the signature. The token and JWKS calls take Corliss's internal
+# address; only authURL, where the browser goes, is public.
+#
+# Sent every run and marked unchanged, like the mail settings: a GET leaves the
+# client secret out, so there is nothing to compare it against.
+- name: Write the Corliss sign-in provider
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/users"
+    method: PATCH
+    body_format: json
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+    body:
+      oauth2:
+        enabled: true
+        providers:
+          - name: oidc
+            displayName: "{{ beszel_oidc_display_name }}"
+            clientId: "{{ beszel_oidc_client_id }}"
+            clientSecret: "{{ corliss_beszel_oidc_client_secret }}"
+            authURL: "{{ beszel_corliss_public_url }}/oidc/authorize"
+            tokenURL: "{{ beszel_corliss_internal_url }}/oidc/token"
+            userInfoURL: ""
+            pkce: true
+            extra:
+              jwksURL: "{{ beszel_corliss_internal_url }}/.well-known/jwks.json"
+              issuers: ["{{ beszel_corliss_public_url }}"]
+  changed_when: false
+  no_log: true
+
+# Each leg the sign-in needs from this CT, probed here rather than discovered
+# at an admin's first click: the JWKS over vmbr1, then the provider as the hub
+# now reports it.
+- name: Verify this CT reaches Corliss's JWKS internally
+  ansible.builtin.uri:
+    url: "{{ beszel_corliss_internal_url }}/.well-known/jwks.json"
+    status_code: 200
+
+- name: Read the users collection back
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/users"
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+  register: beszel_users_collection
+
+- name: Verify the hub reports the Corliss provider
+  ansible.builtin.assert:
+    that:
+      - beszel_users_collection.json.oauth2.enabled
+      - beszel_oidc_provider.clientId | default('') == beszel_oidc_client_id
+      - beszel_oidc_provider.tokenURL | default('') == beszel_corliss_internal_url ~ '/oidc/token'
+    quiet: true
+    fail_msg: The hub did not keep the Corliss sign-in provider written above.
+  vars:
+    beszel_oidc_provider: >-
+      {{ beszel_users_collection.json.oauth2.providers
+         | selectattr('name', 'equalto', 'oidc') | first | default({}) }}
+
 # --- Agent token -------------------------------------------------------------------
 
 # Every agent (the monitor_agent role) enrolls with one token. The hub accepts

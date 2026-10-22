@@ -98,7 +98,7 @@ usage: scn-config
        scn-config nonint show-admins
        scn-config nonint add-admin <handle-or-did> [--admit] [--tier <tier>]
        scn-config nonint remove-admin <handle-or-did>
-       scn-config nonint apply-admins [corliss] [pds]
+       scn-config nonint apply-admins [corliss] [pds] [beszel]
        scn-config nonint show-smtp
        scn-config nonint set-smtp        (URL on stdin)
        scn-config nonint clear-smtp
@@ -543,21 +543,24 @@ pds_hint() {
 # service built or restored since then has never been told. Applying changes no
 # admins, it gives the roster as it stands to each of these. A new consumer is
 # a name here, a label below, and a branch in the two apply functions.
-ADMIN_TARGETS=(corliss pds)
+ADMIN_TARGETS=(corliss pds beszel)
 
 admin_target_label() {
   case "$1" in
     corliss) echo "Who its console and Django admin treat as admins" ;;
     pds) echo "Who may administer it (provisions pds)" ;;
+    beszel) echo "Removes hub users no longer admins (provisions beszel)" ;;
   esac
 }
 
-# pds_assigned — true when the PDS has a container to apply anything to.
-pds_assigned() {
+# assigned <service> — true when it has a container to apply anything to.
+assigned() {
   local i
   load_state
-  i="$(index_of pds)" && [ -n "${SVC_CTID[$i]}" ]
+  i="$(index_of "$1")" && [ -n "${SVC_CTID[$i]}" ]
 }
+
+pds_assigned() { assigned pds; }
 
 # Corliss re-derives its is_staff flags from the roster (sync_admins, v1.3.2).
 # Result in ADMIN_RC / ADMIN_OUT / ADMIN_ERR, like every other admins.yml run.
@@ -593,6 +596,13 @@ nonint_apply_admins() {
           ansible-playbook provision.yml --limit pds || failed=1
         else
           echo "The PDS has no container ID yet; it reads the roster when it is first provisioned."
+        fi
+        ;;
+      beszel)
+        if assigned beszel; then
+          ansible-playbook provision.yml --limit beszel || failed=1
+        else
+          echo "The monitoring hub has no container ID yet; it reads the roster when it is first provisioned."
         fi
         ;;
     esac
@@ -1884,9 +1894,9 @@ $ADMIN_ERR"
 
 # apply_admins <target>... — give the roster as it stands to each target, and
 # say what happened. Corliss first: it is quick and answers in a sentence,
-# where the PDS hands the screen to ansible.
+# where the PDS and the hub hand the screen to ansible, in one run.
 apply_admins() {
-  local note=""
+  local note="" provision=() svc
   if [[ " $* " == *" corliss "* ]]; then
     TERM=ansi whiptail --backtitle "$BACKTITLE" --title "Cluster Admins" \
       --infobox "Asking Corliss…" 8 "$WT_WIDTH"
@@ -1899,18 +1909,23 @@ $ADMIN_ERR"
     note="Corliss:
 $ADMIN_OUT"
   fi
-  if [[ " $* " == *" pds "* ]]; then
-    if pds_assigned; then
-      [ -z "$note" ] || msgbox "Cluster Admins" "$note
+  for svc in pds beszel; do
+    [[ " $* " == *" $svc "* ]] || continue
+    if assigned "$svc"; then
+      provision+=("$svc")
+    else
+      note="${note:+$note
 
-Next, the PDS."
-      run_provision pds
-      return 0
-    fi
-    note="${note:+$note
-
-}The PDS has no container ID yet, so there is nothing to update there.
+}$( [ "$svc" = pds ] && echo "The PDS" || echo "The monitoring hub" ) has no container ID yet, so there is nothing to update there.
 It reads the roster when it is first provisioned."
+    fi
+  done
+  if [ "${#provision[@]}" -gt 0 ]; then
+    [ -z "$note" ] || msgbox "Cluster Admins" "$note
+
+Next: ${provision[*]}."
+    run_provision "${provision[@]}"
+    return 0
   fi
   msgbox "Cluster Admins" "$note"
 }
@@ -1926,8 +1941,9 @@ do_admins_menu() {
 $ADMIN_ERR"
       return 0
     fi
-    text="An admin can approve and revoke members in Corliss and administer
-the PDS. The list is the public roster; nothing is stored here.
+    text="An admin can approve and revoke members in Corliss, administer the
+PDS and sign in to the monitoring hub. The list is the public roster;
+nothing is stored here.
 
 $(admins_table)${ADM_NOTE:+
 

@@ -334,6 +334,42 @@
       {{ beszel_users_collection.json.oauth2.providers
          | selectattr('name', 'equalto', 'oidc') | first | default({}) }}
 
+# --- Admins who have left the roster -------------------------------------------
+
+# A user signed in through Corliss is linked to its DID by an _externalAuths
+# record (providerId). One whose DID is no longer a current admin is deleted:
+# Corliss would refuse their next sign-in, but Beszel renews a session on every
+# page load, so an open tab would otherwise last for ever. Deleting the user
+# signs them out at their next refresh.
+#
+# beszel_admin_dids comes from the play (tasks/roster.yml) and has no default,
+# so the role used without it fails here rather than deleting every one.
+# admin@<domain> has no Corliss link and is never matched; it is excluded by id
+# as well, because it owns the agent token and the alerts.
+- name: Look up the users signed in through Corliss
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/_externalAuths/records?perPage=500&filter={{ beszel_oidc_filter | urlencode }}"
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+  vars:
+    beszel_oidc_filter: "provider='oidc'"
+  register: beszel_oidc_links
+
+- name: Remove the hub users who are no longer admins
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/users/records/{{ item.recordRef }}"
+    method: DELETE
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+    status_code: [204, 404]
+  loop: "{{ beszel_oidc_links.json['items'] }}"
+  loop_control:
+    label: "{{ item.providerId }}"
+  when:
+    - item.providerId not in beszel_admin_dids
+    - item.recordRef != beszel_admin_id
+  changed_when: true
+
 # --- Agent token -------------------------------------------------------------------
 
 # Every agent (the monitor_agent role) enrolls with one token. The hub accepts

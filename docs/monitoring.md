@@ -36,9 +36,12 @@ names the cluster's domain. Anyone not on the admin roster is refused at
 Corliss. Your first sign-in creates your user on the hub, and you see every
 system.
 
-The password login, `admin@<domain>`, stays as a fallback until
-[Corliss#25](https://github.com/Z-Space-Society/Corliss/issues/25) turns it
-off. Its password is on CT 100:
+Removing someone as an admin reaches the hub when it is next provisioned:
+`scn-config` → Cluster Admins → Apply does that, and deletes their hub user,
+which signs them out.
+
+The password login, `admin@<domain>`, stays as a backup for when Corliss is
+down. Its password is on CT 100:
 
 ```sh
 cat /root/.zai-secrets/beszel_admin_password      # CT 100

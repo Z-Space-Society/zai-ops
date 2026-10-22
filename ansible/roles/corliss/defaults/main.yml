@@ -520,11 +520,13 @@ corliss_oidc_redirect_uris:
 # The second relying party: the Beszel hub, which only roster admins may sign in
 # to (Corliss v1.6.0, zai-ops#3 step 4). The id is a local default that the
 # beszel role's provider must match; the secret is in group_vars because both
-# roles read it. The redirect is PocketBase's fixed OAuth2 callback on the
-# hub's public host, the same beszel_host the proxy routes.
+# roles read it. The redirect is the hub's own root, with the slash: the beszel
+# role runs the hub's same-tab sign-in (OAUTH_DISABLE_POPUP), which sends the
+# browser back to the app's base URL rather than to PocketBase's popup callback,
+# whose success page is under the /_/ the proxy blocks. Matched exactly.
 corliss_beszel_oidc_client_id: beszel
 corliss_beszel_oidc_redirect_uris:
-  - "https://{{ beszel_host }}/api/oauth2-redirect"
+  - "https://{{ beszel_host }}/"
 
 # Open WebUI's back-channel logout endpoint — where corliss POSTs a logout_token
 # on sign-out and on revocation. INTERNAL (derived from open-webui's CTID via

@@ -17,6 +17,10 @@ Environment=SHARE_ALL_SYSTEMS=true
 # instead; unset, an admin's first OIDC sign-in is refused. Only roster admins
 # reach this far: Corliss refuses everyone else at /oidc/authorize.
 Environment=USER_CREATION=true
+# Sign in through Corliss in the same tab, returning to the app's root. The
+# popup flow ends on PocketBase's /_/#/auth/oauth2-redirect-success, which the
+# proxy blocks with the rest of /_/, so the popup is left open and blank.
+Environment=OAUTH_DISABLE_POPUP=true
 ExecStart={{ beszel_bin }} serve --http {{ beszel_bind }}:{{ beszel_port }} --dir {{ beszel_data_dir }}
 
 # Restart=always, not on-failure: PocketBase exits 0 on SIGTERM, and the hub is

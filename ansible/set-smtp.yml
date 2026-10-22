@@ -6,6 +6,13 @@
 #     ansible-playbook set-smtp.yml -e smtp_action=set
 #   ansible-playbook set-smtp.yml -e smtp_action=clear
 #   ansible-playbook set-smtp.yml -e smtp_action=show
+#   ansible-playbook set-smtp.yml -e smtp_action=set-alert-email -e alert_email=ops@example.org
+#   ansible-playbook set-smtp.yml -e smtp_action=clear-alert-email
+#
+# The alert recipient is where the Beszel hub mails its alerts (zai-ops#3,
+# docs/monitoring.md). It is not a secret, so it goes in the runtime inventory
+# (inventory/local.yml, all.vars.alert_email), not beside the URL. Alerts are
+# off unless both the relay and the recipient are set.
 #
 # (`scn-config`, the operator command in bin/, drives this — its Set SMTP menu
 # and `scn-config nonint show-smtp | set-smtp | clear-smtp`. The script builds
@@ -14,7 +21,8 @@
 #
 # Why a file under .zai-secrets and not the runtime inventory: the URL carries a
 # password. group_vars/all/main.yml reads the file as `smtp_url`; a missing file
-# reads as empty and every consumer leaves mail off. It is in the Tier-1
+# reads as empty and every consumer leaves mail off. Its consumers are the PDS
+# and the Beszel hub's alerts. It is in the Tier-1
 # control-node backup with the rest of that directory.
 #
 # The URL arrives in the ENVIRONMENT, never as -e: an extra-var is on the
@@ -41,12 +49,17 @@
     # greedy `.*@` ends at the LAST @, so a username that is an email address
     # is still cut whole. Credential-free by construction.
     url_tail_of: '^[a-zA-Z][a-zA-Z0-9+.-]*://(.*@)?'
+    runtime_inventory: "{{ playbook_dir }}/inventory/local.yml"
+    # Deliberately loose, as in set-tls.yml: the relay judges the address; this
+    # only catches a shifted argument landing here.
+    email_regex: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    smtp_actions: ['set', 'clear', 'show', 'set-alert-email', 'clear-alert-email']
     tail_regex: '^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?)(:[0-9]{1,5})?(/[^?#\s]*)?(\?tls=required)?$'
   tasks:
     - name: Require a known action
       ansible.builtin.assert:
-        that: smtp_action | default('') in ['set', 'clear', 'show']
-        fail_msg: "Pass -e smtp_action=set, clear or show."
+        that: smtp_action | default('') in smtp_actions
+        fail_msg: "Pass -e smtp_action=, one of: {{ smtp_actions | join(', ') }}."
 
     - name: Validate the new URL
       when: smtp_action == 'set'
@@ -118,9 +131,59 @@
           {{ 'Mail relay ' ~ ('saved' if smtp_action == 'set' else 'cleared')
              if (smtp_write is changed or smtp_clear is changed)
              else 'Mail relay unchanged — nothing to do' }}.
-          It reaches a service on its next provision
-          (ansible-playbook provision.yml --limit pds).
+          It reaches a service on its next provision: the PDS
+          (provision.yml --limit pds) and the monitoring hub's alerts
+          (provision.yml --limit beszel).
       when: smtp_action in ['set', 'clear']
+
+    # --- Alert recipient -------------------------------------------------------
+
+    - name: Change the alert recipient
+      when: smtp_action in ['set-alert-email', 'clear-alert-email']
+      vars:
+        wanted_email: "{{ (alert_email | default('') | string | trim) if smtp_action == 'set-alert-email' else '' }}"
+      block:
+        - name: Require an address
+          ansible.builtin.assert:
+            that: wanted_email is match(email_regex)
+            fail_msg: "Pass -e alert_email=<address>, e.g. ops@example.org."
+          when: smtp_action == 'set-alert-email'
+
+        # errors='ignore' reads a missing file as empty; 'or {}' makes that a mapping.
+        - name: Load the existing runtime inventory (empty if absent)
+          ansible.builtin.set_fact:
+            runtime_data: "{{ (lookup('file', runtime_inventory, errors='ignore') | from_yaml) or {} }}"
+
+        # all.vars rebuilt without alert_email, then given it back only when
+        # setting: a recursive combine could never remove the key on clear.
+        - name: Build the runtime vars for this recipient
+          ansible.builtin.set_fact:
+            current_vars: "{{ runtime_data.get('all', {}).get('vars') or {} }}"
+            new_vars: >-
+              {{
+                ((runtime_data.get('all', {}).get('vars') or {})
+                 | dict2items | rejectattr('key', 'equalto', 'alert_email') | items2dict)
+                | combine({'alert_email': wanted_email} if wanted_email else {})
+              }}
+
+        # Read-modify-write the WHOLE structure and re-dump, as set-tls.yml does,
+        # so the domain, the CTID assignments and the inference roster survive.
+        - name: Write the runtime inventory
+          ansible.builtin.copy:
+            dest: "{{ runtime_inventory }}"
+            content: >-
+              {{ runtime_data | combine({'all': (runtime_data.get('all') or {})
+                 | combine({'vars': new_vars})}) | to_nice_yaml(indent=2) }}
+            mode: "0644"
+          when: new_vars != current_vars
+
+        - name: Report the recipient change
+          ansible.builtin.debug:
+            msg: >-
+              {{ ('Alert recipient ' ~ ('set to ' ~ wanted_email if wanted_email else 'cleared'))
+                 if new_vars != current_vars else 'Alert recipient unchanged, nothing to do' }}.
+              The monitoring hub picks it up on its next provision
+              (ansible-playbook provision.yml --limit beszel).
 
     # Scheme, host and port only — never the credentials. Written to `out` for
     # scn-config to read (the same hand-off ct-status.yml uses), or printed.
@@ -141,6 +204,7 @@
           port {{ stored_port }}
           tls {{ 'implicit' if stored_scheme == 'smtps' else ('starttls' if stored_tail is search('\?tls=required$') else 'none') }}
           {% endif %}
+          alert_email {{ alert_email | default('', true) or '-' }}
       block:
         - name: Write the description
           ansible.builtin.copy:

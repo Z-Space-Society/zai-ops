@@ -1,0 +1,89 @@
+---
+# Mail for alerts (zai-ops#3 step 5): the relay into PocketBase's settings, and
+# the recipient into the admin's user_settings. Alerts belong to the admin
+# (alerts.yml), so they go to alert_email and nowhere else.
+#
+# Off unless both smtp_url and alert_email are set: SMTP disabled, and no
+# recipient. The empty recipient list matters more than the switch: with SMTP
+# off PocketBase falls back to sendmail, and the hub sends nothing only because
+# it has nobody to send to.
+
+- name: Note whether alert mail is on
+  ansible.builtin.set_fact:
+    beszel_mail_on: "{{ (smtp_url | default('', true) | length > 0) and (alert_email | default('', true) | length > 0) }}"
+
+# The relay URL is parsed here, not stored apart, so set-smtp.yml stays its
+# only writer. smtps is implicit TLS. smtp://…?tls=required is STARTTLS:
+# PocketBase sends STARTTLS when the relay offers it, and Go's PlainAuth will
+# not send a password over a connection that never upgraded, so a relay that
+# drops STARTTLS fails the send rather than getting the password in clear.
+# Sent every run and marked unchanged: a GET masks the password, so there is
+# nothing to compare against, and a PATCH of the same values changes nothing.
+- name: Set the hub's mail settings
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/settings"
+    method: PATCH
+    body_format: json
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+    body:
+      meta:
+        senderAddress: "{{ beszel_email_from_address }}"
+        senderName: "{{ beszel_email_from_name }}"
+      smtp: >-
+        {{ {'enabled': true,
+            'host': relay.hostname,
+            'port': relay.port | default(465 if relay.scheme == 'smtps' else 587, true) | int,
+            'username': relay.username | default('', true) | urldecode,
+            'password': relay.password | default('', true) | urldecode,
+            'tls': relay.scheme == 'smtps',
+            'authMethod': 'PLAIN'}
+           if beszel_mail_on | bool else {'enabled': false} }}
+  vars:
+    relay: "{{ smtp_url | urlsplit if beszel_mail_on | bool else {} }}"
+  changed_when: false
+  no_log: true
+
+- name: Look up the admin's user settings
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/user_settings/records?filter={{ beszel_settings_filter | urlencode }}"
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+  vars:
+    beszel_settings_filter: "user='{{ beszel_admin_id }}'"
+  register: beszel_settings_lookup
+
+# The hub's create hook sets emails to the user's own address whatever the
+# request says, so a missing record is created first and then corrected below.
+- name: Create the admin's user settings
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/user_settings/records"
+    method: POST
+    body_format: json
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+    body:
+      user: "{{ beszel_admin_id }}"
+  register: beszel_settings_created
+  when: beszel_settings_lookup.json['items'] | length == 0
+  changed_when: true
+
+# Only emails is ours. The rest (chart range, units, webhooks) is the admin's
+# own preference in the UI and is kept as it is.
+- name: Set where the admin's alerts are mailed
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ beszel_port }}/api/collections/user_settings/records/{{ beszel_settings_record.id }}"
+    method: PATCH
+    body_format: json
+    headers:
+      Authorization: "{{ beszel_superuser_auth.json.token }}"
+    body:
+      settings: "{{ beszel_settings_current | combine({'emails': beszel_wanted_emails}) }}"
+  vars:
+    beszel_settings_record: >-
+      {{ beszel_settings_created.json if beszel_settings_created is not skipped
+         else beszel_settings_lookup.json['items'] | first }}
+    beszel_settings_current: "{{ beszel_settings_record.settings | default({}, true) }}"
+    beszel_wanted_emails: "{{ [alert_email] if beszel_mail_on | bool else [] }}"
+  when: beszel_settings_current.emails | default([]) != beszel_wanted_emails
+  changed_when: true

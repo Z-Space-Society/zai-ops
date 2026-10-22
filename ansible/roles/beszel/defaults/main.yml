@@ -37,3 +37,22 @@ beszel_app_url: "https://{{ beszel_host }}"
 # Both need an email-shaped name, and neither address receives mail. The
 # superuser's is in group_vars/all/main.yml, as are both passwords.
 beszel_admin_email: "admin@{{ cluster_domain }}"
+
+# Mail for alerts (zai-ops#3 step 5): sent through the cluster relay (smtp_url)
+# to alert_email, both set with scn-config's Set SMTP. Off unless both are set.
+# The relay must accept this sender, as it must the PDS's.
+beszel_email_from_address: "monitor@{{ cluster_domain }}"
+beszel_email_from_name: "SCN monitor"
+
+# What every system the hub knows is watched for. The one place alert policy
+# lives: tasks/alerts.yml writes these onto every system on every run, and puts
+# back a value or delay changed in the hub's UI. name is Beszel's alert kind;
+# value is a percentage where the kind has one; min is minutes (how long down,
+# or how long over the value, before it sends).
+beszel_alerts:
+  - { name: Status, value: 0, min: 5 }
+  - { name: Disk, value: 90, min: 10 }
+  - { name: Memory, value: 90, min: 10 }
+  # Fires on the first report of any failed unit; the agent reads systemd every
+  # ten minutes, so min does nothing here.
+  - { name: SystemdFailed, value: 0, min: 0 }

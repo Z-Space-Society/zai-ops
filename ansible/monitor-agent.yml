@@ -14,9 +14,37 @@
 # out because a new cluster has no hub yet when it runs.
 #
 # A host is skipped, not failed, while the hub is unassigned or not answering.
+# The last play puts the alert policy on every system the hub knows.
 
 - name: Install the Beszel monitoring agent
   hosts: service_containers:control_node
   gather_facts: false
   roles:
     - monitor_agent
+
+# Then every system the hub knows, including the Proxmox host and the inference
+# nodes that no play here reaches, gets the alert policy (beszel_alerts). Beszel
+# can only attach an alert to a system that already exists, so this follows the
+# agents. `--limit beszel` runs just this and the hub CT's own agent.
+- name: Put the alerts on every system
+  hosts: beszel
+  gather_facts: false
+  tasks:
+    - name: Check that the hub is up
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}:{{ beszel_port }}/api/health"
+        timeout: 5
+      register: hub_health
+      failed_when: false
+      delegate_to: localhost
+      when: ctid is defined
+
+    # Unassigned or not answering: the agents above skipped too, for the same reason.
+    - name: Skip a hub that isn't up
+      ansible.builtin.meta: end_host
+      when: ctid is not defined or hub_health.status | default(0) != 200
+
+    - name: Put the alerts on every system
+      ansible.builtin.include_role:
+        name: beszel
+        tasks_from: alerts

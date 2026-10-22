@@ -39,7 +39,8 @@ out and update the docs.
   step. Deliberately not `/opt/zai-ops`, which is CT 100's clone, so the two are
   never mistaken for each other. `host/bootstrap.sh` (run as root) builds CT 100, the Ansible control
   node; everything after is driven by Ansible *from inside CT 100*. Anything else
-  that must run on the host itself (`host/import-github-user.sh`) lives beside it
+  that must run on the host itself (`host/import-github-user.sh`,
+  `host/install-monitor-agent.sh`) lives beside it
   in `host/`, run by path, never put on PATH. CT 100 still has no SSH path to the
   host. See ADR-0008.
 - **CT 100 builds the rest over the API.** Service containers are *created* via
@@ -115,7 +116,7 @@ out and update the docs.
   in `/root/.zai-secrets` because it is minted in the app, not generated). It also runs `provision.yml` per
   service, ordered by `default_ctid` because tier order is dependency order,
   manages cluster admins (`admins.yml`), sets the mail relay
-  (`set-smtp.yml`), the proxy's TLS mode (`set-tls.yml`), the signing keys
+  and the alert recipient (`set-smtp.yml`), the proxy's TLS mode (`set-tls.yml`), the signing keys
   (`rotate-key.yml`) and, under Versions, which release scn-chat and Corliss
   deploy, a tag or `latest` (`set-version.yml`, ADR-0012), and it installs
   the monitoring agents everywhere (`monitor-agent.yml`). A new plain value is a row in Cluster Settings and

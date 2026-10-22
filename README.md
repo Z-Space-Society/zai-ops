@@ -81,6 +81,8 @@ itself from this repo.
    - **Set SMTP**: the outbound mail relay. It is a secret, so it is kept out
      of that file. Set it before provisioning the PDS, or the PDS runs with
      mail off. See [Outbound email](docs/roles/pds.md#outbound-email-smtp).
+     Its **Alert recipient** is where the monitoring hub emails its alerts;
+     see [Using the system monitor](docs/monitoring.md#alerts).
    - **Set TLS**: how the proxy gets its certificate. Skip it and the cluster
      is its own edge (`acme`: Caddy obtains and renews Let's Encrypt certs, so
      public `:80` and `:443` must reach the proxy CT). Choose `none` to stand
@@ -135,7 +137,9 @@ itself from this repo.
                                         #   before the hub skipped theirs
    ```
 
-   `scn-config`'s **Monitoring Agents** entry is that last line.
+   `scn-config`'s **Monitoring Agents** entry is that last line. The Proxmox
+   host and the inference nodes get their agents separately; see
+   [Using the system monitor](docs/monitoring.md#adding-a-machine).
 
    (`scn-config`, `zai-backup`, … are operator commands in the repo's
    [`bin/`](bin/), on `PATH` on the control node. They run in place from git, so

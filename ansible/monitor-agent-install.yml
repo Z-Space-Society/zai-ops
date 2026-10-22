@@ -1,0 +1,69 @@
+---
+# Write a root script that installs the Beszel monitoring agent on a machine
+# Ansible doesn't manage: an inference node (zai-ops#3, step 6).
+#
+#   ansible-playbook monitor-agent-install.yml -e machine=salmon -e out=/root/salmon-agent.sh
+#
+# (`scn-config nonint print-monitor-agent-install salmon` runs this and prints
+# the script.) The script is host/install-monitor-agent.sh with its inputs in a
+# header: the hub's public URL, the agent token, the hub key's public half, the
+# version and checksum pins, and the role's unit and refresh timer as rendered
+# here, so there is one copy of each. Copy it to the machine, run it as root,
+# then delete it: it holds the agent token. Then run Monitoring Agents (or
+# `scn-config nonint apply-monitor-agents beszel`) to put the alerts on it.
+#
+# The URL is https://<beszel_host>: the nodes sit on the LAN and the hub only
+# on vmbr1, so they come in through the proxy, which is why agent-connect is
+# left open on the public route. On a cluster whose edge listens on another
+# port (Ronchamp's :8443), the URL here has no port; no such cluster has an
+# inference node.
+#
+# The Proxmox host does not use this: it runs host/install-monitor-agent.sh
+# from its own clone and reads CT 100's values itself, so that nothing CT 100
+# writes is ever run as host root.
+
+- name: Write an agent install script for a machine Ansible doesn't manage
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    taken_names: "{{ groups['service_containers'] + groups['control_node'] }}"
+  tasks:
+    - name: Require a machine name and an output file
+      ansible.builtin.assert:
+        that:
+          - machine | default('') is match('^[a-z0-9][a-z0-9-]*$')
+          - out | default('') | length > 0
+        fail_msg: "Pass -e machine=<name> (lowercase, e.g. salmon) and -e out=<file>."
+
+    # The hub knows a machine by this name and by a fingerprint made from it, so
+    # reusing a container's name would put two machines on one record.
+    - name: Refuse a name a container already uses
+      ansible.builtin.assert:
+        that: machine not in taken_names
+        fail_msg: "{{ machine }} is a container's name here; give the machine its own."
+
+    - name: Require a provisioned hub
+      ansible.builtin.assert:
+        that: hostvars['beszel'].ctid is defined
+        fail_msg: "The Beszel hub has no CTID yet; assign and provision it first."
+
+    # The role's own defaults, for the unit template's variables and the
+    # checksum pin. Read as vars here: nothing in them templates against a host.
+    - name: Load the agent role's defaults
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/roles/monitor_agent/defaults/main.yml"
+
+    - name: Write the install script
+      ansible.builtin.template:
+        src: monitor-agent-install.sh.j2
+        dest: "{{ out }}"
+        mode: "0600"
+      no_log: true
+
+    - name: Say what the file holds
+      ansible.builtin.debug:
+        msg: >-
+          {{ out }} installs the agent on {{ machine }}. It holds the agent token:
+          copy it there, run it as root, delete both copies, then run
+          scn-config nonint apply-monitor-agents beszel to put the alerts on it.

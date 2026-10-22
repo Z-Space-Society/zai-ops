@@ -134,6 +134,13 @@ corliss_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '
 corliss_secret_key: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/corliss_secret_key chars=ascii_letters,digits length=64') }}"
 corliss_oidc_client_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/corliss_oidc_client_secret chars=digits,abcdef length=48') }}"
 
+# The Beszel hub's OIDC client secret (zai-ops#3 step 4), the second relying
+# party's. Here rather than in either role because two read it: corliss renders
+# it as BESZEL_OIDC_CLIENT_SECRET, and the beszel role writes the same value
+# into the hub's OIDC provider. Hex, so it needs no encoding in the Basic
+# header PocketBase sends it in.
+corliss_beszel_oidc_client_secret: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/corliss_beszel_oidc_client_secret chars=digits,abcdef length=48') }}"
+
 # Bearer token the SCN registry (HappyView Lua) presents when it POSTs a grant
 # or revocation to corliss's /membership/events. Same generate-once posture as
 # the secrets above, with one difference worth knowing: this is the first

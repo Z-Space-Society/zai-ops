@@ -517,6 +517,15 @@ corliss_oidc_client_id: open-webui
 corliss_oidc_redirect_uris:
   - "https://owui.{{ cluster_domain }}/oauth/oidc/callback"
 
+# The second relying party: the Beszel hub, which only roster admins may sign in
+# to (Corliss v1.6.0, zai-ops#3 step 4). The id is a local default that the
+# beszel role's provider must match; the secret is in group_vars because both
+# roles read it. The redirect is PocketBase's fixed OAuth2 callback on the
+# hub's public host, the same beszel_host the proxy routes.
+corliss_beszel_oidc_client_id: beszel
+corliss_beszel_oidc_redirect_uris:
+  - "https://{{ beszel_host }}/api/oauth2-redirect"
+
 # Open WebUI's back-channel logout endpoint — where corliss POSTs a logout_token
 # on sign-out and on revocation. INTERNAL (derived from open-webui's CTID via
 # hostvars), unlike the redirect URI above: that one is a URL a member's browser
@@ -566,6 +575,11 @@ corliss_chat_public_url: "{{ ('https://chat.' ~ cluster_domain) if hostvars['scn
 # trust-model decision, not a config one. If that lands, this becomes
 # `https://ops.{{ cluster_domain }}` and Corliss needs no change.
 corliss_proxmox_url: "https://{{ proxmox_api_host }}:8006"
+
+# The Manage menu's Beszel link, directly under Proxmox, admins only (Corliss
+# v1.6.0). The hub's public origin, the same beszel_host the proxy routes; NOT
+# corliss_beszel_hub_url below, the internal address /systems/ dials.
+corliss_beszel_url: "https://{{ beszel_host }}"
 
 # --- LiteLLM: where Corliss issues members' API keys ------------------------
 # Deliberately NOT corliss_api_url above. That one is the public origin a MEMBER
@@ -791,6 +805,13 @@ corliss_garage_s3_url: "http://{{ hostvars['object-store'].ansible_host }}:{{ co
 # than an origin, because unlike the three above this names an endpoint Caddy
 # publishes rather than the root of a service.
 corliss_caddy_health_url: "http://{{ hostvars['proxy'].ansible_host }}/healthz"
+
+# The Beszel hub, probed at /api/health, PocketBase's liveness endpoint and the
+# beszel role's own smoke test (Corliss v1.6.0). Unguarded like its neighbours
+# (adding-a-service step 6): a cluster with no beszel CTID fails this role
+# rather than rendering a blank. beszel_port is a group_var, not a role
+# default, so it is read directly instead of mirrored.
+corliss_beszel_hub_url: "http://{{ hostvars['beszel'].ansible_host }}:{{ beszel_port }}"
 
 # --- Service manifests: the zai-ops and Version columns on /systems/ ----------
 #

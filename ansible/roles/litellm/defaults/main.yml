@@ -8,13 +8,17 @@
 # so pin it and bump deliberately. Installed into the venv below as
 # `litellm[proxy]=={{ litellm_version }}`.
 #
-# Upstream maintains a `stable/1.89.x` branch that backports security fixes with
-# NO schema change (1.89.4 and 1.89.7 ship the identical 128 migrations), so a
-# patch bump inside this line is a re-run of the role and nothing else. Crossing
-# a MINOR (1.90+) is the different move: 1.90→1.97 adds 19 additive migrations,
-# and `prisma migrate deploy` has no down — pg_dump the litellm DB first.
+# Upstream backports security fixes to a rolling set of `stable/1.N.x` branches
+# and drops the oldest as new minors ship; 1.89.x stopped getting them, which is
+# why this left it (zai-ops#2). Pick the oldest line still being patched: the
+# most-aged code that still gets fixes. A patch bump inside a line keeps the
+# schema and is a re-run of the role. Crossing a minor applies migrations
+# (1.89.7 to 1.103.7 is 128 to 185), and `prisma migrate deploy` has no down,
+# so run `zai-backup` first for a fresh pg_dumpall. Never 1.107.0: that release
+# was a supply-chain compromise.
 # Releases: https://github.com/BerriAI/litellm/releases
-litellm_version: "1.89.7"
+# Advisories: https://github.com/BerriAI/litellm/security/advisories
+litellm_version: "1.103.7"
 
 # Prisma client (prisma-client-py). LiteLLM uses Prisma for its Postgres store but
 # `litellm[proxy]` does NOT pull it — prisma lives in the `extra_proxy` extra, and

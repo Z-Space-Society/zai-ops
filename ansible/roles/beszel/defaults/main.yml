@@ -38,6 +38,23 @@ beszel_app_url: "https://{{ beszel_host }}"
 # superuser's is in group_vars/all/main.yml, as are both passwords.
 beszel_admin_email: "admin@{{ cluster_domain }}"
 
+# Sign-in through Corliss (zai-ops#3 step 4). The hub is Corliss's second
+# confidential OIDC client, which only roster admins can complete; the secret is
+# corliss_beszel_oidc_client_secret in group_vars, which corliss renders too.
+#
+# The client id is a local default: keep it equal to the corliss role's
+# corliss_beszel_oidc_client_id, the convention openwebui_oidc_client_id uses.
+beszel_oidc_client_id: beszel
+# What the sign-in button names: the cluster, which is what an admin signs in to.
+beszel_oidc_display_name: "{{ cluster_domain }}"
+# Corliss's public origin, where the admin's browser goes and the id_token's
+# `iss`. Mirrors corliss_url.
+beszel_corliss_public_url: "https://{{ cluster_domain }}"
+# Corliss's INTERNAL address, for the two calls the hub makes itself: the token
+# exchange and the JWKS fetch. One hop over vmbr1 rather than out through the
+# proxy, the rule for every call between two CTs. The port mirrors corliss_port.
+beszel_corliss_internal_url: "http://{{ hostvars['corliss'].ansible_host }}:8000"
+
 # Mail for alerts (zai-ops#3 step 5): sent through the cluster relay (smtp_url)
 # to alert_email, both set with scn-config's Set SMTP. Off unless both are set.
 # The relay must accept this sender, as it must the PDS's.

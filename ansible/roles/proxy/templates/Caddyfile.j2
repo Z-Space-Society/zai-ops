@@ -176,6 +176,14 @@ http://{{ h.domain }} {
         reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
     }
 {% else %}
+{% for p in h.allow_paths | default([]) %}
+    # An exception carved out of a blocked path below. `handle` sorts ahead of
+    # `respond` in Caddy's directive order, so this path is proxied and never
+    # reaches the block.
+    handle {{ p }} {
+        reverse_proxy {{ hostvars[h.service].ansible_host }}:{{ h.port }}
+    }
+{% endfor %}
 {% for p in h.block_paths | default([]) %}
     # Not routed: answered here and never forwarded. `respond` sorts ahead of
     # reverse_proxy in Caddy's directive order, so it wins for this path.

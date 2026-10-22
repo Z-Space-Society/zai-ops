@@ -105,7 +105,10 @@ caddy_proxy_hosts:
   # in, which leaves PocketBase's own admin surfaces on the internet unless they
   # are answered here instead:
   #
-  #   /_/*                     the PocketBase superuser dashboard.
+  #   /_/*                     the PocketBase superuser dashboard, except
+  #                            /_/images/*: static images the hub's own
+  #                            sign-in page loads, such as the OIDC button's
+  #                            icon. No page, script or API under it.
   #   /api/collections/_superusers/*
   #   /api/collections/pbc_3142635823/*
   #                            superuser sign-in and records. PocketBase finds a
@@ -121,6 +124,7 @@ caddy_proxy_hosts:
   - domain: "{{ beszel_host }}"
     service: beszel
     port: 8090
+    allow_paths: ["/_/images/*"]
     block_paths:
       - "/_/*"
       - "/api/collections/_superusers/*"

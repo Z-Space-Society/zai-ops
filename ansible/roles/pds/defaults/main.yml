@@ -20,26 +20,26 @@
 # source that is down fails every provision that has to clone. Point this back
 # at the fork once it is synced and the knot's uptime is something we rely on.
 #
-# Pinned to f74a3e104661 (2026-10-05, upstream main): atproto-pds 0.15.0-rc.6,
+# Pinned to 09a868cdde93 (2026-10-22, upstream main, the commit that closes
+# upstream's 2026-10-22 release notes): atproto-pds still 0.15.0-rc.6,
 # workspace edition 2024 / rust-version 1.97 / license MIT, verified against
-# that commit. It replaced 68222af18add (0.15.0-rc.4, 670 commits earlier).
-# What the bump is for: GET /_tls-check (e57a6f0), the endpoint Caddy's
-# on-demand TLS asks before issuing a certificate for a handle hostname. The
-# proxy role's catch-all site asks it (caddy_catch_all).
+# that commit. It replaced f74a3e104661 (2026-10-05, 105 commits earlier).
+# What the bump is for: staying current with upstream, which brings the
+# 2026-10-22 spaces alpha, several accounts per browser on the portal, OAuth
+# prompt/max_age, signup-mail limits and password-reset hardening.
 #
-# Checked against f74a3e1 before bumping: the four build features below and
-# every PDS_* name pds.env.j2 writes still exist. Two changes in the range can
-# refuse a boot that 68222af accepted: PDS_PRODUCTION=true now needs
-# PDS_DATA_DIRECTORY to exist (the role creates it), and a JWK in
-# PDS_OAUTH_KEYS_JWK_SET whose public point does not match its private key is
-# refused at load.
+# Checked against 09a868c before bumping: the four build features below and
+# every PDS_* name the role's templates write still exist. The first boot after
+# the bump runs accounts migrations (existing portal sessions carry over, nobody
+# is signed out) and gives every account an #atproto_kem key in the background,
+# stored locally and published nowhere: no PLC operation, no #identity event.
 #
 # Upstream publishes no tag to fetch, so the revision IS the reproducibility
 # pin. A bump drives a re-clone + rebuild (cold cargo build, ~15-30 min, same
 # budget as happyview); re-verify pds_version against the new commit.
 pds_repo_url: "https://tangled.org/ngerakines.me/atproto-crates"
 pds_version: "0.15.0-rc.6"        # informational; verified against the checkout
-pds_revision: "f74a3e104661b503cfc92771acb5ef6775a0acaa"
+pds_revision: "09a868cdde938c789326f1db16ffc30bbf38c15e"
 
 # Build features — the default sqlite storage profile stays on. clap is
 # REQUIRED (both bin targets gate on it); smtp = outbound mail (invites/2FA),

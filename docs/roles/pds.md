@@ -73,7 +73,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | Var | Default | Meaning |
 |---|---|---|
 | `pds_repo_url` | `https://tangled.org/ngerakines.me/atproto-crates` | build source: Nick's canonical workspace. The SCN fork (`sharedcomputer.network/atproto-crates`, on the @commonscomputer.com knot) is not used while it trails upstream; see the comment in `defaults/main.yml` |
-| `pds_revision` | `f74a3e104661…` | **the reproducibility pin**, a commit SHA |
+| `pds_revision` | `09a868cdde93…` | **the reproducibility pin**, a commit SHA |
 | `pds_version` | `0.15.0-rc.6` | informational; verified against the checkout |
 | `pds_hostname` | `pds.{{ cluster_domain }}` | public hostname (SCN: `pds.sharedcomputer.network`) |
 | `pds_service_did` | `did:web:pds.{{ cluster_domain }}` | the PDS's own service identity |

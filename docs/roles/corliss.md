@@ -375,7 +375,7 @@ curl -s https://<domain>/clients/scn-obsidian.json | grep -o '"redirect_uris": \
     `/opt/corliss/venv` by path (the unit's `ExecStart`, `collectstatic`,
     `migrate`, `ensure_admin`, the chown) silently misses it.
   - `UV_PYTHON_INSTALL_DIR={{ corliss_python_install_dir }}` — the app needs
-    Python 3.14 (its committed `.python-version`) and Debian 13 ships 3.13, so
+    Python 3.15 (its committed `.python-version`) and Debian 13 ships 3.13, so
     uv fetches a managed interpreter. Left at uv's default it lands in
     `/root/.local/share/uv/python`, which `ProtectHome=true` hides from the
     daemon. The follow-up `sys._base_executable` check fails the run if it ever

@@ -440,16 +440,19 @@ corliss_python_install_dir: "{{ corliss_home }}/python"
 # uv — provisions the venv from the checkout's pyproject.toml + uv.lock, and
 # fetches the managed CPython to build it against. Installed reproducibly from
 # a pinned, checksummed release tarball (NOT `curl | sh` of a moving
-# installer), same idiom and same pin as the open-webui role. Like open-webui,
-# corliss DOES need uv's managed-CPython fetch: the app requires Python 3.14
-# (pinned in its committed .python-version) and Debian 13 ships 3.13.
+# installer), same idiom as the open-webui role. Like open-webui, corliss DOES
+# need uv's managed-CPython fetch: the app requires Python 3.15 (pinned in its
+# committed .python-version) and Debian 13 ships 3.13.
 #
 # There is deliberately no corliss_python_version var here: the app's
 # .python-version is the single source of truth and uv reads it off the
-# checkout, so a role var would only be a second copy to drift.
+# checkout, so a role var would only be a second copy to drift. The uv pin is
+# where the interpreter's ceiling lives instead: uv only downloads CPython
+# releases it knows of, so a .python-version newer than this uv resolves to a
+# pre-release or fails. 0.11.25 knew 3.15 only as a beta; 0.13.x knows 3.15.0.
 # Releases: https://github.com/astral-sh/uv/releases
-corliss_uv_version: "0.11.25"
-corliss_uv_sha256: "1db18b5e76fa645a7f3865773139bdec8e2d46adbdbb35e7410b34fa8015ccd2"
+corliss_uv_version: "0.13.5"
+corliss_uv_sha256: "f68d291c75783122dad58ab77def0e13f3233f358731db5d6d7e8715603b928f"
 corliss_uv_url: "https://github.com/astral-sh/uv/releases/download/{{ corliss_uv_version }}/uv-x86_64-unknown-linux-gnu.tar.gz"
 corliss_uv_install_dir: /usr/local/bin
 corliss_uv_bin: "{{ corliss_uv_install_dir }}/uv"

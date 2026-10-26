@@ -199,7 +199,7 @@
   register: corliss_clone
   notify: restart corliss
 
-# --- uv + a managed CPython (the app pins 3.14 in its committed .python-version;
+# --- uv + a managed CPython (the app pins 3.15 in its committed .python-version;
 # Debian 13 ships 3.13, so uv fetches its own — exactly like open-webui) --------
 
 - name: Ensure CA certificates are present for the uv + package downloads
@@ -263,7 +263,7 @@
 # One task provisions the whole environment: run from the checkout, `uv sync`
 # creates the venv itself (no separate `uv venv`, no python3-venv apt package),
 # fetches a managed CPython of the version pinned in the app's committed
-# .python-version (3.14 — Debian 13 ships 3.13, so the system interpreter is
+# .python-version (3.15 — Debian 13 ships 3.13, so the system interpreter is
 # unusable here), and installs the exact tree in uv.lock.
 #
 # --locked makes the deploy FAIL if uv.lock is stale against pyproject.toml
@@ -286,7 +286,7 @@
 #
 # uv prints "Checked N packages" to stderr when the environment already matches
 # the lock — the only no-change signal. NOT "Audited", which is `uv pip
-# install`'s wording (verified on uv 0.11); keying on that would report changed
+# install`'s wording (verified on uv 0.11 and 0.13); keying on that would report changed
 # every run and notify a pointless restart.
 - name: Sync the venv from the checkout's uv.lock
   ansible.builtin.command:
@@ -304,7 +304,7 @@
 - name: Confirm the venv's base interpreter resolves under the role tree
   # Guards the load-bearing UV_PYTHON_INSTALL_DIR above: if the interpreter ever
   # lands outside corliss_home — a missed env var, or uv satisfying the request
-  # from a system 3.14 someone installed — the daemon would fail to exec it
+  # from a system 3.15 someone installed — the daemon would fail to exec it
   # under ProtectHome=true. Fail loud at provision time instead of with a
   # cryptic unit start failure. Same guard as the open-webui role.
   ansible.builtin.command:

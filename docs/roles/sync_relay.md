@@ -83,7 +83,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/sync_relay/defaults/main.ym
 
 | Variable | Default | Meaning |
 | -------- | ------- | ------- |
-| `sync_relay_version` | `0.2.1` | Tag checked out and built (the role prefixes `v`). Bump to upgrade; the clone and build tasks re-run when this changes. `0.2.0` is Phase B: token verification, owner-only vaults, `/internal/vaults` and MCP. |
+| `sync_relay_version` | `0.3.0` | Tag checked out and built (the role prefixes `v`). Bump to upgrade; the clone and build tasks re-run when this changes. `0.3.0` adds `note_count` and `bytes` to each vault in a listing, shown on Corliss's Notes page; no new settings, no schema change. `0.2.0` is Phase B: token verification, owner-only vaults, `/internal/vaults` and MCP. |
 | `sync_relay_require_auth` | `true` | The binary's own default. It was `false` through Phase A only. |
 | `sync_relay_mcp_port` | `7031` | The MCP listener, routed as `mcp.<domain>`. |
 | `sync_relay_oidc_issuer` | `https://{{ cluster_domain }}` | The `iss` every token must carry. A local copy of the corliss role's `corliss_url`; keep the two in sync. |
@@ -157,8 +157,12 @@ only grows.
 rebuilt from Postgres plus the blueprint; this one *is* the thing in Postgres,
 and the change table grows steadily because Automerge retains the full change
 graph. Its database is in the postgres Tier-2 backup (the nightly
-`pg_dumpall`, see [Backups](../README.md#backups)). Nothing bounds a member's
-share of it: [scn-sync-relay#1](https://github.com/Z-Space-Society/scn-sync-relay/issues/1).
+`pg_dumpall`, see [Backups](../README.md#backups)). Since `0.3.0` each vault
+in a listing reports `bytes`, its documents' stored size, and `note_count`;
+only the relay can work out the first, because only its index knows which
+documents a vault holds. The relay README's *Inspecting storage* section has
+the SQL for the rest. Nothing bounds a member's share yet:
+[scn-sync-relay#1](https://github.com/Z-Space-Society/scn-sync-relay/issues/1).
 
 ## Verify
 

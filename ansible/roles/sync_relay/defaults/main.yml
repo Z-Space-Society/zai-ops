@@ -21,7 +21,10 @@
 # MCP service on a second listener. Needs Corliss v1.4.0, which issues those
 # tokens, and the auth settings below; it refuses to start with auth on and any
 # of them blank.
-sync_relay_version: "0.2.1"
+#
+# v0.3.0 adds note_count and bytes to each vault in a listing, which Corliss's
+# Notes page shows as Notes and Size. No new settings, no schema change.
+sync_relay_version: "0.3.0"
 
 sync_relay_port: 7030
 # Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race

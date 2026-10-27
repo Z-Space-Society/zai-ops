@@ -383,7 +383,8 @@ corliss_repo_url: https://github.com/Z-Space-Society/Corliss.git
 # and the SCN Sync plugin) and adds the Notes page, which lists and creates a
 # member's vaults on the sync relay. Needs four env keys rendered below
 # (OIDC_RESOURCES, OIDC_CLIENT_METADATA_ALLOWLIST, SYNC_RELAY_SERVICE_TOKEN,
-# ENABLE_NOTES), migration 0007, which the role applies, and the sync relay at
+# ENABLE_NOTES; the allowlist is no longer rendered, since v1.8.0 does not
+# read it), migration 0007, which the role applies, and the sync relay at
 # 0.2.0 or later, since nothing before it accepts Corliss's tokens or serves
 # /internal/vaults. Installs corliss-reconcile.timer with it: public clients
 # hold refresh tokens, so a missed revocation push would otherwise keep a
@@ -739,14 +740,6 @@ corliss_sync_relay_url: "http://{{ hostvars['sync-relay'].ansible_host }}:{{ cor
 corliss_oidc_resources:
   - { url: "https://{{ sync_relay_sync_host }}", kind: sync, label: "Notes sync" }
   - { url: "https://{{ sync_relay_mcp_host }}", kind: mcp, label: "Notes over MCP" }
-
-# Which public clients' metadata documents Corliss will fetch: exact URLs or
-# origins. The claude.ai origin covers the hosted Claude apps, whose exact
-# `client_id` is not published. The SCN Sync plugin's document is Corliss's own and needs no entry. This list
-# is the whole of what an anonymous request can make Corliss fetch, so widen it
-# deliberately.
-corliss_oidc_client_metadata_allowlist:
-  - "https://claude.ai"
 
 # The nav's Notes entry. On, because this release ships with the relay's Phase B
 # in the same change. Off hides the link only; the page still answers.

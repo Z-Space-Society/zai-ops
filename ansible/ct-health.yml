@@ -1,0 +1,109 @@
+---
+# Check the control node and the service containers.
+#
+#   ansible-playbook ct-health.yml --check        # report, change nothing
+#   ansible-playbook ct-health.yml                # clear known stale state, report
+#   ansible-playbook ct-health.yml --limit proxy  # one CT
+#
+# A CT fails here if it has a failed systemd unit, or is running without
+# ct_features. The features come from the API's current config, not its pending
+# one, so a change that is waiting for a CT restart counts as missing. In --check
+# a stale wtmpdb failure is still listed, since nothing has cleared it.
+#
+# provision.yml imports this last. It reaches every CT over SSH, so a CT with no
+# Beszel agent is covered, and a CT that is down is an unreachable host in the
+# PLAY RECAP. This is the state of systemd, not of the service: see the
+# `systemctl --failed` corollary in docs/gotchas.md.
+
+- name: Check the containers
+  hosts: service_containers:control_node
+  gather_facts: false
+  tasks:
+    # The control node has no ctid by design, so it is never skipped for that.
+    - name: Skip a service with no CTID
+      ansible.builtin.meta: end_host
+      when: ctid is not defined and inventory_hostname not in groups['control_node']
+
+    # Debian stopped shipping this timer in wtmpdb 0.73.0-3, but only forky's
+    # package removes the enable symlink, so a CT built from an older template
+    # keeps it. See docs/gotchas.md. Acts only while the link dangles and the
+    # unit file is gone, so a timer Debian brings back is left alone.
+    - name: Look for wtmpdb's dangling rotate timer link
+      ansible.builtin.shell: |
+        link=/etc/systemd/system/timers.target.wants/wtmpdb-rotate.timer
+        if [ -h "$link" ] && [ ! -e "$link" ]; then echo dangling; fi
+      register: wtmpdb_link
+      changed_when: false
+      check_mode: false
+
+    - name: Read the rotate timer's state
+      ansible.builtin.command:
+        argv: [systemctl, show, wtmpdb-rotate.timer, -p, LoadState, -p, ActiveState]
+      register: wtmpdb_timer
+      changed_when: false
+      check_mode: false
+
+    # Before the link goes: reset-failed errors on a unit that is no longer loaded.
+    - name: Reset the rotate timer's stale failure
+      ansible.builtin.command:
+        argv: [systemctl, reset-failed, wtmpdb-rotate.timer]
+      when:
+        - "'LoadState=not-found' in wtmpdb_timer.stdout_lines"
+        - "'ActiveState=failed' in wtmpdb_timer.stdout_lines"
+
+    - name: Remove the dangling link
+      ansible.builtin.file:
+        path: /etc/systemd/system/timers.target.wants/wtmpdb-rotate.timer
+        state: absent
+      register: wtmpdb_link_removed
+      when: wtmpdb_link.stdout == 'dangling'
+
+    - name: Reload systemd without the link
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when: wtmpdb_link_removed is changed
+
+    - name: List failed units
+      ansible.builtin.command:
+        argv: [systemctl, list-units, --state=failed, --plain, --no-legend, --no-pager]
+      register: failed_units
+      changed_when: false
+      check_mode: false
+
+    # Run once for the whole node, since only the control node holds the token.
+    - name: Read each container's config through the API
+      community.proxmox.proxmox_vm_info:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token_id }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        # Proxmox serves a self-signed cert; see provision.yml.
+        validate_certs: false
+        node: "{{ proxmox_node_name }}"
+        type: lxc
+        config: current
+      register: pve_cts
+      delegate_to: localhost
+      run_once: true
+
+    # The control node's CTID isn't recorded, so it is found by the fixed
+    # hostname bootstrap.sh gives it.
+    - name: Require no failed units and every container feature
+      ansible.builtin.assert:
+        that:
+          - failed_units.stdout_lines | length == 0
+          - missing_features | length == 0
+        quiet: true
+        fail_msg: >-
+          {{ inventory_hostname }}:
+          failed units: {{ failed_units.stdout_lines | map('split') | map('first') | join(', ') or 'none' }};
+          missing features: {{ missing_features | join(', ') or 'none' }}.
+          A missing feature needs provision.yml (bootstrap.sh for the control
+          node), then a CT restart.
+      vars:
+        this_ct: >-
+          {{ pve_cts.proxmox_vms | selectattr('vmid', 'equalto', ctid | int)
+             if ctid is defined
+             else pve_cts.proxmox_vms | selectattr('name', 'equalto', 'ansible-control') }}
+        missing_features: >-
+          {{ ct_features | difference((this_ct | first).config.features | default('') | split(',')) }}

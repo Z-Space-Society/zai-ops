@@ -162,7 +162,9 @@ the timeout gotcha below):
 - **Start tasks need `hostname`.** `state: started` with only `vmid` KeyErrors on
   `'name'` for freshly-created CTs ([issue #98]). Pass `hostname:` and add a
   small `retries`/`until` for the post-create race.
-- **Systemd 257 wants nesting.** Create service CTs with `features: [nesting=1]`.
+- **Systemd 257 wants nesting.** Every CT runs with `nesting=1`: `ct_features`
+  for service CTs, `bootstrap.sh` for the control node. A change applies at the
+  next CT restart.
 - **Set `validate_certs: false` explicitly.** Proxmox serves a self-signed cert
   on 8006. <2.0.0 defaults this to false but warns; 2.0.0 flips the default to
   *true*, which would fail every API call. Pinned in `provision.yml`'s

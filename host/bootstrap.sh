@@ -171,12 +171,21 @@ done_ok "template ready ($TEMPLATE)"
 step "Creating container $CTID ($HOSTNAME)"
 if pct status "$CTID" &>/dev/null; then
   info "CT $CTID already exists; skipping create"
+  # A feature set on a running CT waits as pending until it restarts, so read the
+  # current value and restart here. Without nesting, systemd 257 can't mount
+  # tmp.mount, run-lock.mount or dev-mqueue.mount. Same value as ct_features in
+  # group_vars/all/main.yml, which this script runs before.
+  if ! pct config "$CTID" --current | grep -q '^features:.*nesting=1'; then
+    pct set "$CTID" --features nesting=1
+    pct reboot "$CTID"
+    done_ok "CT $CTID restarted with nesting=1"
+  fi
 else
   pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$TEMPLATE" \
     --hostname "$HOSTNAME" --cores 2 --memory 2048 --swap 512 \
     --rootfs "$ROOTFS_STORAGE:8" \
     --net0 name=eth0,bridge="$BRIDGE",ip=dhcp \
-    --unprivileged 1 --onboot 1
+    --unprivileged 1 --onboot 1 --features nesting=1
   pct start "$CTID"
   done_ok "CT $CTID created and started"
 fi

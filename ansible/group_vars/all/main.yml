@@ -33,6 +33,13 @@ reserved_ctids: [100]
 # token auth ("Only root can pass arbitrary filesystem paths").
 ct_rootfs_storage: local-lvm
 
+# Container features every CT runs with. systemd 257 can't mount tmp.mount,
+# run-lock.mount or dev-mqueue.mount in an unprivileged CT without nesting.
+# keyctl and the rest are for Docker on LXC, which this cluster doesn't run.
+# bootstrap.sh sets the same value on the control node; ct-health.yml checks both.
+ct_features:
+  - nesting=1
+
 # --- Auto-generated runtime secrets (no manual step) -----------------------
 # Generated on the control node the first time they're used and persisted under
 # /root/.zai-secrets (root-only); re-runs reuse the same values, so the

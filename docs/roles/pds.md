@@ -73,7 +73,7 @@ committed. Key defaults in `roles/pds/defaults/main.yml`:
 | Var | Default | Meaning |
 |---|---|---|
 | `pds_repo_url` | `https://tangled.org/ngerakines.me/atproto-crates` | build source: Nick's canonical workspace. The SCN fork (`sharedcomputer.network/atproto-crates`, on the @commonscomputer.com knot) is not used while it trails upstream; see the comment in `defaults/main.yml` |
-| `pds_revision` | `09a868cdde93…` | **the reproducibility pin**, a commit SHA |
+| `pds_revision` | `be466e5aec3d…` | **the reproducibility pin**, a commit SHA |
 | `pds_version` | `0.15.0-rc.6` | informational; verified against the checkout |
 | `pds_hostname` | `pds.{{ cluster_domain }}` | public hostname (SCN: `pds.sharedcomputer.network`) |
 | `pds_service_did` | `did:web:pds.{{ cluster_domain }}` | the PDS's own service identity |
@@ -249,6 +249,10 @@ rotation key below, is
 - Single instance, SQLite-only: one LXC, and no replica.
 - 0016 permissioned-data (spaces) is a Phase-C direction, not a near-term
   promise — the draft is settling.
+- A spaces alpha can break clients and convert stored data. Across such a bump,
+  deploy the PDS and [scn-chat](scn_chat.md) together, and snapshot
+  `/var/lib/pds` with the service stopped first: the conversion cannot be undone
+  and the older binary cannot read the result.
 - The SCN **account** rotation key (boris's, signed on PDS Commons Computer) is
   distinct from this server's `PDS_PLC_ROTATION_KEY_PRIVATE` (recovery for
   identities it issues). Both are DR-critical, and the second is not wired yet

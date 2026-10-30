@@ -108,6 +108,10 @@
       # rootfs that PVE rejects under token auth ("Only root can pass arbitrary
       # filesystem paths"). ostemplate is set explicitly; a wrong value there
       # surfaces as a misleading bare 'errors', not an auth failure.
+      #
+      # The module's `update` defaults to true, so on an existing CT this applies
+      # any change to these values. A feature change stays pending until the CT
+      # restarts, which this play does not do; ct-health.yml below reports it.
       community.proxmox.proxmox:
         vmid: "{{ ctid }}"
         hostname: "{{ ct_hostname }}"
@@ -118,8 +122,7 @@
         swap: "{{ ct_swap }}"
         unprivileged: true
         onboot: true
-        features:
-          - nesting=1
+        features: "{{ ct_features }}"
         pubkey: "{{ lookup('file', '/root/.ssh/id_ed25519.pub') }}"
         netif: "{{ ct_netif }}"
         state: present
@@ -317,3 +320,7 @@
 # writes the token the agents enroll with.
 - name: Install the Beszel monitoring agent
   ansible.builtin.import_playbook: monitor-agent.yml
+
+# Last, so every CT this run touched is checked, with or without an agent.
+- name: Check the containers
+  ansible.builtin.import_playbook: ct-health.yml

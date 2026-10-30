@@ -117,7 +117,12 @@ on the remaining service CTs:
   KeyError `'name'` on freshly created CTs ([community.proxmox #98]). Pass
   `hostname:` on the start task; a small `retries`/`until` covers the race.
 - **Systemd 257 wants nesting.** Unprivileged CTs warn "you may need to enable
-  nesting"; service CTs are created with `features: [nesting=1]`.
+  nesting"; without it `tmp.mount`, `run-lock.mount` and `dev-mqueue.mount` fail.
+  Every CT gets `nesting=1`: service CTs from `ct_features`, the control node
+  from `bootstrap.sh`.
+- **A feature change waits for a restart.** On a running CT, `pct set --features`
+  and the module's `update` path both write a pending value. `ct-health.yml`
+  reads the current config, so it fails until the CT has restarted.
 - **HTTP 595 on create = wrong `node:`, not a network problem.** `595 Errors
   during connection establishment, proxy handshake: Connection timed out` is a
   Proxmox status: `pveproxy` accepted the request but failed trying to *proxy* it
@@ -385,6 +390,20 @@ Hard-won lessons about **binding a listen socket at boot**:
   asks each service the same feature-level question on demand — but it is a
   status page for an admin who is already looking, not monitoring: nothing polls
   it and nothing alerts. The cluster still has no monitoring; see [TODO](README.md#todo).
+
+Hard-won lessons reading **failed units**:
+
+- **`wtmpdb-rotate.timer` is a Debian packaging leftover.** Debian's `wtmpdb`
+  enabled this timer up to 0.73.0-2 and stopped shipping it in 0.73.0-3. Trixie's
+  package never removes the enable symlink, which forky's postinst does, so a
+  template built on the old package keeps a dangling link in
+  `timers.target.wants`. `ct-health.yml` removes the link only while it dangles,
+  and resets the failure only while the unit is `not-found`.
+- **`systemd-run` leaves its failures behind.** A failed transient `run-*.service`
+  stays in `systemctl --failed` until `reset-failed` or a restart, and
+  `ct-health.yml` reports it. As a one-off diagnostic, pass `--collect` so a
+  failed run unloads itself. With `-p User=` from a terminal, also redirect stdin
+  from `/dev/null`: the unit can't open root's terminal and fails before it starts.
 
 Hard-won lessons wiring **identity** ([`corliss`](roles/corliss.md)):
 

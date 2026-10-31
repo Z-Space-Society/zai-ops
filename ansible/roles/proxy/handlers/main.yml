@@ -1,4 +1,8 @@
 ---
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
 # Graceful, zero-downtime config swap: the Debian unit's reload runs
 # `caddy reload`, which loads the new Caddyfile via the admin API without
 # dropping connections.
@@ -6,3 +10,10 @@
   ansible.builtin.service:
     name: caddy
     state: reloaded
+
+# Drops every connection, so only for what a reload can't change: the process
+# environment. See caddy_disable_mptcp in defaults/main.yml.
+- name: restart caddy
+  ansible.builtin.service:
+    name: caddy
+    state: restarted

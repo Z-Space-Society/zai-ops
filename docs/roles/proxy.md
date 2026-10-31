@@ -64,8 +64,10 @@ for, and Caddy keeps retrying issuance.
 | Install Caddy | `apt` (`caddy={{ caddy_apt_version }}`) | Version-pinned, like Garage and uv. Pulls the `caddy` user, `/etc/caddy/`, `/var/lib/caddy`, and `caddy.service`. **This upgrades an existing 2.6.2 install and restarts Caddy**, which is a brief outage of every public route on the LAN-facing edge. |
 | Assert the TLS mode | `assert` | The template branches on the exact mode string, so a typo would render a config for no mode, and `caddy validate` checks syntax, not intent. |
 | Deploy the Caddyfile | `template` (`validate: caddy validate`) | Renders `caddy_proxy_hosts`. `validate` is the `nginx -t` analog — a bad config fails the task instead of deploying. |
+| Keep Caddy off Multipath TCP | `file`, `template` (`caddy-no-mptcp.conf.j2`) | Writes the `caddy.service.d/no-mptcp.conf` drop-in, or removes it when `caddy_disable_mptcp` is false. Either way restarts Caddy, a brief outage of every public route. See [Notes](#notes). |
 | Start + enable `caddy` | `systemd` | Running now + on boot. |
 | Validate the deployed config | `command: caddy validate` (`changed_when: false`) | Final guard that the live file is valid. |
+| Verify no MPTCP sockets are listening | `command: ss -HMlnp` (`changed_when: false`) | Fails the play if any process on the CT still holds an MPTCP listener. Skipped when `caddy_disable_mptcp` is false. |
 | Read the installed package version | `command` → `dpkg-query -W -f='${Version}' caddy` (`changed_when: false`, `check_mode: false`) | Records what this CT has. `caddy_apt_version` is what the pin should produce, not proof it did. |
 | Record the manifest | `include_role: manifest` (`installed version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `proxy.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
@@ -73,7 +75,9 @@ for, and Caddy keeps retrying issuance.
 
 | Handler | Action |
 | ------- | ------ |
+| `reload systemd` | `systemctl daemon-reload`, so a drop-in change reaches the unit |
 | `reload caddy` | `systemctl reload caddy` — the Debian unit runs `caddy reload`, a graceful zero-downtime config swap |
+| `restart caddy` | `systemctl restart caddy`, for a process environment change, which a reload can't apply. Drops connections |
 
 ## Variables
 
@@ -86,6 +90,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/proxy/defaults/main.yml):
 | `caddy_acme_email` | `""` | Let's Encrypt account contact, `acme` mode only, rendered as the global `email` option when non-empty. Not a secret. Recorded by `scn-config nonint set-tls acme <email>` and removed whenever the recorded mode leaves `acme`. Let's Encrypt no longer sends expiry reminders, so it is not a renewal alarm. |
 | `caddy_backports_suite` | `{{ ansible_distribution_release }}-backports` | Derived from the CT's own release, so the blueprint stays generic. |
 | `caddy_apt_version` | `2.11.2-1~bpo13+1` | Exact apt version pin. **Not** generic: `~bpo13` names Debian 13, so a base-image change means re-pinning here. It fails loudly at apt rather than installing something else. |
+| `caddy_disable_mptcp` | `true` | Runs Caddy with `GODEBUG=multipathtcp=0` from a systemd drop-in. False removes the drop-in. See [Notes](#notes). |
 | `caddy_trusted_proxies` | `[]` | Addresses whose `X-Forwarded-*` headers Caddy trusts instead of overwriting. Empty renders no `servers` block at all, so a cluster where this Caddy is the outermost proxy is unaffected. See [Notes](#notes). |
 | `caddy_proxy_hosts` | *(litellm)* | The routes. Each entry `{ domain, service, port }` maps a public domain to an internal service; the upstream IP is derived from that service's CTID via `hostvars[service].ansible_host` (`10.1.1.<ctid>`), never hardcoded. Ships with the live `litellm` route (`api.{{ cluster_domain }}`); the `:80` health/redirect site keeps the config sound even before a CTID is assigned. An entry may also carry `redirects: [{ from, to, code, skip_if_cookie }]` — edge-level `handle <from> { redir <to> <code> }` blocks, evaluated before the catch-all `reverse_proxy`, for cases the upstream app can't redirect itself (e.g. open-webui's `/auth*` → `/oauth/oidc/login`, since it has no native "skip the login page when OAuth is the only option"). `skip_if_cookie` names a cookie whose presence lets the request fall through to the real app instead of redirecting — see [Notes](#notes) below, it's load-bearing for open-webui, not optional. An entry without redirects may carry `block_paths: [<path matcher>, …]`, each rendered as `respond <path> 404` ahead of the `reverse_proxy`, for paths the upstream serves but the edge must not publish (the sync relay's `/internal/*`). `allow_paths: [<path matcher>, …]` carves exceptions out of those, each rendered as a `handle <path> { reverse_proxy … }` that Caddy runs before the `respond` (the Beszel hub's `/_/images/*`, which its sign-in page loads from inside the blocked `/_/`). |
 | `caddy_catch_all` | `{ service: pds, port: 3000, ask: /_tls-check }` | Where a hostname with no route goes: member handles, to the PDS, on the cluster domain or a separate handle domain (`pds_handle_domain`) alike. In `acme` mode it renders a hostless `https://` site with `tls { on_demand }` and the global `on_demand_tls { ask http://<upstream>:<port><ask> }`; in `none` mode, the `:80` site's fallback. Skipped until the service has a CTID; `{}` disables it. Hostless on purpose, never `*.<domain>`: see [Notes](#notes). |
@@ -138,7 +143,25 @@ ssh root@10.1.1.<ctid> 'journalctl -u caddy --no-pager | grep -iE "obtain|challe
 If issuance fails, check public `:80` first (see
 [Known gotchas](../gotchas.md)).
 
+The role's MPTCP check passes on empty `ss` output, which is also what a kernel
+without `mptcp_diag` prints. To prove it can see a listener, run this in the CT
+before the drop-in exists, or with `caddy_disable_mptcp` false. Caddy should
+appear:
+
+```bash
+ss -HMlnp
+```
+
 ## Notes
+
+- **Caddy runs without Multipath TCP, and that does not patch anything.** Go 1.24
+  and later accept MPTCP on listeners by default, and the public remote-root
+  exploit for CVE-2026-98432 goes through an MPTCP listener. The bug itself is a
+  use-after-free in the kernel's IPv4 TCP handshake, so this removes the exploited
+  path and leaves the bug in place; the fix is a patched kernel on the Proxmox
+  host. This CT is unprivileged and shares that kernel, so `net.mptcp.enabled` is
+  deliberately not set here. The setting takes a restart, not a reload, because
+  `GODEBUG` is read at process start.
 
 - **`caddy_trusted_proxies` is only for clusters behind another proxy.** Caddy
   sets `X-Forwarded-*` from the connection it received and, by default, ignores

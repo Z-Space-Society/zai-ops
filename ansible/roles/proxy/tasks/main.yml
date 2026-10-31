@@ -99,6 +99,39 @@
     validate: "caddy validate --adapter caddyfile --config %s"
   notify: reload caddy
 
+# See caddy_disable_mptcp in defaults/main.yml for why. A restart, not a reload:
+# GODEBUG is read at process start, and a reload keeps the same process and the
+# MPTCP listeners it already holds.
+- name: Create the caddy unit drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/caddy.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: caddy_disable_mptcp | bool
+
+- name: Keep Caddy off Multipath TCP
+  ansible.builtin.template:
+    src: caddy-no-mptcp.conf.j2
+    dest: /etc/systemd/system/caddy.service.d/no-mptcp.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart caddy
+  when: caddy_disable_mptcp | bool
+
+- name: Remove the Multipath TCP drop-in
+  ansible.builtin.file:
+    path: /etc/systemd/system/caddy.service.d/no-mptcp.conf
+    state: absent
+  notify:
+    - reload systemd
+    - restart caddy
+  when: not caddy_disable_mptcp | bool
+
 - name: Ensure caddy is started and enabled
   ansible.builtin.systemd:
     name: caddy
@@ -115,6 +148,18 @@
   ansible.builtin.command:
     cmd: caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
   changed_when: false
+
+# After the flush, so it sees the restarted process. Any MPTCP listener counts,
+# not only Caddy's, and -p names the holder in the failure output. Empty output
+# proves nothing on a kernel without mptcp_diag: there ss lists no MPTCP sockets
+# at all, so see Verify in docs/roles/proxy.md.
+- name: Verify no MPTCP sockets are listening
+  ansible.builtin.command:
+    cmd: ss -HMlnp
+  register: caddy_mptcp_listeners
+  changed_when: false
+  failed_when: caddy_mptcp_listeners.rc != 0 or (caddy_mptcp_listeners.stdout | trim | length) > 0
+  when: caddy_disable_mptcp | bool
 
 # --- Manifest (docs/roles/manifest.md) ----------------------------------------
 # Read back from dpkg rather than restating caddy_apt_version: the manifest

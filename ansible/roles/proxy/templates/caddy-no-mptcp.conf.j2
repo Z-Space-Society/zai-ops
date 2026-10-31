@@ -1,0 +1,7 @@
+# {{ ansible_managed }}
+#
+# See caddy_disable_mptcp in the proxy role's defaults for why this exists. The
+# unit sets no GODEBUG of its own as far as this role knows; a later Environment=
+# wins outright, so add to this value rather than a second line if it ever does.
+[Service]
+Environment=GODEBUG=multipathtcp=0

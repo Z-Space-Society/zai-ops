@@ -39,11 +39,13 @@ on the box, `0600`, no manual entry required.
 - **Secrets never touch process argv**: `host/bootstrap.sh` pipes secrets over
   stdin into `pct exec`, since command-line arguments are readable via
   `/proc/<pid>/cmdline` for the life of the process.
-- **Internal-only network**: all service containers except the edge proxy
-  sit on `vmbr1` (`10.1.1.0/24`, no uplink) with no LAN exposure; the proxy is
-  the only dual-homed service container. CT 100 also has a LAN leg (`net0` on
-  `vmbr0`) and answers SSH there
-  ([#44](https://github.com/Z-Space-Society/zai-ops/issues/44)).
+- **Internal-only network**: the control node and all service containers
+  except the edge proxy sit on `vmbr1` (`10.1.1.0/24`, no uplink) with no LAN
+  exposure; the proxy is the only dual-homed container. Operators reach the
+  control node with `pct enter` from the host.
+- **Edge-blocked paths**: the proxy answers 404 for upstream paths meant only
+  for inside the cluster: Corliss's `/admin/` and `/membership/events`, the sync
+  relay's `/internal/*`, and the Beszel hub's superuser surfaces.
 - **SSH logins**: root is key-only everywhere, the Proxmox hosts included.
   Human admins get a sudo account from their GitHub keys (`github_user`);
   password SSH is still on for those accounts

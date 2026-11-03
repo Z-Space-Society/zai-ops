@@ -105,7 +105,7 @@ The committed routes, and what each publishes of its upstream:
 
 | Hostname | Service | Everything, or less |
 | -------- | ------- | ------------------- |
-| apex | `corliss` | everything |
+| apex | `corliss` | everything except `/admin/` and `/membership/events`, which answer 404 |
 | `api.` | `litellm` | everything, `/ui` included (the admin panel, behind the master key; see [zai-ops#44](https://github.com/Z-Space-Society/zai-ops/issues/44)) |
 | `owui.` | `open-webui` | everything; `/auth*` is redirected to the OIDC login unless the session cookie is present |
 | `view.` | `happyview` | everything |
@@ -287,6 +287,11 @@ ss -HMlnp
   vault endpoints for Corliss there, guarded by the service token alone.
   `block_paths` answers them with a 404 at the edge; Corliss reaches them over
   vmbr1.
+- **The apex does not publish Corliss's `/admin/` or `/membership/events`.**
+  HappyView pushes membership events CT-to-CT over vmbr1. The Django admin is
+  break-glass, reached through a tunnel to the host (see
+  [corliss](corliss.md#notes)). `/admin` is blocked as well as `/admin/*`, so
+  the bare path never reaches Django's slash redirect.
 - **Empty `caddy_proxy_hosts` is safe** — the `:80` site (health probe + HTTPS
   redirect) keeps the Caddyfile valid before any upstream is assigned, mirroring
   the inventory's placeholder pattern.

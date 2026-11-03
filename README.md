@@ -207,8 +207,9 @@ The bootstrap creates an isolated internal bridge `vmbr1` (`10.1.1.0/24`, no
 uplink) and makes the host its NAT gateway (`10.1.1.1`), so service containers
 can reach the internet for package installs without being exposed on the LAN.
 
-- The control node (CT 100) sits at `10.1.1.100` and reaches every service at
-  its static internal IP — no DHCP guessing.
+- The control node (CT 100) sits at `10.1.1.100` on `vmbr1` only and reaches
+  every service at its static internal IP. It has no LAN NIC; reach it with
+  `pct enter` from the host.
 - proxy (Caddy) is the only LAN-facing container: dual-homed on `vmbr0` (DHCP)
   for inbound traffic and `vmbr1` (`10.1.1.110`) to reach upstreams.
 - The remaining services live on `vmbr1` only and route out through the host.

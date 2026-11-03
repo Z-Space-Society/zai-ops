@@ -81,7 +81,16 @@ caddy_proxy_hosts:
   - { domain: "pds.{{ cluster_domain }}", service: pds, port: 3000 }
   # Corliss owns the APEX (ADR-0006), not a subdomain: its OIDC issuer is the
   # bare origin, and discovery has to sit at <issuer>/.well-known/... .
-  - { domain: "{{ cluster_domain }}", service: corliss, port: 8000 }
+  #
+  # Two Corliss paths are for inside the cluster only. /membership/events is the
+  # registry's push, which HappyView sends CT-to-CT over vmbr1. /admin/ is the
+  # Django admin and its break-glass login, reached through an SSH tunnel to the
+  # host (see docs/roles/corliss.md); "/admin" is listed too so the bare path
+  # cannot reach Django's slash redirect.
+  - domain: "{{ cluster_domain }}"
+    service: corliss
+    port: 8000
+    block_paths: ["/admin", "/admin/*", "/membership/events"]
   # The sync relay (Phase B, relay v0.2.0). Two hostnames, two listeners: the
   # automerge sync websocket on 7030 and the MCP service on 7031. The hostnames
   # come from group_vars because Corliss and the relay build token audiences

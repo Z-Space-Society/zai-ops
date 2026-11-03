@@ -62,7 +62,8 @@ out and update the docs.
   rather than members, and both are core. What separates those two is that core
   infra is the **data foundations**: storage with no logic of its own, versus
   platform's services *with* logic. `proxy` (Caddy) is the only LAN-facing CT
-  (dual-homed on `vmbr0` + `vmbr1`); everything else is internal-only and routes
+  (dual-homed on `vmbr0` + `vmbr1`); everything else, the control node
+  included (reached with `pct enter` from the host), is internal-only and routes
   out via the host.
 - **SSH into service CTs via an injected key.** CT 100's root ed25519 public key
   is injected at create time; key-only root login. No per-CT passwords.

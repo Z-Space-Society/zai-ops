@@ -138,7 +138,6 @@ CTID="${1:-100}"
 HOSTNAME=ansible-control
 TEMPLATE_STORAGE=local
 ROOTFS_STORAGE=local-lvm
-BRIDGE=vmbr0
 REPO_URL=https://github.com/Z-Space-Society/zai-ops.git
 
 # --- Ensure the template is downloaded ---
@@ -184,25 +183,33 @@ else
   pct create "$CTID" "$TEMPLATE_STORAGE:vztmpl/$TEMPLATE" \
     --hostname "$HOSTNAME" --cores 2 --memory 2048 --swap 512 \
     --rootfs "$ROOTFS_STORAGE:8" \
-    --net0 name=eth0,bridge="$BRIDGE",ip=dhcp \
+    --net1 name=eth1,bridge=vmbr1,ip=10.1.1.100/24,gw=10.1.1.1 \
     --unprivileged 1 --onboot 1 --features nesting=1
   pct start "$CTID"
   done_ok "CT $CTID created and started"
 fi
 
-# --- Attach the control node to the internal network ---
-# CT 100 gets a second NIC on vmbr1 (.100) so it can reach every service CT at
-# its static internal IP (10.1.1.10X) — no DHCP guessing. Idempotent: re-running
-# pct set with the same value is a no-op.
-step "Attaching control node to internal network"
-pct set "$CTID" -net1 name=eth1,bridge=vmbr1,ip=10.1.1.100/24
-done_ok "eth1 = 10.1.1.100 on vmbr1"
+# --- Keep the control node on the internal network only ---
+# The control node holds every credential in the cluster, so it has no LAN NIC:
+# it sits on vmbr1 at .100, reaches every service CT at its static internal IP,
+# and goes out through the host's NAT like they do. Operators reach it with
+# `pct enter` from the host. The NIC stays net1/eth1 so a control node built
+# before this keeps its interface name; the gateway is set before net0 is
+# dropped so its outbound access never lapses. Idempotent: re-running pct set
+# with the same value is a no-op, and net0 is only deleted while present.
+step "Keeping control node on the internal network only"
+pct set "$CTID" -net1 name=eth1,bridge=vmbr1,ip=10.1.1.100/24,gw=10.1.1.1
+if pct config "$CTID" | grep -q '^net0:'; then
+  pct set "$CTID" --delete net0
+  done_ok "LAN NIC removed"
+fi
+done_ok "eth1 = 10.1.1.100 on vmbr1, gateway 10.1.1.1"
 
 # --- Wait for the container network to come up ---
-# DHCP lease + DNS readiness on a fresh CT is variable; a fixed sleep either
-# wastes time or (on a busy LAN/slow DHCP) aborts the whole script under
-# set -e when apt-get update follows too soon. Poll instead: `getent hosts`
-# proves interface up -> DHCP lease -> resolv.conf -> DNS in one check, which
+# Network + DNS readiness on a fresh CT is variable; a fixed sleep either
+# wastes time or (on a slow boot) aborts the whole script under set -e when
+# apt-get update follows too soon. Poll instead: `getent hosts` proves
+# interface up -> route via the host's NAT -> resolv.conf -> DNS in one check, which
 # is exactly what apt needs next. Bounded at 60s so a genuinely broken
 # network fails loudly instead of hanging.
 step "Waiting for CT $CTID network"

@@ -63,10 +63,12 @@ What it does, in order (each phase prints a numbered banner):
    is on `local`, download the newest one in the `pveam` index. Resolved by
    pattern, not pinned (see [Known gotchas](gotchas.md)).
 7. **Create the control node** — CT 100 (`ansible-control`), unprivileged,
-   2 cores / 2 GB / 8 GB, `net0` on `vmbr0` (DHCP), `nesting=1`. If it already
-   exists the create is skipped, and it only gets `nesting=1` and a restart if it
-   lacks it.
-8. **Attach to the internal network** — give CT 100 a `vmbr1` NIC at `10.1.1.100`.
+   2 cores / 2 GB / 8 GB, `net1` on `vmbr1` at `10.1.1.100` (gw `10.1.1.1`),
+   `nesting=1`. If it already exists the create is skipped, and it only gets
+   `nesting=1` and a restart if it lacks it.
+8. **Keep it on the internal network only** — re-assert the `vmbr1` NIC and its
+   gateway, then drop a `net0` LAN NIC if an older bootstrap left one. CT 100
+   has no LAN leg; operators reach it with `pct enter` from the host.
 9. **Provision the control node** — fix the locale (must happen before Ansible
    can run at all), install `ansible`, `git` and `whiptail`, clone this repo to `/opt/zai-ops`,
    install the pinned Ansible collections (`community.proxmox >=1.6.0`, so
@@ -134,7 +136,7 @@ LAN.
 | Host                 | LAN (`vmbr0`) | Internal (`vmbr1`, `10.1.1.0/24`) |
 | -------------------- | ------------- | --------------------------------- |
 | Proxmox host         | physical NIC  | `10.1.1.1` (NAT gateway)          |
-| CT 100 control node  | DHCP          | `10.1.1.100`                      |
+| CT 100 control node  | —             | `10.1.1.100` (gw `10.1.1.1`)      |
 | CT 101 object-store  | —             | `10.1.1.101` (gw `10.1.1.1`)      |
 | CT 102 postgres      | —             | `10.1.1.102` (gw `10.1.1.1`)      |
 | CT 110 proxy (Caddy) | DHCP          | `10.1.1.110`                      |

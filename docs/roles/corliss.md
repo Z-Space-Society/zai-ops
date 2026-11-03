@@ -56,11 +56,11 @@ cluster can pin a tag instead with `scn-config nonint set-version corliss <tag>`
 | `/notes/` | the member's vaults on the [sync relay](sync_relay.md), and how to connect Obsidian and an MCP client. Membership-gated. Lists and creates through the relay's `/internal/vaults` at its internal address; Corliss stores nothing about vaults. `v1.4.0`+ |
 | `/account/` | the member's own name and email, and the only place either can be changed. **Signed-in, not membership-gated** — an applicant sitting in the queue is exactly the person an admin is about to read a name for. Both fields are seeded from the member's PDS at login and only when blank, so a save here survives their next sign-in; clearing one re-arms the fill. `v1.0.0`+ |
 | `/api/` | the member's own API keys — issue, list, revoke, and usage, read live from LiteLLM. Membership-gated, and *issuing* needs a real grant on top of that: a roster admin reaches the page but gets no key |
-| `/membership/events` | the SCN registry's membership push — bearer-authed, machine-to-machine (see [Secrets](#secrets)) |
+| `/membership/events` | the SCN registry's membership push — bearer-authed, machine-to-machine (see [Secrets](#secrets)). Internal only: HappyView calls it over vmbr1 and the edge answers 404 |
 | `/membership/apply` | the other end of the same subject, and the only thing a signed-in **non**-member can do here: writes a `membership.request` record into the applicant's **own PDS** (corliss already holds their tokens from login, so it writes there directly). Confers nothing — the record asks, and only an admin's grant in the registry space answers. `v0.8.0`+ |
 | `/manage/` | the cluster console — the application queue, member roll, admin roster, and the reconcile button. Gated on the atproto roster (`is_cluster_admin`), **not** on any Django flag and **never on membership**, so it stays reachable on a rebuilt cluster with an empty membership cache. The queue lists only applications still awaiting a decision (`v0.8.1`+), and since `v0.8.2` an admin approves, changes a tier and revokes from here — authored by their own registry session, never by a Corliss credential. Since `v0.9.0` it also owns roster editing, which was the last thing the `manage_console` SPA was needed for — that role has been deleted, so this is now the cluster's only admin write surface |
 | `/systems/` | the stack, and whether it is up — each service asked directly, results cached 30s (10s when anything is not up). Three states: `up` and `down` are measurements, `unknown` is what a blank setting or a probe that raised gets, so a missing address never renders as an outage. Two "up"s are narrower than they read: the **sync relay**'s `/health` is liveness only and never touches Postgres, and **Garage** is asked on its S3 port because its admin API is loopback-only. Cluster-admin gated, 404 otherwise. `v0.9.3`+ |
-| `/admin/` | Django admin (break-glass account). **Never membership-gated:** `did:local:admin` is not on the roster and will never have a cache row, so a gate here would lock out the recovery account |
+| `/admin/` | Django admin (break-glass account). **Never membership-gated:** `did:local:admin` is not on the roster and will never have a cache row, so a gate here would lock out the recovery account. Internal only: the edge answers 404, so reach it through a tunnel to the host (see [Notes](#notes)) |
 
 Membership enforcement is a per-view check in corliss, deliberately not
 middleware — middleware covers every path by default, and `/manage/` and
@@ -340,6 +340,13 @@ curl -s https://<domain>/clients/scn-obsidian.json | grep -o '"redirect_uris": \
 
 ## Notes
 
+- **The Django admin is reached through a tunnel, not the edge.** The proxy
+  answers 404 for `/admin/`, so the break-glass login is never on the
+  internet. From a laptop on the LAN, forward a port through the host
+  (`ssh -L 8000:10.1.1.<corliss ctid>:8000 <you>@<host>`) and open
+  `http://127.0.0.1:8000/admin/`. `127.0.0.1` is already in
+  `corliss_allowed_hosts` for the smoke test, and browsers treat it as a secure
+  context, so the secure session and CSRF cookies still set.
 - **The reconcile timer is what bounds a missed revocation for public
   clients.** Claude and the SCN Sync plugin hold refresh tokens, and the
   refresh grant asks the membership cache, never the registry. The registry's

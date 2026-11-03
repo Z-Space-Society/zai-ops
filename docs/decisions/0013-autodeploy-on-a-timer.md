@@ -21,11 +21,13 @@ trigger that reaches in from GitHub ran into one of these problems:
 ## Decision
 
 1. **CT 100 polls; nothing reaches in.** `zai-autodeploy.timer` runs
-   [`bin/zai-autodeploy`](../../bin/zai-autodeploy) every 5 minutes. It reads
+   [`bin/zai-autodeploy`](../../bin/zai-autodeploy) every minute. It reads
    each app's setting, newest tag and deployed version from `set-version.yml
    -e version_action=show`, the same data `scn-config`'s Versions screen
    shows. For each app set to `latest` whose newest tag differs from what is
    deployed, it runs `provision.yml --limit <app>`.
+   (Revised 2026-11-03: the tick was every 5 minutes. It is now every minute,
+   so a tag starts deploying within about 75 seconds.)
 
 2. **A pin is never moved.** The timer acts only on `latest`, recorded or the
    role default. A pinned app stays where it is. An app with nothing deployed
@@ -78,6 +80,8 @@ trigger that reaches in from GitHub ran into one of these problems:
   failure came before the restart.
 - The timer skips a tick while any `ansible-playbook` runs on CT 100, so it
   never races an operator.
+- Each tick runs one `git ls-remote` per app against its forge (GitHub for
+  Corliss, tangled.org for scn-chat), about 1,440 a day per app.
 - A `--check` run writes no record, and nor does a host whose every task was
   skipped.
 - Records accumulate; nothing prunes them yet.

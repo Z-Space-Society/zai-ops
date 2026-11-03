@@ -28,7 +28,7 @@ collections, and prepares the SSH key used to reach service containers.
 | Assert the vault password file is root-only | `ansible.builtin.file` (`mode: 0600`) | Defense-in-depth: catches permission drift on `/root/.vault_pass`. The bootstrap already writes it with `umask 077`. |
 | Put the repo's `bin/` on PATH + land in the repo | `ansible.builtin.copy` (`/etc/profile.d/zai-ops.sh`) | Make the operator commands (`scn-config`, `zai-backup`, …) discoverable by name for interactive shells. They run in place from git — nothing is copied to `/usr/local/bin`, so `git pull` is enough to update them. The same snippet also `cd`s a fresh login/`pct enter` into `/opt/zai-ops`, guarded on `$PWD = $HOME` so it doesn't relocate a shell that's already navigated elsewhere. |
 | Symlink the autodeploy systemd units into place | `ansible.builtin.file` (`state: link`) | `zai-autodeploy.{service,timer}` live in the role's `files/`, symlinked like the backup units, so a `git pull` changes them. See [ADR-0013](../decisions/0013-autodeploy-on-a-timer.md). |
-| Enable the autodeploy timer | `ansible.builtin.systemd` | Every 5 minutes, [`zai-autodeploy run`](../../bin/zai-autodeploy) provisions each app set to `latest` whose newest release isn't deployed. |
+| Enable the autodeploy timer | `ansible.builtin.systemd` | Every minute, [`zai-autodeploy run`](../../bin/zai-autodeploy) provisions each app set to `latest` whose newest release isn't deployed. |
 
 ## Variables
 

@@ -4,12 +4,12 @@
 #
 # No Persistent=true: it applies to OnCalendar= only. The boot run catches up.
 [Unit]
-Description=ZAI autodeploy, every 5 minutes
+Description=ZAI autodeploy, every minute
 
 [Timer]
 OnBootSec=5min
-OnUnitActiveSec=5min
-RandomizedDelaySec=30
+OnUnitActiveSec=1min
+RandomizedDelaySec=15
 
 [Install]
 WantedBy=timers.target

@@ -41,8 +41,11 @@ shared service token, over `vmbr1` only.
 **Build-from-source note.** The relay is our own code and no one publishes a
 Debian package for it, so the role builds from source with the Rust toolchain,
 the same shape as [`happyview`](happyview.md). First provision takes ~15–30 min
-on a cold CT because `cargo build --release` compiles the full dependency graph;
-`target/` is deleted afterwards to reclaim several GB. The CT is therefore sized
+on a cold CT because `cargo build --release` compiles the full dependency graph.
+`target/` is kept afterwards, so a version bump recompiles the relay's own crate
+in a few minutes instead; it is cleared before a build only when free disk
+under `/opt/scn-sync-relay` is below `sync_relay_min_free_gb`, and that build is
+a cold one again. The CT is therefore sized
 at 2 GB RAM / 16 GB disk for build headroom — the runtime footprint is far
 lighter.
 
@@ -58,9 +61,10 @@ lighter.
 | Install Rust toolchain | `shell` (rustup) | `cargo build --release` needs Rust. Skipped if already present. The repo commits a `rust-toolchain.toml`, so rustup installs and uses the *pinned* toolchain on first build regardless of the channel this role requests. |
 | Check checked-out version | `command` → `git describe --tags --exact-match` | Detect version drift; re-clone only when the pinned tag differs from what is on disk. |
 | Clone source at pinned tag | `ansible.builtin.git` | `--depth 1` keeps the clone lean; `force: true` discards drift on re-pin. **The tag must be pushed** — see the gotcha below. |
-| Build (`cargo build --release`) | `command` | Runs only when the clone changed or the binary is missing. No `creates:` guard, because the deleted `target/` would otherwise trigger a rebuild on every replay. Notifies restart. |
+| Check free disk | `command` (`df`) | Read before building, for the guard below. |
+| Clear the Cargo build tree when short of disk | `file: state=absent` | Only when a build is due and free disk is below `sync_relay_min_free_gb`. Cargo never prunes old artifacts, so a kept `target/` grows as dependency versions change. |
+| Build (`cargo build --release`) | `command` | Runs only when the clone changed or the binary is missing. `target/` survives the checkout (gitignored; the clone's `force` only discards changes to tracked files), so a bump rebuilds only what changed. No `creates:` guard, since `target/` existing says nothing about which version it holds. Notifies restart. |
 | Install binary to `/opt/scn-sync-relay/bin` | `copy` (remote_src) | `target/release/scn-sync-relay` → the stable install path. |
-| Remove the Cargo build tree | `file: state=absent` | `target/` holds GB of intermediates no longer needed. The `src/` tree stays so the `git describe` probe above keeps working. |
 | Render the env file | `template` (`0600 root`, `no_log`) | `SCN_SYNC_RELAY_DATABASE_URL`, `_BIND`, `_REQUIRE_AUTH`, the `_OIDC_ISSUER` and `_OIDC_JWKS_URL` it verifies tokens against, the `_SYNC_AUDIENCE` and `_MCP_AUDIENCE` they must carry, `_MCP_BIND` and `_SERVICE_TOKEN`, then `RUST_LOG`. Notifies restart. |
 | Install the systemd unit | `template` → `/etc/systemd/system/scn-sync-relay.service` | Hardened; `Restart=always`. Notifies reload + restart. |
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
@@ -95,6 +99,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/sync_relay/defaults/main.ym
 | `sync_relay_db_name` / `_db_user` | `scn_sync_relay` | Postgres database + role this role creates. |
 | `sync_relay_database_url` | composed | `postgresql://…@{{ hostvars['postgres'].ansible_host }}:5432/…` — the address is derived, never written down. |
 | `sync_relay_repo_url` | GitHub | Public repo, so no credentials are needed at build time. |
+| `sync_relay_min_free_gb` | `4` | Below this much free disk under `/opt/scn-sync-relay`, `target/` is cleared before a build, which is then a cold one. |
 
 `sync_relay_db_password` is **not** a role default: it lives in
 [`group_vars/all/main.yml`](../../ansible/group_vars/all/main.yml) as a
@@ -209,7 +214,8 @@ not have.
 
 > [!note] Build on the CT, not on CT 100
 > This follows [`happyview`](happyview.md): rustup on the service CT, build in
-> place, delete `target/`. The alternative — build on the control node and ship
+> place. Unlike happyview it keeps `target/` between builds, because this relay
+> is bumped often and a cold build is 15-30 min. The alternative — build on the control node and ship
 > the artifact — would put a Rust toolchain and a multi-GB cargo cache on the
 > only LAN-facing CT, and the glibc the binary links against would have to match
 > anyway. Both CTs are Trixie, so building where it runs is the simpler answer.

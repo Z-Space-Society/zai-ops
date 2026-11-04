@@ -45,7 +45,16 @@
 # stopped, which files a member's documents that no vault reaches into a folder
 # in their private vault. The service itself is unchanged: no new settings, no
 # schema change.
-sync_relay_version: "0.4.4"
+#
+# v0.5.0 gives each member one private vault, with no name, at the path
+# "Private", made by the first listing that asks; a workspace's vault comes
+# from PUT /internal/vaults/workspace, which replaces POST and PATCH. Corliss
+# v1.10.0 is the caller of the new route, so it deploys right after this.
+# Every syncing device must run SCN Sync 1.2.0 first. At startup the binary
+# makes vaults.name nullable, clears private vaults' names and adds a unique
+# index on one private vault per member; a member with two stops startup.
+# No new settings.
+sync_relay_version: "0.5.0"
 
 sync_relay_port: 7030
 # Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race

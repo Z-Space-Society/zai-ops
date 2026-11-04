@@ -3,9 +3,10 @@
 #
 # scn-sync-relay is a Rust binary built from source at a pinned tag: no upstream
 # publishes a Debian package or a plain-HTTP release tarball for it, and it is
-# ours anyway. Same shape as the happyview role — rustup on the CT, build in
-# place, install the binary, delete the build tree. Runtime memory is light; the
-# 2 GB CT sizing is compilation headroom.
+# ours anyway. Same shape as the happyview role (rustup on the CT, build in
+# place, install the binary), except that the build tree is kept: a version bump
+# then recompiles the relay's own crate rather than every dependency. Runtime
+# memory is light; the 2 GB CT sizing is compilation headroom.
 #
 # ADR-0007 records the design. Since 0.2.0 this is the Phase B relay, which
 # verifies Corliss access tokens; the proxy routes it, and the smoke test below
@@ -165,10 +166,30 @@
     path: "{{ sync_relay_bin }}"
   register: sync_relay_bin_stat
 
+- name: Check the free disk space under {{ sync_relay_home }}
+  ansible.builtin.command: df --output=avail -BG "{{ sync_relay_home }}"
+  register: sync_relay_disk
+  changed_when: false
+
+- name: Clear the Cargo build tree when the CT is short of disk
+  # target/ is kept between builds (below), and it grows as dependency versions
+  # change, since cargo never prunes old artifacts. Below the floor it goes, and
+  # that one build is a cold one again. The free space is read before building,
+  # so a build never starts on a nearly full disk.
+  ansible.builtin.file:
+    path: "{{ sync_relay_src }}/target"
+    state: absent
+  when:
+    - (sync_relay_clone is changed) or (not sync_relay_bin_stat.stat.exists)
+    - (sync_relay_disk.stdout_lines[-1] | trim | regex_replace('G$', '') | int) < sync_relay_min_free_gb
+
 - name: Build scn-sync-relay from source (cargo build --release)
   # Build when the clone just moved to a new version, or the binary isn't installed
-  # yet. No `creates:` guard — the deleted target/ below would otherwise trick it
-  # into rebuilding on every idempotent re-run.
+  # yet. target/ survives the checkout (it is gitignored, and the clone's
+  # `force` only discards changes to tracked files), so cargo rebuilds only
+  # what the new tag changed: a bump takes minutes, not the 15-30 a cold build
+  # does. No `creates:` guard, since target/ existing says nothing about which
+  # version it holds.
   ansible.builtin.command:
     cmd: /root/.cargo/bin/cargo build --release
     chdir: "{{ sync_relay_src }}"
@@ -188,14 +209,6 @@
     mode: "0755"
   when: (sync_relay_clone is changed) or (not sync_relay_bin_stat.stat.exists)
   notify: restart scn-sync-relay
-
-- name: Remove the Cargo build tree to reclaim disk space
-  # target/ holds every intermediate object and dependency (multiple GB). The
-  # binary is installed; the src tree without target/ is kept so the
-  # `git describe` version probe above still works.
-  ansible.builtin.file:
-    path: "{{ sync_relay_src }}/target"
-    state: absent
 
 # --- Secret env + unit ------------------------------------------------------------
 

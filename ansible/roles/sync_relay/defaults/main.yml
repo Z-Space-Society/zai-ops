@@ -35,7 +35,12 @@
 # v0.4.2 adds `path` to each vault in a listing ("Private/Notes",
 # "Workspaces/<name>"), so MCP, Corliss and the Obsidian plugin read one
 # spelling instead of each building it. No new settings, no schema change.
-sync_relay_version: "0.4.2"
+#
+# v0.4.3 adds GET /internal/vaults/all, every vault with its creator and each
+# member's documents that no vault reaches, for Corliss's admin view. Under
+# /internal/, so the proxy's block_paths already keeps it off the edge. No new
+# settings, no schema change.
+sync_relay_version: "0.4.3"
 
 sync_relay_port: 7030
 # Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race

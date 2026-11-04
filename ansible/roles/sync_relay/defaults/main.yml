@@ -24,7 +24,14 @@
 #
 # v0.3.0 adds note_count and bytes to each vault in a listing, which Corliss's
 # Notes page shows as Notes and Size. No new settings, no schema change.
-sync_relay_version: "0.3.0"
+#
+# v0.4.0 lets a vault belong to one Corliss workspace instead of a member, from
+# a `workspaces` claim in the token; v0.4.1 makes that claim a list of opaque
+# workspace IDs and takes renames by PATCH /internal/vaults. A token with no
+# such claim is a member in no workspace, so a Corliss that sends none keeps
+# private vaults working. No new settings; the two new columns are added by the
+# binary at startup (ADD COLUMN IF NOT EXISTS).
+sync_relay_version: "0.4.1"
 
 sync_relay_port: 7030
 # Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race

@@ -29,6 +29,14 @@ First provision takes ~15–30 min on a cold CT; build trees are cleaned afterwa
 reclaim ~6 GB. The CT is therefore sized at 2 GB RAM / 16 GB disk for build headroom
 — the runtime footprint is much lighter.
 
+**Stall check.** HappyView's Jetstream connection can go quiet without closing,
+which stops indexing while `happyview` stays `active` and `/` keeps answering
+([#83](https://github.com/Z-Space-Society/zai-ops/issues/83)). A timer runs
+`happyview-stall-check` every 15 minutes. It fails its unit when the Jetstream
+cursor hasn't been saved for 15 minutes, and the monitoring hub's SystemdFailed
+alert mails the alert recipient. It only reports. See Notes for what to do when
+it fires.
+
 ## Tasks
 
 | Task | Module | Why |
@@ -37,7 +45,7 @@ reclaim ~6 GB. The CT is therefore sized at 2 GB RAM / 16 GB disk for build head
 | Probe + create the `happyview` database | `command` → `su - postgres -c psql`, `delegate_to: postgres` | Probe `pg_database`, then `CREATE DATABASE OWNER happyview` if absent. |
 | Create `happyview` group + user | `group`, `user` | Run the daemon unprivileged, no login shell. |
 | Create home + config dirs | `ansible.builtin.file` | `/opt/happyview` + `/opt/happyview/bin` (root-owned), `/etc/happyview` (root-owned, `0750`). |
-| Install build dependencies | `apt` | `build-essential`, `ca-certificates`, `curl`, `git`, `libssl-dev`, `pkg-config`, `unzip`. |
+| Install build dependencies | `apt` | `build-essential`, `ca-certificates`, `curl`, `git`, `libssl-dev`, `pkg-config`, `unzip`, plus `postgresql-client` for the stall check's `psql`. |
 | Set up NodeSource repo + install Node.js 22 | `shell` (NodeSource setup_22.x) + `apt` | The Next.js frontend (`web/`) requires Node 22; the distro ships an older version. NodeSource provides the only reliable Debian 13 package. |
 | Install Rust toolchain | `shell` (rustup) | `cargo build --release` requires Rust stable. Skipped if already present. |
 | Check checked-out version | `command` → `git describe` | Detect version drift; re-clone only when the pinned tag differs. |
@@ -51,9 +59,11 @@ reclaim ~6 GB. The CT is therefore sized at 2 GB RAM / 16 GB disk for build head
 | Remove the Cargo build tree | `file: state=absent` | `target/` holds ~5+ GB of objects + deps that are no longer needed after install. |
 | Render the secret env file | `template` (`0600 root`, `no_log`) | `DATABASE_URL`, `PUBLIC_URL`, `SESSION_SECRET`, `TOKEN_ENCRYPTION_KEY`, `HOST`/`PORT`, `STATIC_DIR`. Notifies restart. |
 | Install the systemd unit | `template` → `/etc/systemd/system/happyview.service` | Hardened (`ProtectSystem=strict`, `ReadWritePaths=/opt/happyview`). Notifies reload + restart. |
+| Install the stall check | `copy` + `template` | `/usr/local/sbin/happyview-stall-check`, `happyview-stall-check.service` (`Type=exec`, reads `DATABASE_URL` from the env file) and its timer. Notifies reload. |
 | Ensure started + enabled | `ansible.builtin.systemd` | Running now + on boot. |
 | Flush handlers | `meta: flush_handlers` | Bring the daemon up with final config before the smoke test. |
 | Wait for port + root endpoint | `wait_for` (`127.0.0.1:3000`) + `uri` (`/`) | Proves the app booted and bound the port. |
+| Start + enable the stall check timer | `ansible.builtin.systemd` | After the smoke test, so its first run finds a running `happyview`. |
 | Record the manifest | `include_role: manifest` (`happyview_version`) | Last task, after the smoke test, so a service that failed it never claims a version. Writes `happyview.json` to Garage for Corliss's `/systems/`. Warns and carries on if the write fails. See [`manifest`](manifest.md). |
 
 ### Handlers
@@ -102,6 +112,7 @@ Defined in [`defaults/main.yml`](../../ansible/roles/happyview/defaults/main.yml
 | `happyview_repo_url` | Tangled repo URL | Source cloned at build time. |
 | `happyview_static_dir` | `/opt/happyview/static` | Where `web/out/` is deployed. Passed to HappyView as `STATIC_DIR`; HappyView serves these files directly. |
 | `happyview_rust_channel` | `stable` | Rustup toolchain channel. |
+| `happyview_stall_max_age` | `900` | Seconds since the Jetstream cursor was last saved before `happyview-stall-check` fails. |
 
 ### Secrets (auto-generated — no manual step)
 
@@ -135,6 +146,10 @@ curl -fs http://10.1.1.<ctid>:3000/
 # Database:
 ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep happyview
 
+# Stall check: the timer is scheduled and the last run saw a fresh cursor
+ssh root@10.1.1.<ctid> 'systemctl list-timers happyview-stall-check.timer --no-pager'
+ssh root@10.1.1.<ctid> 'journalctl -u happyview-stall-check -n 3 --no-pager'
+
 # End-to-end: browse https://view.<domain>, upload a lexicon schema, and verify
 # the generated XRPC endpoints appear in the admin dashboard.
 ```
@@ -158,6 +173,29 @@ ssh root@<postgres-ip> "su - postgres -c 'psql -l'" | grep happyview
   for AT Protocol OAuth callbacks; if the domain drifts from `view.{{ cluster_domain }}`
   OAuth will fail. Change both `happyview_public_url` (in defaults or inventory) and
   the Caddy route entry together.
+- **When the stall check fires.** The mail reads "Failed services on happyview:
+  happyview-stall-check". In v2.13.1 the Jetstream read has no timeout, so a
+  connection that goes quiet without closing hangs the consumer until restart.
+  Restart it on the happyview CT with `systemctl restart happyview`. Within 72
+  hours of the stall, HappyView resumes from its saved cursor and replays the
+  gap, which can take some minutes. Past 72 hours it skips the cursor and
+  starts from now, and each lexicon with records needs a backfill. The check's
+  next run, at most 15 minutes later, clears the failed unit. Each stall leaves
+  a mail, an entry in the hub's alert history and a line in
+  `journalctl -u happyview-stall-check`.
+- **Why the check reads `updated_at`, and why 15 minutes.** The check reads
+  `updated_at` on the `jetstream_cursor` row of `happyview_instance_settings`.
+  HappyView saves that row about every 5 seconds while events arrive, and
+  identity and account events reach every subscriber every few seconds,
+  whatever collections are indexed. Its `value` is the last event's time, which
+  stays old during a replay that is working, so the check doesn't use it.
+  HappyView's own reconnect backoff tops out at 60 seconds, so a loud
+  disconnect recovers well inside 15 minutes and never alerts. The timer's 15
+  minutes outlasts the monitoring agent's 10 minute systemd refresh. The unit
+  is `Type=exec` because the agent ignores a failed oneshot (see
+  [gotchas](../gotchas.md)).
+- **The check only reports.** It never restarts `happyview`, so each stall is
+  counted before deciding whether an automatic restart should hide it.
 - For how the CT is assigned a CTID, created and reached, see
   [`provision.yml`](../../ansible/provision.yml) and the
   [main docs](../README.md#service-ctid-assignment).

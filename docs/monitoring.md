@@ -108,7 +108,7 @@ Every machine is watched for:
 | Status | the machine has been down for 5 minutes, and again when it is back |
 | Disk | disk use has been over 90% for 10 minutes |
 | Memory | memory use has been over 90% for 10 minutes |
-| Failed service | any systemd unit has failed |
+| Failed service | any systemd unit has failed, checked every 10 minutes. A unit that failed without ever starting (a failed `Type=oneshot`) is not counted; see [gotchas](gotchas.md) |
 
 **Who gets them:** one address, the alert recipient. Alerts are emailed through
 the cluster's mail relay, so they are **off** unless both the relay and the

@@ -1,0 +1,38 @@
+#!/bin/bash
+# Managed by zai-ops (roles/happyview). Fails when HappyView's Jetstream
+# consumer has stopped saving its cursor, which is how a silent stall shows
+# (zai-ops#83). Run by happyview-stall-check.timer; a failed run is reported by
+# the monitoring hub's SystemdFailed alert. It never restarts anything.
+#
+# The signal is updated_at on the jetstream_cursor row: HappyView saves the
+# cursor about every 5 s while events arrive, and identity and account events
+# arrive every few seconds whatever collections are indexed. updated_at, not
+# the cursor's value: during a replay the value is an old event time while
+# updated_at keeps moving.
+set -u
+
+max_age="${HAPPYVIEW_STALL_MAX_AGE:-900}"
+
+# A stopped happyview is someone's decision, and a crashed one is already a
+# failed unit of its own.
+if ! systemctl is-active --quiet happyview; then
+  echo "happyview is not active; not checking"
+  exit 0
+fi
+
+# DATABASE_URL comes from happyview's own env file (EnvironmentFile=).
+if ! age="$(psql "$DATABASE_URL" -AtX -v ON_ERROR_STOP=1 -c \
+  "SELECT EXTRACT(EPOCH FROM now() - updated_at::timestamptz)::int
+     FROM happyview_instance_settings WHERE key = 'jetstream_cursor'")"; then
+  echo "could not read the Jetstream cursor from Postgres"
+  exit 1
+fi
+
+if [ -n "$age" ] && [ "$age" -le "$max_age" ]; then
+  echo "Jetstream cursor saved ${age}s ago"
+  exit 0
+fi
+
+echo "Jetstream stalled: cursor last saved ${age:-never}s ago (limit ${max_age}s)." \
+  "Restart happyview within 72 hours of the stall to replay the gap."
+exit 1

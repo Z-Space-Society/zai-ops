@@ -1,0 +1,21 @@
+# {{ ansible_managed }}
+# zai-ops#83: fails while HappyView's Jetstream cursor is stale, so the
+# monitoring hub's SystemdFailed alert mails alert_email.
+[Unit]
+Description=Check that HappyView is still indexing from Jetstream
+After=happyview.service
+
+[Service]
+# exec, not oneshot: the Beszel agent skips a unit that has never been
+# active, and a oneshot that fails is never active. An exec unit is active
+# once the script starts, so its failure is counted.
+Type=exec
+# Root, for the 0600 env file that holds DATABASE_URL. Nothing is written.
+EnvironmentFile={{ happyview_env_file }}
+Environment=HAPPYVIEW_STALL_MAX_AGE={{ happyview_stall_max_age }}
+ExecStart=/usr/local/sbin/happyview-stall-check
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

@@ -97,8 +97,9 @@ caddy_proxy_hosts:
   # from the same two values.
   #
   # `block_paths` is load-bearing on the sync route. /internal/vaults lists and
-  # creates any member's vaults for whoever holds the service token, and is for
-  # Corliss over vmbr1 only. The relay's own README says the proxy must not route
+  # creates any member's vaults for whoever holds the service token, and
+  # /internal/vaults/all lists every vault at once. Both are for Corliss over
+  # vmbr1 only. The relay's own README says the proxy must not route
   # it, and the token is the only other thing guarding it.
   #
   # The sync token travels in the query string (`wss://sync.<domain>/?access_token=`),

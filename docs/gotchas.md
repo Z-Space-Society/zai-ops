@@ -483,3 +483,15 @@ Hard-won lessons provisioning **human accounts** (`add-github-user.yml`):
   call and held back an alert until the hub restarted. A service CT that must
   not send local mail removes Postfix (the `beszel` role does), so the fallback
   fails at once with an error instead.
+
+- **Beszel never counts a unit that has never been active, so a failed
+  `Type=oneshot` is invisible to the SystemdFailed alert.** The agent skips any
+  unit whose `ActiveEnterTimestamp` is zero (`agent/systemd.go`, v0.21.0). A
+  oneshot goes from activating straight to failed without ever being active,
+  so `systemctl --failed` lists it, while the hub shows "Failed: 0" and sends
+  nothing. Proven on Heron on 2026-11-04 with
+  `systemd-run -p Type=oneshot /bin/false` (no alert) against `-p Type=exec`
+  (alert mailed). A unit whose failure must alert, such as
+  `happyview-stall-check`, uses `Type=exec`, which is active as soon as the
+  program starts. The agent also reads systemd only every 10 minutes, so a
+  failure that clears sooner can be missed.

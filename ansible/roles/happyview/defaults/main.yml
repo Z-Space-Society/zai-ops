@@ -42,3 +42,9 @@ happyview_static_dir: /opt/happyview/static
 
 # Rust toolchain channel installed via rustup.
 happyview_rust_channel: stable
+
+# Seconds since HappyView last saved its Jetstream cursor before
+# happyview-stall-check fails (zai-ops#83). The cursor saves about every 5 s
+# while events flow, and HappyView's own reconnect backoff tops out at 60 s,
+# so 15 minutes is never reached in normal running.
+happyview_stall_max_age: 900

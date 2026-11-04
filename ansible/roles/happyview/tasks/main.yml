@@ -111,6 +111,8 @@
       - libssl-dev
       - pkg-config
       - unzip
+      # psql, for happyview-stall-check (below). Not a build dependency.
+      - postgresql-client
     state: present
     update_cache: true
 
@@ -325,6 +327,39 @@
     enabled: true
     daemon_reload: true
 
+# --- Stall check (zai-ops#83) -------------------------------------------------------
+# HappyView's Jetstream read has no timeout, so a connection that goes quiet
+# without closing stops indexing while the unit stays active. This check fails
+# its own unit when the cursor stops being saved; the monitoring hub's
+# SystemdFailed alert mails alert_email. It reports only: a person restarts
+# happyview, which replays the gap while the cursor is under 72 hours old.
+
+- name: Install the stall check script
+  ansible.builtin.copy:
+    src: happyview-stall-check
+    dest: /usr/local/sbin/happyview-stall-check
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the stall check service
+  ansible.builtin.template:
+    src: happyview-stall-check.service.j2
+    dest: /etc/systemd/system/happyview-stall-check.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload systemd
+
+- name: Install the stall check timer
+  ansible.builtin.copy:
+    src: happyview-stall-check.timer
+    dest: /etc/systemd/system/happyview-stall-check.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: reload systemd
+
 - name: Apply pending happyview restarts before the smoke test
   ansible.builtin.meta: flush_handlers
 
@@ -343,6 +378,14 @@
   until: happyview_health is succeeded
   retries: 10
   delay: 3
+
+# After the smoke test and the handler flush, so the timer starts against a
+# running happyview with the units already reloaded.
+- name: Ensure the stall check timer is started and enabled
+  ansible.builtin.systemd:
+    name: happyview-stall-check.timer
+    state: started
+    enabled: true
 
 # --- Manifest (docs/roles/manifest.md) ----------------------------------------
 # After the smoke test, so a service that failed it never claims a version.

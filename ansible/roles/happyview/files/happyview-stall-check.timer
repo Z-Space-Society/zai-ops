@@ -1,0 +1,13 @@
+# Managed by zai-ops (roles/happyview).
+[Unit]
+Description=Check every 15 minutes that HappyView is still indexing
+
+[Timer]
+OnBootSec=15min
+# Longer than the Beszel agent's 10 minute systemd refresh, so a failure that
+# the next run clears is still seen once.
+OnUnitActiveSec=15min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

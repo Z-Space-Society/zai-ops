@@ -40,7 +40,12 @@
 # member's documents that no vault reaches, for Corliss's admin view. Under
 # /internal/, so the proxy's block_paths already keeps it off the edge. No new
 # settings, no schema change.
-sync_relay_version: "0.4.3"
+#
+# v0.4.4 adds the `file-unfiled` subcommand, run by hand with the service
+# stopped, which files a member's documents that no vault reaches into a folder
+# in their private vault. The service itself is unchanged: no new settings, no
+# schema change.
+sync_relay_version: "0.4.4"
 
 sync_relay_port: 7030
 # Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race

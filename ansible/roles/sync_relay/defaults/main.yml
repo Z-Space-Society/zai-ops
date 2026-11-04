@@ -31,7 +31,11 @@
 # such claim is a member in no workspace, so a Corliss that sends none keeps
 # private vaults working. No new settings; the two new columns are added by the
 # binary at startup (ADD COLUMN IF NOT EXISTS).
-sync_relay_version: "0.4.1"
+#
+# v0.4.2 adds `path` to each vault in a listing ("Private/Notes",
+# "Workspaces/<name>"), so MCP, Corliss and the Obsidian plugin read one
+# spelling instead of each building it. No new settings, no schema change.
+sync_relay_version: "0.4.2"
 
 sync_relay_port: 7030
 # Wildcard, never a literal 10.1.1.x. A container address loses a cold-boot race

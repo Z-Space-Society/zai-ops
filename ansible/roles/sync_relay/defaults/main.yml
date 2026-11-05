@@ -56,7 +56,12 @@
 # makes vaults.name nullable, clears private vaults' names and adds a unique
 # index on one private vault per member; a member with two stops startup.
 # No new settings.
-sync_relay_version: "0.5.0"
+#
+# v0.5.1 adds `folders` ("Private", "Workspaces") beside `vaults` in GET /vaults,
+# named even when a member has no vault in one, so SCN Sync 1.2.3 can make an
+# empty Workspaces folder. Additive: older plugins ignore it. No new settings,
+# no schema change.
+sync_relay_version: "0.5.1"
 
 # Below this much free disk under sync_relay_home, target/ is cleared before a
 # build, which is then a cold one. The CT has 16 GB; a full build tree is

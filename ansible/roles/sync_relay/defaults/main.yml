@@ -61,7 +61,15 @@
 # named even when a member has no vault in one, so SCN Sync 1.2.3 can make an
 # empty Workspaces folder. Additive: older plugins ignore it. No new settings,
 # no schema change.
-sync_relay_version: "0.5.1"
+#
+# v0.6.0 moves to samod 0.16 and records which member each Automerge actor
+# belongs to, so a change can be traced to who made it. The binary adds the
+# actor_members and relay_jobs tables at startup, then maps stored history
+# once in the background ("actor-backfill done" in the journal). A sync frame
+# carrying a new change under another member's actor, or a sync message that
+# does not decode, is dropped with a log line. No new settings; Corliss and
+# SCN Sync are unchanged.
+sync_relay_version: "0.6.0"
 
 # Below this much free disk under sync_relay_home, target/ is cleared before a
 # build, which is then a cold one. The CT has 16 GB; a full build tree is

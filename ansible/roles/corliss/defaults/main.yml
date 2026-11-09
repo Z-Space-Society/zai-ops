@@ -738,6 +738,12 @@ corliss_sync_relay_url: "http://{{ hostvars['sync-relay'].ansible_host }}:{{ cor
 # against, so the two cannot be spelled differently. `kind` tells the Notes page
 # which URL is which; `label` is what the consent screen names.
 corliss_oidc_resources:
+  # The notes. host first: the Notes page shows the first of each kind
+  # (Corliss#45, which also is what accepts two of a kind). The sync. and mcp.
+  # entries after keep issuing tokens for plugins up to 1.2.x and existing
+  # Claude connectors until they retire (scn-notes#19).
+  - { url: "https://{{ sync_relay_notes_host }}", kind: sync, label: "SCN Notes" }
+  - { url: "https://{{ sync_relay_notes_host }}/mcp", kind: mcp, label: "SCN Notes over MCP" }
   - { url: "https://{{ sync_relay_sync_host }}", kind: sync, label: "Notes sync" }
   - { url: "https://{{ sync_relay_mcp_host }}", kind: mcp, label: "Notes over MCP" }
 

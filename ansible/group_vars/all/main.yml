@@ -248,7 +248,7 @@ scn_chat_secret_key: "{{ lookup('ansible.builtin.pipe', 'test -f ' ~ _zai_secret
 
 # The sync relay's Postgres password, same generate-once-and-persist posture as
 # the pairs above. Hex, so it needs no percent-encoding inside the
-# SCN_SYNC_RELAY_DATABASE_URL the role builds from it.
+# SCN_NOTES_DATABASE_URL the role builds from it.
 #
 # Named sync_relay_db_password to match the role default that consumes it
 # directly — unlike the redis/openwebui pairs, nothing wraps this one under a
@@ -258,7 +258,7 @@ sync_relay_db_password: "{{ lookup('ansible.builtin.password', _zai_secrets_dir 
 # The credential Corliss presents on the relay's /internal/vaults, to list a
 # member's vaults and create one. Here rather than in either role because both
 # render it: Corliss as SYNC_RELAY_SERVICE_TOKEN, the relay as
-# SCN_SYNC_RELAY_SERVICE_TOKEN, and one value resolved on the control node is
+# SCN_NOTES_SERVICE_TOKEN, and one value resolved on the control node is
 # what keeps them from disagreeing. Not DR-critical: losing it costs a
 # regenerate and a replay of both roles, and no stored data depends on it.
 sync_relay_service_token: "{{ lookup('ansible.builtin.password', _zai_secrets_dir ~ '/sync_relay_service_token chars=ascii_letters,digits length=48') }}"
@@ -272,6 +272,11 @@ sync_relay_service_token: "{{ lookup('ansible.builtin.password', _zai_secrets_di
 # service answers, so it must be lowercase with no trailing slash.
 sync_relay_sync_host: "sync.{{ cluster_domain }}"
 sync_relay_mcp_host: "mcp.{{ cluster_domain }}"
+
+# The one host members' clients use from v0.7.0: the plugin at /v1/, MCP at
+# /mcp (scn-obsidian#27). Read by the same three roles as the two above, which
+# keep answering until they retire (scn-notes#19).
+sync_relay_notes_host: "notes.{{ cluster_domain }}"
 
 # Beszel (zai-ops#3): the monitoring hub on the beszel CT, and an agent on the
 # control node and every service container (the monitor_agent role). The

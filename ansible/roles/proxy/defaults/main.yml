@@ -111,6 +111,12 @@ caddy_proxy_hosts:
     port: 7030
     block_paths: ["/internal/*"]
   - { domain: "{{ sync_relay_mcp_host }}", service: sync-relay, port: 7031 }
+  # The notes. host (scn-notes v0.7.0): MCP at /mcp, the plugin at /v1/. Its
+  # listener serves no /internal/ at all, so it needs no block_paths. The
+  # plugin's token rides in the /v1/sync query string, the same as on sync.,
+  # so the no-access-log rule above covers it too. sync. and mcp. stay until
+  # they retire (scn-notes#19).
+  - { domain: "{{ sync_relay_notes_host }}", service: sync-relay, port: 7032 }
   # The Beszel hub (zai-ops#3). Public so agents outside the cluster can dial
   # in, which leaves PocketBase's own admin surfaces on the internet unless they
   # are answered here instead:

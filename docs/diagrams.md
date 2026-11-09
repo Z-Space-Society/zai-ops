@@ -111,9 +111,11 @@ connects to each directly, because neither has a page anyone lands on. See
 
 **Three edges worth noticing:**
 
-- `sync-relay` is routed at `sync.<domain>` and `mcp.<domain>` because the
-  relay verifies a Corliss access token on every connection. Its `/internal/`
-  prefix is answered 404 at the edge: Corliss reaches it over `vmbr1` with the
+- `sync-relay` is routed at `notes.<domain>`, and at `sync.<domain>` and
+  `mcp.<domain>` until they retire, because the relay verifies a Corliss
+  access token on every connection. Its `/internal/` prefix is never routed:
+  the `notes.` listener does not serve it, and `sync.` answers it 404 at the
+  edge. Corliss reaches it over `vmbr1` with the
   service token ([ADR-0007](decisions/0007-sync-relay-and-space-membership.md)).
 - `pds` takes two kinds of hostname: its own route, and every name no other
   route claims, which is how member handles resolve. Caddy issues a certificate

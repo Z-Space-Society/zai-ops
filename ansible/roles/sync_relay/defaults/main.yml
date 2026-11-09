@@ -69,7 +69,18 @@
 # carrying a new change under another member's actor, or a sync message that
 # does not decode, is dropped with a log line. No new settings; Corliss and
 # SCN Sync are unchanged.
-sync_relay_version: "0.6.0"
+#
+# v0.7.0 is the software renamed scn-notes, serving one notes.<domain> host
+# beside sync. and mcp. (scn-obsidian#27). It reads SCN_NOTES_* in place of
+# SCN_SYNC_RELAY_*, and needs two new settings: the notes URL
+# (sync_relay_public_url) and its port (sync_relay_public_port). The unit,
+# user and paths follow the new name; this role moves the build tree so the
+# build stays warm, and removes the old unit, config and user. At startup the
+# binary renames its vaults table to workspaces in one transaction, so 0.6.0
+# cannot run on the database afterwards: take a dump first. sync. and mcp.
+# answer exactly as before. Corliss needs the release with Corliss#45 before
+# this, since it refuses OIDC_RESOURCES with two resources of a kind otherwise.
+sync_relay_version: "0.7.0"
 
 # Below this much free disk under sync_relay_home, target/ is cleared before a
 # build, which is then a cold one. The CT has 16 GB; a full build tree is
@@ -82,13 +93,20 @@ sync_relay_port: 7030
 # failure mode that took the cluster down on 2026-08-20 via Postgres.
 sync_relay_host: "0.0.0.0"
 
-sync_relay_user: scn-sync-relay
-sync_relay_group: scn-sync-relay
-sync_relay_home: /opt/scn-sync-relay
-sync_relay_bin: /opt/scn-sync-relay/bin/scn-sync-relay
-sync_relay_src: /opt/scn-sync-relay/src
-sync_relay_config_dir: /etc/scn-sync-relay
-sync_relay_env_file: /etc/scn-sync-relay/scn-sync-relay.env
+# The software's own names, which follow the crate. Before v0.7.0 it was
+# scn-sync-relay; the tasks move the old build tree here and remove the old
+# unit, config and user.
+sync_relay_user: scn-notes
+sync_relay_group: scn-notes
+sync_relay_home: /opt/scn-notes
+sync_relay_bin: /opt/scn-notes/bin/scn-notes
+sync_relay_src: /opt/scn-notes/src
+sync_relay_config_dir: /etc/scn-notes
+sync_relay_env_file: /etc/scn-notes/scn-notes.env
+sync_relay_unit: scn-notes
+
+# The pre-v0.7.0 names, for the tasks that clear them away.
+sync_relay_old_name: scn-sync-relay
 
 sync_relay_db_name: scn_sync_relay
 sync_relay_db_user: scn_sync_relay
@@ -102,6 +120,11 @@ sync_relay_require_auth: true
 # The MCP listener. Its own port so the proxy routes it under its own hostname,
 # and so the sync listener's /internal/ paths can never be reached through it.
 sync_relay_mcp_port: 7031
+
+# The notes. listener (v0.7.0): MCP at /mcp, the plugin's API under /v1/, and
+# no /internal/ at all, so the proxy routes the whole host. Its own port for
+# the same reason as MCP's.
+sync_relay_public_port: 7032
 
 # Who issues the tokens the relay accepts: Corliss's public URL, exactly as
 # Corliss's corliss_url spells it, because it is compared with each token's
@@ -122,7 +145,12 @@ sync_relay_oidc_jwks_url: "http://{{ hostvars['corliss'].ansible_host }}:{{ sync
 sync_relay_sync_audience: "https://{{ sync_relay_sync_host }}"
 sync_relay_mcp_audience: "https://{{ sync_relay_mcp_host }}"
 
-sync_relay_repo_url: "https://github.com/Z-Space-Society/scn-sync-relay"
+# The notes. host's URL, an origin with no path and no trailing slash: the
+# plugin's audience there, and with /mcp after it, an MCP client's. Corliss's
+# OIDC_RESOURCES builds both from the same group_vars host.
+sync_relay_public_url: "https://{{ sync_relay_notes_host }}"
+
+sync_relay_repo_url: "https://github.com/Z-Space-Society/scn-notes"
 
 # Pinned in the repo's own rust-toolchain.toml; rustup reads that file and
 # installs the right toolchain regardless of what this channel says. Kept here

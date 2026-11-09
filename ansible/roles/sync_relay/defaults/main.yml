@@ -80,7 +80,12 @@
 # cannot run on the database afterwards: take a dump first. sync. and mcp.
 # answer exactly as before. Corliss needs the release with Corliss#45 before
 # this, since it refuses OIDC_RESOURCES with two resources of a kind otherwise.
-sync_relay_version: "0.7.0"
+#
+# v0.7.1 adds the note_history MCP tool (a note's changes by DID, earlier
+# versions, diffs) and POST /v1/documents/{id}/actors on the notes. host, and
+# stamps the relay's own MCP commits with a time. Additive: no new settings,
+# no schema change, no proxy change. Rolling back to 0.7.0 is safe.
+sync_relay_version: "0.7.1"
 
 # Below this much free disk under sync_relay_home, target/ is cleared before a
 # build, which is then a cold one. The CT has 16 GB; a full build tree is

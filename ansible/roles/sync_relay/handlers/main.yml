@@ -3,7 +3,7 @@
   ansible.builtin.systemd:
     daemon_reload: true
 
-- name: restart scn-sync-relay
+- name: restart scn-notes
   ansible.builtin.service:
-    name: scn-sync-relay
+    name: "{{ sync_relay_unit }}"
     state: restarted

@@ -279,7 +279,8 @@ ss -HMlnp
   check the rendered Caddyfile for `not routed` lines if a hostname is missing.
 - **There is no access log, and the sync route depends on that.** A sync
   client sends its access token in the query string
-  (`wss://sync.<domain>/?access_token=…`), since a browser or phone websocket
+  (`wss://sync.<domain>/?access_token=…`, or `/v1/sync?access_token=…` on
+  `notes.<domain>`), since a browser or phone websocket
   cannot send an `Authorization` header. Nothing logs it today because this
   Caddyfile has no `log` directive. A change that adds one must filter the
   query out of the logged URI in the same commit.

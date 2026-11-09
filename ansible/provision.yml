@@ -262,7 +262,8 @@
 # because cargo build --release compiles the full Rust dependency graph.
 #
 # Phase B (relay v0.2.0) verifies Corliss's access tokens, so the proxy routes
-# sync.<domain> and mcp.<domain> to it, with /internal/ left unrouted. It runs
+# notes.<domain> to it, and sync.<domain> and mcp.<domain> until they retire,
+# with /internal/ left unrouted. It runs
 # after corliss, whose JWKS it fetches. See
 # docs/decisions/0007-sync-relay-and-space-membership.md.
 - name: Configure the SCN sync relay

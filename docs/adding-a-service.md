@@ -53,7 +53,7 @@ source build, [`litellm`](roles/litellm.md) for a pip install, or
   `NoNewPrivileges=true`, `ProtectSystem=strict`, `ProtectHome=true` and
   `PrivateTmp=true`. The daemon's own data directory is its only
   `ReadWritePaths`, and a service that keeps its state elsewhere gets none (see
-  `scn-sync-relay.service.j2`). Set `Restart=` with a comment on why that
+  `scn-notes.service.j2` in the sync_relay role). Set `Restart=` with a comment on why that
   value, since the right one depends on how the daemon exits.
 - **End with a smoke test** that proves the feature, not just the unit: a
   `wait_for` on the port, then a `uri` against a real endpoint (see the end of

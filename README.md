@@ -1,4 +1,4 @@
-# zai-ops
+# corliss-ops
 
 The control node for the Z-Space AI Cluster (ZAI) — both the
 infrastructure-as-code that builds a cluster and the control app that operates
@@ -22,7 +22,7 @@ itself from this repo.
 
    ```bash
    apt-get update; apt-get install -y git   # 401s from the enterprise repo are expected; the bootstrap disables it
-   git clone https://github.com/Z-Space-Society/zai-ops.git /root/zai-ops
+   git clone https://github.com/Z-Space-Society/corliss-ops.git /root/zai-ops
    /root/zai-ops/host/bootstrap.sh
    ```
 

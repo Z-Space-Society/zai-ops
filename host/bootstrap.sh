@@ -138,7 +138,7 @@ CTID="${1:-100}"
 HOSTNAME=ansible-control
 TEMPLATE_STORAGE=local
 ROOTFS_STORAGE=local-lvm
-REPO_URL=https://github.com/Z-Space-Society/zai-ops.git
+REPO_URL=https://github.com/Z-Space-Society/corliss-ops.git
 
 # --- Ensure the template is downloaded ---
 # Resolved by pattern, never pinned: Proxmox drops the old point release from the

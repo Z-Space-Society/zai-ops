@@ -85,7 +85,14 @@
 # versions, diffs) and POST /v1/documents/{id}/actors on the notes. host, and
 # stamps the relay's own MCP commits with a time. Additive: no new settings,
 # no schema change, no proxy change. Rolling back to 0.7.0 is safe.
-sync_relay_version: "0.7.1"
+#
+# v0.8.0 adds each member's verified handle to note_history and the actors
+# endpoint, plus "you" and "via": "mcp" on history groups. The relay now makes
+# outbound lookups (HTTPS to plc.directory and handle domains, DNS TXT through
+# the CT's resolver), which it already reaches through the host's NAT. A failed
+# lookup shows the DID. No new settings, no schema change, no proxy change.
+# Rolling back to 0.7.1 is safe.
+sync_relay_version: "0.8.0"
 
 # Below this much free disk under sync_relay_home, target/ is cleared before a
 # build, which is then a cold one. The CT has 16 GB; a full build tree is

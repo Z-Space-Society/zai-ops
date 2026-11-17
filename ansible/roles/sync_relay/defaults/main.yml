@@ -92,7 +92,15 @@
 # the CT's resolver), which it already reaches through the host's NAT. A failed
 # lookup shows the DID. No new settings, no schema change, no proxy change.
 # Rolling back to 0.7.1 is safe.
-sync_relay_version: "0.8.0"
+#
+# v0.8.1 sends CORS headers on the notes. host for a browser client on
+# loopback: "*" on /.well-known/oauth-protected-resource, and on /v1/ the
+# loopback origin by name, never "*", never with credentials (Corliss#69). It
+# also updates dependencies for security advisories (rustls, webpki, rmcp,
+# jsonwebtoken 12). No new settings, no schema change, no proxy change: the
+# proxy passes the preflight and the headers through. Rolling back to 0.8.0 is
+# safe.
+sync_relay_version: "0.8.1"
 
 # Below this much free disk under sync_relay_home, target/ is cleared before a
 # build, which is then a cold one. The CT has 16 GB; a full build tree is

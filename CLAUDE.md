@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-Guidance for Claude when working in this repo (zai-ops — infrastructure-as-code
-for the Z-Space AI Cluster).
+Guidance for Claude when working in this repo (corliss-ops, formerly
+zai-ops: infrastructure-as-code for the Z-Space AI Cluster).
 
 **Prime directive:** full reproducibility. Flash Proxmox, clone this repo onto
 it, run the bootstrap, and the stack rebuilds itself from this repo. Every change
